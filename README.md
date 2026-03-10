@@ -2,6 +2,10 @@
 
 A TV-first Letterboxd-style tracker built with Expo + React Native + Convex.
 
+## License
+
+This project is licensed under `PolyForm-Noncommercial-1.0.0`. Non-commercial use is allowed under the terms in [LICENSE](LICENSE).
+
 ## Setup
 
 1. Install dependencies
