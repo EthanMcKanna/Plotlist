@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Show Detail - Layout Mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0D0F14;
+    color: #F1F3F7;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    max-width: 375px;
+    margin: 0 auto;
+    overflow-x: hidden;
+  }
+  .hero { position: relative; height: 448px; }
+  .backdrop {
+    width: 100%; height: 340px;
+    object-fit: cover;
+    display: block;
+  }
+  .backdrop-gradient {
+    position: absolute; left: 0; right: 0; bottom: 108px; height: 340px;
+    background: linear-gradient(
+      to bottom,
+      rgba(13,15,20,0) 0%,
+      rgba(13,15,20,0.4) 45%,
+      rgba(13,15,20,0.85) 75%,
+      rgba(13,15,20,1) 100%
+    );
+  }
+  .side-vignette {
+    position: absolute; left: 0; right: 0; top: 0; height: 340px;
+    background: linear-gradient(
+      to right,
+      rgba(13,15,20,0.6) 0%,
+      transparent 30%,
+      transparent 70%,
+      rgba(13,15,20,0.6) 100%
+    );
+  }
+  .poster-wrap {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    display: flex; justify-content: center;
+  }
+  .poster {
+    width: 160px; height: 240px; border-radius: 14px; object-fit: cover;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.6);
+  }
+  .back-btn {
+    position: absolute; top: 52px; left: 16px; z-index: 10;
+    width: 40px; height: 40px; border-radius: 20px;
+    background: rgba(30,30,40,0.6); backdrop-filter: blur(12px);
+    display: flex; align-items: center; justify-content: center;
+    color: #F1F3F7; font-size: 20px;
+  }
+  .meta-area { text-align: center; padding: 20px 32px 0; }
+  .show-title {
+    font-size: 24px; font-weight: 700; letter-spacing: 0.3px;
+  }
+  .meta-line {
+    margin-top: 8px; font-size: 14px; color: #9BA1B0;
+    letter-spacing: 0.8px;
+  }
+  .tagline {
+    margin-top: 12px; font-size: 14px; color: #5A6070;
+    font-style: italic; line-height: 20px;
+  }
+  .rating-row {
+    margin-top: 16px; display: flex; align-items: center;
+    justify-content: center; gap: 16px;
+  }
+  .rating-badge {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .star { color: #FBBF24; font-size: 16px; }
+  .rating-num { font-size: 18px; font-weight: 700; }
+  .rating-max { font-size: 14px; color: #5A6070; }
+  .vote-count { font-size: 12px; color: #5A6070; }
+  .content-rating {
+    border: 1px solid #5A6070; border-radius: 6px;
+    padding: 2px 8px; font-size: 12px; font-weight: 700;
+    color: #9BA1B0; letter-spacing: 0.5px;
+  }
+  .status-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 12px; padding: 4px 12px; border-radius: 999px;
+    background: rgba(14,165,233,0.15); font-size: 12px;
+    font-weight: 600; color: #38bdf8;
+  }
+  .status-pills {
+    display: flex; justify-content: center; gap: 8px;
+    margin-top: 24px; padding: 0 24px; flex-wrap: wrap;
+  }
+  .pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 999px;
+    border: 1px solid #2A2E38; background: #161A22;
+    font-size: 12px; font-weight: 600; color: #9BA1B0;
+  }
+  .pill.active {
+    border-color: #0ea5e9; background: #0ea5e9; color: #fff;
+  }
+  .overview {
+    margin-top: 32px; padding: 0 24px;
+    font-size: 14px; color: #9BA1B0; line-height: 22px;
+  }
+  .glance-bar {
+    margin: 32px 24px 0; display: flex;
+    border: 1px solid #2A2E38; border-radius: 16px;
+    background: #161A22; overflow: hidden;
+  }
+  .glance-item {
+    flex: 1; padding: 16px 0; text-align: center;
+    border-right: 1px solid #2A2E38;
+  }
+  .glance-item:last-child { border-right: none; }
+  .glance-val { font-size: 18px; font-weight: 700; }
+  .glance-label { margin-top: 4px; font-size: 12px; color: #5A6070; }
+  .section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.5px; color: #5A6070; margin-bottom: 16px;
+  }
+  .details-section { margin-top: 32px; padding: 0 24px; }
+  .detail-row {
+    display: flex; align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(42,46,56,0.5);
+  }
+  .detail-label { width: 112px; font-size: 14px; color: #5A6070; }
+  .detail-value { flex: 1; font-size: 14px; font-weight: 500; }
+  .genres-section { margin-top: 32px; padding: 0 24px; }
+  .genre-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .genre-tag {
+    padding: 6px 14px; border-radius: 999px;
+    border: 1px solid #2A2E38; background: #161A22;
+    font-size: 12px; font-weight: 500; color: #9BA1B0;
+  }
+  .cast-section { margin-top: 40px; }
+  .cast-section .section-label { padding: 0 24px; }
+  .cast-scroll {
+    display: flex; gap: 0; overflow-x: auto; padding: 0 24px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cast-scroll::-webkit-scrollbar { display: none; }
+  .cast-item { min-width: 96px; margin-right: 16px; text-align: center; }
+  .cast-photo {
+    width: 80px; height: 80px; border-radius: 40px;
+    object-fit: cover; background: #1C2028;
+    display: block; margin: 0 auto;
+  }
+  .cast-name {
+    margin-top: 8px; font-size: 13px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cast-role {
+    font-size: 11px; color: #5A6070;
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .divider { margin: 40px 24px 0; height: 1px; background: #2A2E38; }
+  .activity-section { margin-top: 32px; padding: 0 24px; }
+  .activity-card {
+    border: 1px solid #2A2E38; border-radius: 16px;
+    background: #161A22; padding: 16px;
+  }
+  .activity-header { display: flex; align-items: center; gap: 12px; }
+  .activity-icon {
+    width: 36px; height: 36px; border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  .icon-blue { background: rgba(56,189,248,0.15); }
+  .icon-amber { background: rgba(245,158,11,0.15); }
+  .icon-green { background: rgba(34,197,94,0.15); }
+  .activity-title { font-size: 16px; font-weight: 600; }
+  .collapsible {
+    margin-top: 12px; border: 1px solid #2A2E38;
+    border-radius: 16px; background: #161A22; padding: 16px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .collapsible-left { display: flex; align-items: center; gap: 12px; }
+  .input-mock {
+    margin-top: 12px; border: 1px solid #2A2E38;
+    border-radius: 12px; background: #1C2028;
+    padding: 12px 16px; font-size: 14px; color: #5A6070;
+  }
+  .btn-primary {
+    margin-top: 16px; width: 100%; padding: 12px;
+    border-radius: 999px; background: #0ea5e9;
+    text-align: center; font-size: 14px;
+    font-weight: 600; color: #fff; border: none;
+  }
+  .spacer { height: 60px; }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <img class="backdrop" src="https://image.tmdb.org/t/p/w1280/9faGSFi5jam6pDWGNd0p8JcJtmd.jpg" alt="backdrop">
+  <div class="backdrop-gradient"></div>
+  <div class="side-vignette"></div>
+  <div class="back-btn">&larr;</div>
+  <div class="poster-wrap">
+    <img class="poster" src="https://image.tmdb.org/t/p/w500/7WUHnWGx5OO145IRxPDUkQSh4C7.jpg" alt="poster">
+  </div>
+</div>
+
+<!-- TITLE & METADATA -->
+<div class="meta-area">
+  <div class="show-title">Breaking Bad</div>
+  <div class="meta-line">2008 &nbsp;&middot;&nbsp; Drama, Crime, Thriller &nbsp;&middot;&nbsp; 45m</div>
+  <div class="tagline">"Remember my name."</div>
+  <div class="rating-row">
+    <div class="rating-badge">
+      <span class="star">&#9733;</span>
+      <span class="rating-num">8.9</span>
+      <span class="rating-max">/10</span>
+      <span class="vote-count">(13,241)</span>
+    </div>
+    <span class="content-rating">TV-MA</span>
+  </div>
+  <div class="status-chip">&#10003; Completed</div>
+</div>
+
+<!-- STATUS PILLS -->
+<div class="status-pills">
+  <div class="pill">&#128278; Watchlist</div>
+  <div class="pill">&#128065; Watching</div>
+  <div class="pill active">&#10004; Completed</div>
+  <div class="pill">&#10006; Dropped</div>
+</div>
+
+<!-- OVERVIEW -->
+<div class="overview">
+  A chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine with a former student in order to secure his family's future.
+</div>
+
+<!-- AT A GLANCE -->
+<div class="glance-bar">
+  <div class="glance-item">
+    <div class="glance-val">5</div>
+    <div class="glance-label">Seasons</div>
+  </div>
+  <div class="glance-item">
+    <div class="glance-val">62</div>
+    <div class="glance-label">Episodes</div>
+  </div>
+  <div class="glance-item">
+    <div class="glance-val">Ended</div>
+    <div class="glance-label">Status</div>
+  </div>
+</div>
+
+<!-- DETAILS -->
+<div class="details-section">
+  <div class="section-label">Details</div>
+  <div class="detail-row">
+    <div class="detail-label">First aired</div>
+    <div class="detail-value">Jan 20, 2008</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Last aired</div>
+    <div class="detail-value">Sep 29, 2013</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Runtime</div>
+    <div class="detail-value">45 min per episode</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Network</div>
+    <div class="detail-value">AMC</div>
+  </div>
+  <div class="detail-row">
+    <div class="detail-label">Created by</div>
+    <div class="detail-value">Vince Gilligan</div>
+  </div>
+</div>
+
+<!-- GENRES -->
+<div class="genres-section">
+  <div class="section-label">Genres</div>
+  <div class="genre-tags">
+    <span class="genre-tag">Drama</span>
+    <span class="genre-tag">Crime</span>
+    <span class="genre-tag">Thriller</span>
+  </div>
+</div>
+
+<!-- CAST -->
+<div class="cast-section">
+  <div class="section-label">Cast</div>
+  <div class="cast-scroll">
+    <div class="cast-item">
+      <img class="cast-photo" src="https://image.tmdb.org/t/p/w185/uc4G5qdezaOMiBBjFRGF1TxTCib.jpg" alt="">
+      <div class="cast-name">Bryan Cranston</div>
+      <div class="cast-role">Walter White</div>
+    </div>
+    <div class="cast-item">
+      <img class="cast-photo" src="https://image.tmdb.org/t/p/w185/nVKMcSFDGqdqbHQBRgBFJYOH1sD.jpg" alt="">
+      <div class="cast-name">Aaron Paul</div>
+      <div class="cast-role">Jesse Pinkman</div>
+    </div>
+    <div class="cast-item">
+      <img class="cast-photo" src="https://image.tmdb.org/t/p/w185/fX5C8wSxfIF2sPjviKiFjQLsmfB.jpg" alt="">
+      <div class="cast-name">Anna Gunn</div>
+      <div class="cast-role">Skyler White</div>
+    </div>
+    <div class="cast-item">
+      <img class="cast-photo" src="https://image.tmdb.org/t/p/w185/jNBCaHfgSUBgiQ6LSXcrHAYBjop.jpg" alt="">
+      <div class="cast-name">Dean Norris</div>
+      <div class="cast-role">Hank Schrader</div>
+    </div>
+    <div class="cast-item">
+      <div class="cast-photo" style="background:#252930;"></div>
+      <div class="cast-name">Betsy Brandt</div>
+      <div class="cast-role">Marie Schrader</div>
+    </div>
+  </div>
+</div>
+
+<!-- DIVIDER -->
+<div class="divider"></div>
+
+<!-- YOUR ACTIVITY -->
+<div class="activity-section">
+  <div class="section-label">Your Activity</div>
+  <div class="activity-card">
+    <div class="activity-header">
+      <div class="activity-icon icon-blue">&#128197;</div>
+      <div class="activity-title">Log a watch</div>
+    </div>
+    <div class="input-mock">Mar 8, 2026</div>
+    <div class="input-mock">Add a note (optional)</div>
+    <div class="btn-primary">Add to Diary</div>
+  </div>
+
+  <div class="collapsible" style="margin-top: 12px;">
+    <div class="collapsible-left">
+      <div class="activity-icon icon-amber">&#9998;</div>
+      <div class="activity-title">Write a review</div>
+    </div>
+    <span style="color:#5A6070;">&#9662;</span>
+  </div>
+
+  <div class="collapsible" style="margin-top: 12px;">
+    <div class="collapsible-left">
+      <div class="activity-icon icon-green">&#9776;</div>
+      <div class="activity-title">Add to list</div>
+    </div>
+    <span style="color:#5A6070;">&#9662;</span>
+  </div>
+</div>
+
+<!-- DIVIDER -->
+<div class="divider"></div>
+
+<!-- COMMUNITY REVIEWS -->
+<div class="activity-section">
+  <div class="section-label">Community Reviews</div>
+  <div style="text-align:center; padding: 24px 0; color: #5A6070; font-size: 14px;">
+    No reviews yet<br>
+    <span style="font-size: 12px;">Be the first to review this show!</span>
+  </div>
+</div>
+
+<div class="spacer"></div>
+</body>
+</html>
