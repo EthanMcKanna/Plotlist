@@ -53,7 +53,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const needsOnboarding =
       isAuthenticated && (me?.onboardingStep ?? "profile") !== "complete";
     const onExpectedOnboardingScreen =
-      inOnboardingGroup && segments[1] === onboardingStep;
+      pathname === ONBOARDING_ROUTES[onboardingStep];
 
     if (!isAuthenticated && !inAuthGroup && Platform.OS !== "web") {
       router.replace("/sign-in");
