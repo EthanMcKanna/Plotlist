@@ -16,7 +16,9 @@ import {
 import {
   RELEASE_CALENDAR_PROVIDER_OPTIONS,
   buildReleaseCalendarData,
+  getDateOnlyTimestamp,
   getReleaseEventFlags,
+  getStartOfLocalDayTimestamp,
   isReleaseSyncStateStale,
   isTrackedReleaseStatus,
   normalizeSelectedProviders,
@@ -33,10 +35,6 @@ type ShowDoc = Doc<"shows">;
 
 function uniqShowIds(showIds: Id<"shows">[]) {
   return Array.from(new Set(showIds));
-}
-
-function toAirDateTimestamp(airDate: string) {
-  return new Date(`${airDate}T00:00:00.000Z`).getTime();
 }
 
 function getTrackedProviderSet(selectedProviders?: string[] | null) {
@@ -192,8 +190,8 @@ async function buildFutureReleaseEvents(
 
   const maxSeasonNumber =
     seasons.length > 0 ? seasons[seasons.length - 1].season_number ?? 0 : 0;
-  const now = Date.now();
-  const maxAirDate = now + RELEASE_WINDOW_MS;
+  const todayStart = getStartOfLocalDayTimestamp();
+  const maxAirDate = todayStart + RELEASE_WINDOW_MS;
   const events: Array<Omit<Doc<"releaseEvents">, "_id" | "_creationTime">> = [];
 
   for (const season of seasons) {
@@ -226,8 +224,8 @@ async function buildFutureReleaseEvents(
         continue;
       }
 
-      const airDateTs = toAirDateTimestamp(episode.airDate);
-      if (!Number.isFinite(airDateTs) || airDateTs < now || airDateTs > maxAirDate) {
+      const airDateTs = getDateOnlyTimestamp(episode.airDate);
+      if (!Number.isFinite(airDateTs) || airDateTs < todayStart || airDateTs > maxAirDate) {
         continue;
       }
 

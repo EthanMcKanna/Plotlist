@@ -41,6 +41,9 @@ export const RELEASE_CALENDAR_PROVIDER_OPTIONS = [
 export const RELEASE_CALENDAR_VIEWS = [
   { value: "tonight", label: "Tonight" },
   { value: "upcoming", label: "Upcoming" },
+  { value: "premieres", label: "Premieres" },
+  { value: "returning", label: "Returning" },
+  { value: "finales", label: "Finales" },
 ] as const;
 
 export type ReleaseCalendarView = (typeof RELEASE_CALENDAR_VIEWS)[number]["value"];
@@ -125,6 +128,27 @@ export function normalizeSelectedProviders(selectedProviders?: string[] | null) 
 
 export function getLocalDateString(value = new Date()) {
   return format(value, "yyyy-MM-dd");
+}
+
+export function getStartOfLocalDayTimestamp(value = new Date()) {
+  return new Date(
+    value.getFullYear(),
+    value.getMonth(),
+    value.getDate(),
+    0,
+    0,
+    0,
+    0,
+  ).getTime();
+}
+
+export function getDateOnlyTimestamp(value: string) {
+  const [year, month, day] = value.split("-").map((part) => Number(part));
+  if (!year || !month || !day) {
+    return Number.NaN;
+  }
+
+  return new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
 }
 
 export function getReleaseEventFlags(args: {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   buildReleaseCalendarData,
+  getDateOnlyTimestamp,
   getReleaseEventFlags,
   getTrackedShowIdsFromStates,
   isReleaseSyncStateStale,
@@ -82,6 +83,13 @@ describe("release calendar helpers", () => {
     ).toEqual(["show-1", "show-2"]);
   });
 
+  it("normalizes date-only timestamps to the local day instead of UTC midnight", () => {
+    const airDateTs = getDateOnlyTimestamp("2026-03-13");
+
+    expect(Number.isFinite(airDateTs)).toBe(true);
+    expect(new Date(airDateTs).getUTCHours()).toBe(12);
+  });
+
   it("filters results by selected providers without dropping matching upcoming releases", () => {
     const result = buildReleaseCalendarData({
       shows: [
@@ -95,7 +103,7 @@ describe("release calendar helpers", () => {
             {
               showId: "show-1",
               airDate: "2026-03-20",
-              airDateTs: Date.parse("2026-03-20T00:00:00.000Z"),
+              airDateTs: getDateOnlyTimestamp("2026-03-20"),
               seasonNumber: 1,
               episodeNumber: 2,
               episodeTitle: "Next",
@@ -116,7 +124,7 @@ describe("release calendar helpers", () => {
             {
               showId: "show-2",
               airDate: "2026-03-20",
-              airDateTs: Date.parse("2026-03-20T00:00:00.000Z"),
+              airDateTs: getDateOnlyTimestamp("2026-03-20"),
               seasonNumber: 2,
               episodeNumber: 1,
               episodeTitle: "Return",
@@ -151,7 +159,7 @@ describe("release calendar helpers", () => {
             {
               showId: "show-1",
               airDate: "2026-03-13",
-              airDateTs: Date.parse("2026-03-13T00:00:00.000Z"),
+              airDateTs: getDateOnlyTimestamp("2026-03-13"),
               seasonNumber: 1,
               episodeNumber: 1,
               episodeTitle: "Pilot",
@@ -163,7 +171,7 @@ describe("release calendar helpers", () => {
             {
               showId: "show-1",
               airDate: "2026-03-14",
-              airDateTs: Date.parse("2026-03-14T00:00:00.000Z"),
+              airDateTs: getDateOnlyTimestamp("2026-03-14"),
               seasonNumber: 1,
               episodeNumber: 2,
               episodeTitle: "Tomorrow",
@@ -198,7 +206,7 @@ describe("release calendar helpers", () => {
             {
               showId: "show-1",
               airDate: "2026-03-15",
-              airDateTs: Date.parse("2026-03-15T00:00:00.000Z"),
+              airDateTs: getDateOnlyTimestamp("2026-03-15"),
               seasonNumber: 1,
               episodeNumber: 3,
               episodeTitle: "Cached",
