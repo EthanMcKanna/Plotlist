@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getCurrentUserOrThrow } from "./utils";
 import { rateLimit } from "./rateLimit";
@@ -120,5 +120,34 @@ export const listPublicForUser = query({
       .order("desc")
       .paginate(args.paginationOpts);
     return page;
+  },
+});
+
+export const listPublicByOwnerIds = internalQuery({
+  args: {
+    ownerIds: v.array(v.id("users")),
+    limit: v.optional(v.number()),
+    limitPerOwner: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const uniqueOwnerIds = Array.from(new Set(args.ownerIds));
+    const limit = Math.min(args.limit ?? 12, 20);
+    const limitPerOwner = Math.min(args.limitPerOwner ?? 2, 4);
+
+    const perOwnerLists = await Promise.all(
+      uniqueOwnerIds.map((ownerId) =>
+        ctx.db
+          .query("lists")
+          .withIndex("by_owner_updatedAt", (q) => q.eq("ownerId", ownerId))
+          .filter((q) => q.eq(q.field("isPublic"), true))
+          .order("desc")
+          .take(limitPerOwner),
+      ),
+    );
+
+    return perOwnerLists
+      .flat()
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, limit);
   },
 });

@@ -1,10 +1,14 @@
-import { action, internalMutation, internalQuery, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, query, type ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { normalizeSearchText } from "./utils";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { getSeasonDetailsWithCache } from "../lib/seasonDetails";
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const LIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const SHOW_DETAILS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENT_SEASON_DETAILS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const ARCHIVE_SEASON_DETAILS_CACHE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const MAJOR_STREAMING_PROVIDER_IDS = new Set([8, 9, 15, 337, 350, 386, 387, 1899]);
 const PROVIDER_NAME_ALIASES: Record<number, string> = {
   386: "Peacock",
@@ -148,6 +152,32 @@ export const upsertDetailsCache = internalMutation({
 function tmdbUrl(path: string) {
   const base = process.env.TMDB_BASE_URL ?? "https://api.themoviedb.org/3";
   return `${base}${path}`;
+}
+
+function getTmdbApiKey() {
+  const apiKey = process.env.TMDB_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing TMDB_API_KEY env var");
+  }
+  return apiKey;
+}
+
+function getSeasonDetailsCacheTtlMs(airDate?: string | null) {
+  if (!airDate) {
+    return RECENT_SEASON_DETAILS_CACHE_TTL_MS;
+  }
+
+  const airTime = new Date(airDate).getTime();
+  if (!Number.isFinite(airTime)) {
+    return RECENT_SEASON_DETAILS_CACHE_TTL_MS;
+  }
+
+  const ageMs = Date.now() - airTime;
+  if (ageMs <= 180 * 24 * 60 * 60 * 1000) {
+    return RECENT_SEASON_DETAILS_CACHE_TTL_MS;
+  }
+
+  return ARCHIVE_SEASON_DETAILS_CACHE_TTL_MS;
 }
 
 function getCanonicalProviderName(providerId: number, providerName: string) {
@@ -299,59 +329,10 @@ export const search = query({
 export const searchCatalog = action({
   args: { text: v.string() },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) {
-      throw new Error("Not authenticated");
-    }
-    await ctx.runMutation(internal.rateLimit.enforce, {
-      key: `tmdb-search:${userId}`,
-      limit: 30,
-      windowMs: 60_000,
+    return await ctx.runAction(api.embeddings.searchShows, {
+      text: args.text,
+      limit: 12,
     });
-    const query = args.text.trim();
-    if (!query) return [];
-    const normalized = normalizeSearchText(query);
-    const now = Date.now();
-    const cached = await ctx.runQuery(internal.shows.getSearchCache, {
-      query: normalized,
-    });
-    if (cached && cached.expiresAt > now) {
-      return cached.results as any[];
-    }
-    const apiKey = process.env.TMDB_API_KEY;
-    if (!apiKey) {
-      throw new Error("Missing TMDB_API_KEY env var");
-    }
-
-    const url = tmdbUrl(
-      `/search/tv?api_key=${apiKey}&language=en-US&query=${encodeURIComponent(
-        query,
-      )}`,
-    );
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`TMDB search failed: ${response.status}`);
-    }
-    const data = await response.json();
-    const results = (data.results ?? []).slice(0, 20).map((result: any) => ({
-      externalSource: "tmdb",
-      externalId: String(result.id),
-      title: result.name ?? result.original_name ?? "Untitled",
-      year: result.first_air_date
-        ? Number(String(result.first_air_date).slice(0, 4))
-        : undefined,
-      overview: result.overview ?? undefined,
-      posterUrl: result.poster_path
-        ? `https://image.tmdb.org/t/p/w500${result.poster_path}`
-        : undefined,
-    }));
-    await ctx.runMutation(internal.shows.upsertSearchCache, {
-      query: normalized,
-      results,
-      fetchedAt: now,
-      expiresAt: now + CACHE_TTL_MS,
-    });
-    return results;
   },
 });
 
@@ -481,7 +462,7 @@ export const getTmdbList = action({
       category: cacheKey,
       results,
       fetchedAt: now,
-      expiresAt: now + CACHE_TTL_MS,
+      expiresAt: now + LIST_CACHE_TTL_MS,
     });
 
     return results;
@@ -512,6 +493,9 @@ export const ingestFromCatalog = action({
       externalId: args.externalId,
     });
     if (existing) {
+      await ctx.scheduler.runAfter(0, internal.embeddings.ensureShowEmbedding, {
+        showId: existing._id,
+      });
       return existing._id;
     }
 
@@ -519,7 +503,7 @@ export const ingestFromCatalog = action({
       const normalized = normalizeSearchText(
         `${args.title} ${args.originalTitle ?? ""}`,
       );
-      return await ctx.runMutation(internal.shows.upsertFromCatalog, {
+      const showId = await ctx.runMutation(internal.shows.upsertFromCatalog, {
         externalSource: args.externalSource,
         externalId: args.externalId,
         title: args.title,
@@ -528,6 +512,10 @@ export const ingestFromCatalog = action({
         posterUrl: args.posterUrl,
         searchText: normalized,
       });
+      await ctx.scheduler.runAfter(0, internal.embeddings.ensureShowEmbedding, {
+        showId,
+      });
+      return showId;
     }
 
     const apiKey = process.env.TMDB_API_KEY;
@@ -553,7 +541,7 @@ export const ingestFromCatalog = action({
       `${title} ${data.original_name ?? ""} ${data.tagline ?? ""}`,
     );
 
-    return await ctx.runMutation(internal.shows.upsertFromCatalog, {
+    const showId = await ctx.runMutation(internal.shows.upsertFromCatalog, {
       externalSource: "tmdb",
       externalId: String(data.id),
       title,
@@ -564,8 +552,305 @@ export const ingestFromCatalog = action({
       posterUrl: posterPath,
       searchText: normalized,
     });
+    await ctx.scheduler.runAfter(0, internal.embeddings.ensureShowEmbedding, {
+      showId,
+    });
+    return showId;
   },
 });
+
+async function fetchSeasonDetailsPayload(
+  ctx: ActionCtx,
+  args: { externalId: string; seasonNumber: number },
+) {
+  const now = Date.now();
+  const cacheExternalId = `${args.externalId}:season:${args.seasonNumber}`;
+  const cached = await ctx.runQuery(internal.shows.getDetailsCache, {
+    externalSource: "tmdb-season",
+    externalId: cacheExternalId,
+  });
+  if (cached && cached.expiresAt > now) {
+    return cached.payload;
+  }
+
+  const response = await fetch(
+    tmdbUrl(
+      `/tv/${args.externalId}/season/${args.seasonNumber}?api_key=${getTmdbApiKey()}&language=en-US`,
+    ),
+  );
+
+  if (!response.ok) {
+    throw new Error(`TMDB season request failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const episodes = (data.episodes ?? []).map((episode: any) => ({
+    id: episode.id,
+    name: episode.name ?? `Episode ${episode.episode_number}`,
+    episodeNumber: episode.episode_number ?? 0,
+    seasonNumber: episode.season_number ?? args.seasonNumber,
+    airDate: episode.air_date ?? null,
+    runtime: episode.runtime ?? null,
+    overview: episode.overview ?? null,
+    stillPath: episode.still_path
+      ? `https://image.tmdb.org/t/p/w780${episode.still_path}`
+      : null,
+    voteAverage: episode.vote_average ?? 0,
+    voteCount: episode.vote_count ?? 0,
+    crew:
+      episode.crew
+        ?.filter((person: any) =>
+          ["Director", "Writer", "Screenplay", "Story"].includes(person.job),
+        )
+        .slice(0, 4)
+        .map((person: any) => ({
+          id: person.id,
+          name: person.name,
+          job: person.job,
+        })) ?? [],
+    guestStars:
+      episode.guest_stars?.slice(0, 5).map((person: any) => ({
+        id: person.id,
+        name: person.name,
+        character: person.character ?? null,
+      })) ?? [],
+  }));
+
+  const ratedEpisodes = episodes.filter((episode: any) => episode.voteCount > 0);
+  const seasonVoteAverage =
+    ratedEpisodes.length > 0
+      ? Number(
+          (
+            ratedEpisodes.reduce(
+              (sum: number, episode: any) => sum + episode.voteAverage,
+              0,
+            ) / ratedEpisodes.length
+          ).toFixed(1),
+        )
+      : null;
+
+  const payload = {
+    id: data.id,
+    seasonNumber: data.season_number ?? args.seasonNumber,
+    name: data.name ?? `Season ${args.seasonNumber}`,
+    overview: data.overview ?? null,
+    airDate: data.air_date ?? null,
+    posterPath: data.poster_path
+      ? `https://image.tmdb.org/t/p/w500${data.poster_path}`
+      : null,
+    episodeCount: episodes.length,
+    voteAverage: seasonVoteAverage,
+    episodes,
+  };
+
+  await ctx.runMutation(internal.shows.upsertDetailsCache, {
+    externalSource: "tmdb-season",
+    externalId: cacheExternalId,
+    payload,
+    fetchedAt: now,
+    expiresAt: now + getSeasonDetailsCacheTtlMs(payload.airDate),
+  });
+
+  return payload;
+}
+
+function hasExtendedDetailsCachePayload(payload: unknown) {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    "watchProviderUrlsStatus" in (payload as Record<string, unknown>)
+  );
+}
+
+async function fetchExtendedDetailsPayload(
+  ctx: ActionCtx,
+  args: { externalId: string; rateLimitKey?: string | null },
+) {
+  if (args.rateLimitKey) {
+    await ctx.runMutation(internal.rateLimit.enforce, {
+      key: args.rateLimitKey,
+      limit: 30,
+      windowMs: 60_000,
+    });
+  }
+
+  const apiKey = getTmdbApiKey();
+  const now = Date.now();
+  const cached = await ctx.runQuery(internal.shows.getDetailsCache, {
+    externalSource: "tmdb",
+    externalId: args.externalId,
+  });
+  if (cached && cached.expiresAt > now && hasExtendedDetailsCachePayload(cached.payload)) {
+    return cached.payload;
+  }
+
+  const url = tmdbUrl(
+    `/tv/${args.externalId}?api_key=${apiKey}&language=en-US` +
+      `&append_to_response=credits,videos,similar,recommendations,external_ids,content_ratings`,
+  );
+
+  const providersUrl = tmdbUrl(
+    `/tv/${args.externalId}/watch/providers?api_key=${apiKey}`,
+  );
+  const watchPageUrl = `https://www.themoviedb.org/tv/${args.externalId}/watch?locale=US`;
+
+  const [response, providersResponse, watchPageResponse] = await Promise.all([
+    fetch(url),
+    fetch(providersUrl),
+    fetch(watchPageUrl),
+  ]);
+  if (!response.ok) {
+    throw new Error(`TMDB request failed: ${response.status}`);
+  }
+
+  const [data, providersData, watchPageHtml] = await Promise.all([
+    response.json(),
+    providersResponse.ok ? providersResponse.json() : null,
+    watchPageResponse.ok ? watchPageResponse.text() : null,
+  ]);
+
+  const usProviders = providersData?.results?.US ?? null;
+  const providerTitleUrls = watchPageHtml
+    ? extractProviderTitleUrls(watchPageHtml)
+    : new Map<string, string>();
+  const streamingAvailabilityOrder = [{ key: "flatrate", label: "Stream" }] as const;
+  const watchProviders = new Map<
+    string,
+    {
+      id: number;
+      name: string;
+      logoUrl: string | null;
+      availability: string[];
+      deepLinkUrl: string | null;
+    }
+  >();
+
+  for (const availability of streamingAvailabilityOrder) {
+    const providers = usProviders?.[availability.key] ?? [];
+    for (const provider of providers) {
+      if (!MAJOR_STREAMING_PROVIDER_IDS.has(provider.provider_id)) {
+        continue;
+      }
+      const providerName = getCanonicalProviderName(
+        provider.provider_id,
+        provider.provider_name,
+      );
+      const existing = watchProviders.get(providerName);
+      if (existing) {
+        if (!existing.availability.includes(availability.label)) {
+          existing.availability.push(availability.label);
+        }
+        continue;
+      }
+
+      watchProviders.set(providerName, {
+        id: provider.provider_id,
+        name: providerName,
+        logoUrl: provider.logo_path
+          ? `https://image.tmdb.org/t/p/w92${provider.logo_path}`
+          : null,
+        availability: [availability.label],
+        deepLinkUrl: providerTitleUrls.get(providerName) ?? null,
+      });
+    }
+  }
+
+  const payload = {
+    tagline: data.tagline ?? null,
+    createdBy:
+      data.created_by?.map((person: any) => ({
+        id: person.id,
+        name: person.name,
+        profilePath: person.profile_path
+          ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
+          : null,
+      })) ?? [],
+    genres: data.genres ?? [],
+    networks: data.networks ?? [],
+    status: data.status,
+    numberOfSeasons: data.number_of_seasons ?? 0,
+    numberOfEpisodes: data.number_of_episodes ?? 0,
+    episodeRunTime: data.episode_run_time?.[0] ?? null,
+    voteAverage: data.vote_average ?? 0,
+    voteCount: data.vote_count ?? 0,
+    backdropPath: data.backdrop_path
+      ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}`
+      : null,
+    firstAirDate: data.first_air_date,
+    lastAirDate: data.last_air_date,
+    seasons: data.seasons ?? [],
+    cast:
+      data.credits?.cast?.slice(0, 20).map((person: any) => ({
+        id: person.id,
+        name: person.name,
+        character: person.character,
+        profilePath: person.profile_path
+          ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
+          : null,
+      })) ?? [],
+    crew:
+      data.credits?.crew
+        ?.filter((person: any) =>
+          ["Creator", "Executive Producer", "Director", "Writer"].includes(person.job),
+        )
+        .slice(0, 10)
+        .map((person: any) => ({
+          id: person.id,
+          name: person.name,
+          job: person.job,
+          profilePath: person.profile_path
+            ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
+            : null,
+        })) ?? [],
+    videos:
+      data.videos?.results
+        ?.filter((video: any) =>
+          video.site === "YouTube" && ["Trailer", "Teaser"].includes(video.type),
+        )
+        .slice(0, 5)
+        .map((video: any) => ({
+          id: video.id,
+          key: video.key,
+          name: video.name,
+          type: video.type,
+        })) ?? [],
+    similar:
+      data.similar?.results?.slice(0, 10).map((show: any) => ({
+        id: show.id,
+        title: show.name,
+        posterPath: show.poster_path
+          ? `https://image.tmdb.org/t/p/w500${show.poster_path}`
+          : null,
+        voteAverage: show.vote_average,
+      })) ?? [],
+    contentRating:
+      data.content_ratings?.results?.find((rating: any) => rating.iso_3166_1 === "US")?.rating ??
+      null,
+    imdbId: data.external_ids?.imdb_id ?? null,
+    watchProviders: Array.from(watchProviders.values())
+      .slice(0, 12)
+      .map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        logoUrl: provider.logoUrl,
+        availability: provider.availability.join(" · "),
+        deepLinkUrl: provider.deepLinkUrl,
+      })),
+    watchProvidersLink: usProviders?.link ?? null,
+    watchProvidersStatus: usProviders ? "available" : "missing",
+    watchProviderUrlsStatus: watchPageHtml ? "available" : "missing",
+  };
+
+  await ctx.runMutation(internal.shows.upsertDetailsCache, {
+    externalSource: "tmdb",
+    externalId: args.externalId,
+    payload,
+    fetchedAt: now,
+    expiresAt: now + SHOW_DETAILS_CACHE_TTL_MS,
+  });
+
+  return payload;
+}
 
 export const getExtendedDetails = action({
   args: { externalId: v.string() },
@@ -574,188 +859,27 @@ export const getExtendedDetails = action({
     if (!userId) {
       throw new Error("Not authenticated");
     }
-    await ctx.runMutation(internal.rateLimit.enforce, {
-      key: `tmdb-details:${userId}`,
-      limit: 30,
-      windowMs: 60_000,
-    });
-    const apiKey = process.env.TMDB_API_KEY;
-    if (!apiKey) {
-      throw new Error("Missing TMDB_API_KEY env var");
-    }
-    const now = Date.now();
-    const cached = await ctx.runQuery(internal.shows.getDetailsCache, {
-      externalSource: "tmdb",
+    return await fetchExtendedDetailsPayload(ctx, {
       externalId: args.externalId,
+      rateLimitKey: `tmdb-details:${userId}`,
     });
-    if (
-      cached &&
-      cached.expiresAt > now &&
-      cached.payload &&
-      "watchProviderUrlsStatus" in (cached.payload as Record<string, unknown>)
-    ) {
-      return cached.payload;
-    }
+  },
+});
 
-    const url = tmdbUrl(
-      `/tv/${args.externalId}?api_key=${apiKey}&language=en-US` +
-      `&append_to_response=credits,videos,similar,recommendations,external_ids,content_ratings`
-    );
-
-    const providersUrl = tmdbUrl(
-      `/tv/${args.externalId}/watch/providers?api_key=${apiKey}`,
-    );
-    const watchPageUrl = `https://www.themoviedb.org/tv/${args.externalId}/watch?locale=US`;
-
-    const [response, providersResponse, watchPageResponse] = await Promise.all([
-      fetch(url),
-      fetch(providersUrl),
-      fetch(watchPageUrl),
-    ]);
-    if (!response.ok) {
-      throw new Error(`TMDB request failed: ${response.status}`);
-    }
-
-    const [data, providersData, watchPageHtml] = await Promise.all([
-      response.json(),
-      providersResponse.ok ? providersResponse.json() : null,
-      watchPageResponse.ok ? watchPageResponse.text() : null,
-    ]);
-
-    const usProviders = providersData?.results?.US ?? null;
-    const providerTitleUrls = watchPageHtml
-      ? extractProviderTitleUrls(watchPageHtml)
-      : new Map<string, string>();
-    const streamingAvailabilityOrder = [{ key: "flatrate", label: "Stream" }] as const;
-    const watchProviders = new Map<
-      string,
-      {
-        id: number;
-        name: string;
-        logoUrl: string | null;
-        availability: string[];
-        deepLinkUrl: string | null;
-      }
-    >();
-
-    for (const availability of streamingAvailabilityOrder) {
-      const providers = usProviders?.[availability.key] ?? [];
-      for (const provider of providers) {
-        if (!MAJOR_STREAMING_PROVIDER_IDS.has(provider.provider_id)) {
-          continue;
-        }
-        const providerName = getCanonicalProviderName(
-          provider.provider_id,
-          provider.provider_name,
-        );
-        const existing = watchProviders.get(providerName);
-        if (existing) {
-          if (!existing.availability.includes(availability.label)) {
-            existing.availability.push(availability.label);
-          }
-          continue;
-        }
-
-        watchProviders.set(providerName, {
-          id: provider.provider_id,
-          name: providerName,
-          logoUrl: provider.logo_path
-            ? `https://image.tmdb.org/t/p/w92${provider.logo_path}`
-            : null,
-          availability: [availability.label],
-          deepLinkUrl: providerTitleUrls.get(providerName) ?? null,
-        });
-      }
-    }
-
-    const payload = {
-      // Base details
-      tagline: data.tagline ?? null,
-      createdBy: data.created_by?.map((person: any) => ({
-        id: person.id,
-        name: person.name,
-        profilePath: person.profile_path
-          ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
-          : null,
-      })) ?? [],
-      genres: data.genres ?? [],
-      networks: data.networks ?? [],
-      status: data.status,
-      numberOfSeasons: data.number_of_seasons ?? 0,
-      numberOfEpisodes: data.number_of_episodes ?? 0,
-      episodeRunTime: data.episode_run_time?.[0] ?? null,
-      voteAverage: data.vote_average ?? 0,
-      voteCount: data.vote_count ?? 0,
-      backdropPath: data.backdrop_path
-        ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}`
-        : null,
-      firstAirDate: data.first_air_date,
-      lastAirDate: data.last_air_date,
-      seasons: data.seasons ?? [],
-
-      // Extended data
-      cast: data.credits?.cast?.slice(0, 20).map((person: any) => ({
-        id: person.id,
-        name: person.name,
-        character: person.character,
-        profilePath: person.profile_path
-          ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
-          : null,
-      })) ?? [],
-
-      crew: data.credits?.crew?.filter((person: any) =>
-        ['Creator', 'Executive Producer', 'Director', 'Writer'].includes(person.job)
-      ).slice(0, 10).map((person: any) => ({
-        id: person.id,
-        name: person.name,
-        job: person.job,
-        profilePath: person.profile_path
-          ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
-          : null,
-      })) ?? [],
-
-      videos: data.videos?.results?.filter((video: any) =>
-        video.site === 'YouTube' && ['Trailer', 'Teaser'].includes(video.type)
-      ).slice(0, 5).map((video: any) => ({
-        id: video.id,
-        key: video.key,
-        name: video.name,
-        type: video.type,
-      })) ?? [],
-
-      similar: data.similar?.results?.slice(0, 10).map((show: any) => ({
-        id: show.id,
-        title: show.name,
-        posterPath: show.poster_path
-          ? `https://image.tmdb.org/t/p/w500${show.poster_path}`
-          : null,
-        voteAverage: show.vote_average,
-      })) ?? [],
-
-      contentRating: data.content_ratings?.results?.find(
-        (rating: any) => rating.iso_3166_1 === 'US'
-      )?.rating ?? null,
-
-      imdbId: data.external_ids?.imdb_id ?? null,
-      watchProviders: Array.from(watchProviders.values()).slice(0, 12).map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        logoUrl: provider.logoUrl,
-        availability: provider.availability.join(" · "),
-        deepLinkUrl: provider.deepLinkUrl,
-      })),
-      watchProvidersLink: usProviders?.link ?? null,
-      watchProvidersStatus: usProviders ? "available" : "missing",
-      watchProviderUrlsStatus: watchPageHtml ? "available" : "missing",
-    };
-    await ctx.runMutation(internal.shows.upsertDetailsCache, {
-      externalSource: "tmdb",
+export const getExtendedDetailsInternal = internalAction({
+  args: { externalId: v.string() },
+  handler: async (ctx, args) => {
+    return await fetchExtendedDetailsPayload(ctx, {
       externalId: args.externalId,
-      payload,
-      fetchedAt: now,
-      expiresAt: now + CACHE_TTL_MS,
+      rateLimitKey: null,
     });
-    return payload;
+  },
+});
+
+export const getSeasonDetailsInternal = internalAction({
+  args: { externalId: v.string(), seasonNumber: v.number() },
+  handler: async (ctx, args) => {
+    return await fetchSeasonDetailsPayload(ctx, args);
   },
 });
 
@@ -766,15 +890,6 @@ export const getSeasonDetails = action({
     if (!userId) {
       throw new Error("Not authenticated");
     }
-    await ctx.runMutation(internal.rateLimit.enforce, {
-      key: `tmdb-season-details:${userId}`,
-      limit: 30,
-      windowMs: 60_000,
-    });
-    const apiKey = process.env.TMDB_API_KEY;
-    if (!apiKey) {
-      throw new Error("Missing TMDB_API_KEY env var");
-    }
 
     const now = Date.now();
     const cacheExternalId = `${args.externalId}:season:${args.seasonNumber}`;
@@ -782,88 +897,18 @@ export const getSeasonDetails = action({
       externalSource: "tmdb-season",
       externalId: cacheExternalId,
     });
-    if (cached && cached.expiresAt > now) {
-      return cached.payload;
-    }
 
-    const response = await fetch(
-      tmdbUrl(
-        `/tv/${args.externalId}/season/${args.seasonNumber}?api_key=${apiKey}&language=en-US`,
-      ),
-    );
-
-    if (!response.ok) {
-      throw new Error(`TMDB season request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const episodes = (data.episodes ?? []).map((episode: any) => ({
-      id: episode.id,
-      name: episode.name ?? `Episode ${episode.episode_number}`,
-      episodeNumber: episode.episode_number ?? 0,
-      seasonNumber: episode.season_number ?? args.seasonNumber,
-      airDate: episode.air_date ?? null,
-      runtime: episode.runtime ?? null,
-      overview: episode.overview ?? null,
-      stillPath: episode.still_path
-        ? `https://image.tmdb.org/t/p/w780${episode.still_path}`
-        : null,
-      voteAverage: episode.vote_average ?? 0,
-      voteCount: episode.vote_count ?? 0,
-      crew:
-        episode.crew
-          ?.filter((person: any) =>
-            ["Director", "Writer", "Screenplay", "Story"].includes(person.job),
-          )
-          .slice(0, 4)
-          .map((person: any) => ({
-            id: person.id,
-            name: person.name,
-            job: person.job,
-          })) ?? [],
-      guestStars:
-        episode.guest_stars?.slice(0, 5).map((person: any) => ({
-          id: person.id,
-          name: person.name,
-          character: person.character ?? null,
-        })) ?? [],
-    }));
-
-    const ratedEpisodes = episodes.filter((episode: any) => episode.voteCount > 0);
-    const seasonVoteAverage =
-      ratedEpisodes.length > 0
-        ? Number(
-            (
-              ratedEpisodes.reduce(
-                (sum: number, episode: any) => sum + episode.voteAverage,
-                0,
-              ) / ratedEpisodes.length
-            ).toFixed(1),
-          )
-        : null;
-
-    const payload = {
-      id: data.id,
-      seasonNumber: data.season_number ?? args.seasonNumber,
-      name: data.name ?? `Season ${args.seasonNumber}`,
-      overview: data.overview ?? null,
-      airDate: data.air_date ?? null,
-      posterPath: data.poster_path
-        ? `https://image.tmdb.org/t/p/w500${data.poster_path}`
-        : null,
-      episodeCount: episodes.length,
-      voteAverage: seasonVoteAverage,
-      episodes,
-    };
-
-    await ctx.runMutation(internal.shows.upsertDetailsCache, {
-      externalSource: "tmdb-season",
-      externalId: cacheExternalId,
-      payload,
-      fetchedAt: now,
-      expiresAt: now + CACHE_TTL_MS,
+    return await getSeasonDetailsWithCache({
+      cached,
+      now,
+      enforceRateLimit: async () => {
+        await ctx.runMutation(internal.rateLimit.enforce, {
+          key: `tmdb-season-details:${userId}`,
+          limit: 30,
+          windowMs: 60_000,
+        });
+      },
+      fetchPayload: async () => await fetchSeasonDetailsPayload(ctx, args),
     });
-
-    return payload;
   },
 });

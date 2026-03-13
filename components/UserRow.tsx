@@ -7,6 +7,16 @@ import { useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { Avatar } from "./Avatar";
+import { TasteMatchSummary } from "./TasteMatchSummary";
+
+type TasteMatchData = {
+  percent: number;
+  sharedFavoriteShows: Array<{
+    showId?: string;
+    title: string;
+    posterUrl?: string | null;
+  }>;
+};
 
 type UserRowProps = {
   userId: Id<"users">;
@@ -20,6 +30,7 @@ type UserRowProps = {
   mutualCount?: number;
   inContacts?: boolean;
   showFollowButton?: boolean;
+  taste?: TasteMatchData | null;
 };
 
 function buildRelationshipSubtitle({
@@ -64,6 +75,7 @@ export const UserRow = memo(function UserRow({
   mutualCount = 0,
   inContacts = false,
   showFollowButton = true,
+  taste = null,
 }: UserRowProps) {
   const router = useRouter();
   const follow = useMutation(api.follows.follow);
@@ -112,46 +124,55 @@ export const UserRow = memo(function UserRow({
   });
 
   return (
-    <View className="flex-row items-center justify-between rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
-      <Pressable
-        onPress={handlePressProfile}
-        className="flex-1 flex-row items-center gap-3 pr-3 active:opacity-80"
-      >
-        <Avatar uri={avatarUrl} label={nameLabel} size={44} />
-        <View className="flex-1">
-          <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
-            {nameLabel}
-          </Text>
-          {usernameLabel ? (
-            <Text className="text-xs text-text-tertiary" numberOfLines={1}>
-              {usernameLabel}
-            </Text>
-          ) : null}
-          {relationshipSubtitle ? (
-            <Text className="mt-1 text-xs text-text-tertiary" numberOfLines={1}>
-              {relationshipSubtitle}
-            </Text>
-          ) : null}
-        </View>
-      </Pressable>
-      {showFollowButton ? (
+    <View className="rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
+      <View className="flex-row items-center justify-between">
         <Pressable
-          onPress={handleToggleFollow}
-          disabled={isPending}
-          className={`items-center justify-center rounded-full px-4 py-2 ${
-            isFollowing
-              ? "border border-dark-border bg-dark-card"
-              : "bg-brand-500"
-          } ${isPending ? "opacity-60" : ""}`}
+          onPress={handlePressProfile}
+          className="flex-1 flex-row items-center gap-3 pr-3 active:opacity-80"
         >
-          <Text
-            className={`text-xs font-semibold ${
-              isFollowing ? "text-text-primary" : "text-white"
-            }`}
-          >
-            {isFollowing ? "Following" : "Follow"}
-          </Text>
+          <Avatar uri={avatarUrl} label={nameLabel} size={44} />
+          <View className="flex-1">
+            <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
+              {nameLabel}
+            </Text>
+            {usernameLabel ? (
+              <Text className="text-xs text-text-tertiary" numberOfLines={1}>
+                {usernameLabel}
+              </Text>
+            ) : null}
+            {relationshipSubtitle ? (
+              <Text className="mt-1 text-xs text-text-tertiary" numberOfLines={1}>
+                {relationshipSubtitle}
+              </Text>
+            ) : null}
+          </View>
         </Pressable>
+        {showFollowButton ? (
+          <Pressable
+            onPress={handleToggleFollow}
+            disabled={isPending}
+            className={`items-center justify-center rounded-full px-4 py-2 ${
+              isFollowing
+                ? "border border-dark-border bg-dark-card"
+                : "bg-brand-500"
+            } ${isPending ? "opacity-60" : ""}`}
+          >
+            <Text
+              className={`text-xs font-semibold ${
+                isFollowing ? "text-text-primary" : "text-white"
+              }`}
+            >
+              {isFollowing ? "Following" : "Follow"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {taste ? (
+        <TasteMatchSummary
+          percent={taste.percent}
+          sharedFavoriteShows={taste.sharedFavoriteShows}
+          variant="compact"
+        />
       ) : null}
     </View>
   );

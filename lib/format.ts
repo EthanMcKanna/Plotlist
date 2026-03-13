@@ -16,6 +16,14 @@ export function formatShortDate(value: number) {
   return format(new Date(value), "MMM d");
 }
 
+export function formatCalendarDay(value: number) {
+  return format(new Date(value), "EEEE, MMM d");
+}
+
+export function formatEpisodeCode(seasonNumber: number, episodeNumber: number) {
+  return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+}
+
 export function formatRelativeTime(value: number) {
   return formatDistanceToNowStrict(new Date(value), { addSuffix: true });
 }

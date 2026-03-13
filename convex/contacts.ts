@@ -10,7 +10,6 @@ import { getCurrentUserOrThrow } from "./utils";
 import { rateLimit } from "./rateLimit";
 
 const CONTACT_SYNC_LIMIT = 2_000;
-const INVITE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 type SyncEntry = {
   sourceRecordId?: string;
@@ -158,10 +157,14 @@ export const syncSnapshot = action({
       entries: nextEntries,
     });
 
+    const inviteCount = nextEntries.filter((entry) => !entry.matchedUserId).length;
+
     return {
       totalCount: nextEntries.length,
       matchedCount: nextEntries.filter((entry) => entry.matchedUserId).length,
-      invitedCount: nextEntries.filter((entry) => !entry.matchedUserId).length,
+      inviteCount,
+      // A fresh snapshot clears prior invite send state, so this count resets on sync.
+      invitedCount: 0,
       syncedAt,
     };
   },
@@ -204,7 +207,10 @@ export const getStatus = query({
       matchedCount: entries.filter((entry) => entry.matchedUserId).length,
       inviteCount: entries.filter((entry) => !entry.matchedUserId).length,
       invitedCount: entries.filter((entry) => entry.invitedAt).length,
-      lastSyncedAt: entries[0]?.updatedAt ?? null,
+      lastSyncedAt:
+        entries.length > 0
+          ? entries.reduce((latest, entry) => Math.max(latest, entry.createdAt), 0)
+          : null,
     };
   },
 });
@@ -314,10 +320,6 @@ export const sendInvite = mutation({
     const entry = await ctx.db.get(args.entryId);
     if (!entry || entry.ownerId !== user._id || entry.matchedUserId) {
       throw new Error("This contact is no longer available to invite");
-    }
-
-    if (entry.invitedAt && entry.invitedAt > Date.now() - INVITE_COOLDOWN_MS) {
-      throw new Error("Invite already sent recently");
     }
 
     await ctx.db.patch(entry._id, {

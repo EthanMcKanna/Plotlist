@@ -62,6 +62,7 @@ export default function ProfileTab() {
     me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
   );
   const counts = useQuery(api.watchStates.getCounts, me ? {} : "skip");
+  const episodeStats = useQuery(api.episodeProgress.getStats, me ? {} : "skip");
 
   const followers = me?.countsFollowers ?? 0;
   const following = me?.countsFollowing ?? 0;
@@ -137,7 +138,6 @@ export default function ProfileTab() {
           </Text>
         ) : null}
 
-        {/* View profile link */}
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -177,7 +177,7 @@ export default function ProfileTab() {
         </View>
 
         {/* ── Activity cards ── */}
-        <View className="mt-4 flex-row gap-3">
+        <View className="mt-6 flex-row gap-3">
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -232,6 +232,55 @@ export default function ProfileTab() {
             <Text className="mt-2.5 text-sm text-text-tertiary">Dropped</Text>
           </Pressable>
         </View>
+
+        {/* ── Watch stats ── */}
+        {episodeStats && episodeStats.totalEpisodes > 0 && (() => {
+          const hrs = Math.floor(episodeStats.totalMinutes / 60);
+          const mins = episodeStats.totalMinutes % 60;
+          const days = Math.floor(hrs / 24);
+          const remHrs = hrs % 24;
+          const timeLabel =
+            days > 0
+              ? `${days}d ${remHrs}h`
+              : hrs > 0
+                ? `${hrs}h ${mins}m`
+                : `${mins}m`;
+          return (
+            <View className="mt-6 rounded-2xl border border-dark-border bg-dark-card p-4">
+              <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
+                Watch Stats
+              </Text>
+              <View className="flex-row">
+                <View className="flex-1 items-center">
+                  <Text className="text-2xl font-bold text-brand-400">
+                    {episodeStats.totalEpisodes.toLocaleString()}
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-text-tertiary">
+                    Episodes
+                  </Text>
+                </View>
+                <View className="w-px self-stretch bg-dark-border" />
+                <View className="flex-1 items-center">
+                  <Text className="text-2xl font-bold text-purple-400">
+                    {timeLabel}
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-text-tertiary">
+                    Time Watched
+                  </Text>
+                </View>
+                <View className="w-px self-stretch bg-dark-border" />
+                <View className="flex-1 items-center">
+                  <Text className="text-2xl font-bold text-green-400">
+                    {episodeStats.showsWithProgress}
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-text-tertiary">
+                    Shows Tracked
+                  </Text>
+                </View>
+              </View>
+            </View>
+          );
+        })()}
 
         {/* ── Library ── */}
         <View className="mt-8">

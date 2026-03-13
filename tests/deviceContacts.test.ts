@@ -37,7 +37,7 @@ describe("loadDeviceContacts", () => {
         {
           id: "1",
           name: " Ada Lovelace ",
-          phoneNumbers: [{ number: "312 555 0182" }, { number: "312 555 0182" }],
+          phoneNumbers: [{ number: "312 555 0182" }, { number: "(312) 555-0182" }],
         },
         {
           id: "2",
@@ -48,6 +48,11 @@ describe("loadDeviceContacts", () => {
         {
           id: "3",
           phoneNumbers: [{ number: "  " }, { number: "888 555 0101" }],
+        },
+        {
+          id: "4",
+          name: "Local Extension",
+          phoneNumbers: [{ number: "555" }],
         },
       ],
     });

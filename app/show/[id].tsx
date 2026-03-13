@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Dimensions,
   Linking,
@@ -38,12 +37,19 @@ import { SimilarShowCard } from "../../components/SimilarShowCard";
 import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
 import { StatusSelector } from "../../components/StatusSelector";
+import { EpisodeGuide } from "../../components/EpisodeGuide";
+import {
+  INITIAL_VISIBLE_SEASONS,
+  getInitialVisibleSeasonCount,
+  getNextVisibleSeasonCount,
+  getSeasonLoadErrorMessage,
+  type SeasonLoadState,
+} from "../../lib/seasonGuide";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BACKDROP_HEIGHT = 340;
 const POSTER_HEIGHT = 240;
 const POSTER_WIDTH = 160;
-const INITIAL_VISIBLE_SEASONS = 3;
 
 export default function ShowScreen() {
   const params = useLocalSearchParams();
@@ -98,6 +104,26 @@ export default function ShowScreen() {
     }
   );
   const createReview = useMutation(api.reviews.create);
+  const rateEpisode = useMutation(api.reviews.rateEpisode);
+  const removeEpisodeRating = useMutation(api.reviews.removeEpisodeRating);
+  const myEpisodeRatings = useQuery(
+    api.reviews.getMyEpisodeRatings,
+    isAuthenticated ? { showId } : "skip",
+  );
+  const myEpisodeRatingMap = useMemo(() => {
+    const map = new Map<string, { rating: number; reviewText?: string }>();
+    if (myEpisodeRatings) {
+      for (const r of myEpisodeRatings) {
+        if (r.seasonNumber != null && r.episodeNumber != null) {
+          map.set(`S${r.seasonNumber}E${r.episodeNumber}`, {
+            rating: r.rating,
+            reviewText: r.reviewText ?? undefined,
+          });
+        }
+      }
+    }
+    return map;
+  }, [myEpisodeRatings]);
   const toggleListItem = useMutation(api.listItems.toggle);
   const listMembership = useQuery(
     api.listItems.getShowMembership,
@@ -107,19 +133,46 @@ export default function ShowScreen() {
     () => new Set(listMembership ?? []),
     [listMembership],
   );
+  const episodeProgress = useQuery(
+    api.episodeProgress.getProgressForShow,
+    isAuthenticated ? { showId } : "skip",
+  );
+  const watchedEpisodeSet = useMemo(() => {
+    const set = new Set<string>();
+    if (episodeProgress) {
+      for (const ep of episodeProgress) {
+        set.add(`S${ep.seasonNumber}E${ep.episodeNumber}`);
+      }
+    }
+    return set;
+  }, [episodeProgress]);
+  const toggleEpisode = useMutation(api.episodeProgress.toggleEpisode);
+  const markSeasonWatched = useMutation(api.episodeProgress.markSeasonWatched);
+  const unmarkSeasonWatched = useMutation(api.episodeProgress.unmarkSeasonWatched);
   const getExtendedDetails = useAction(api.shows.getExtendedDetails);
   const getSeasonDetails = useAction(api.shows.getSeasonDetails);
+  const getSimilarShows = useAction(api.embeddings.getSimilarShows);
+  const getShowTasteSocialProof = useAction(api.embeddings.getShowTasteSocialProof);
 
   const [extendedDetails, setExtendedDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(true);
+  const [similarShows, setSimilarShows] = useState<any[]>([]);
+  const [loadingSimilarShows, setLoadingSimilarShows] = useState(false);
+  const [tasteSocialProof, setTasteSocialProof] = useState<any>(null);
   const [seasonDetailsByNumber, setSeasonDetailsByNumber] = useState<Record<number, any>>(
     {}
   );
-  const [loadingSeasonNumbers, setLoadingSeasonNumbers] = useState<Set<number>>(new Set());
-  const [episodeGuideExpanded, setEpisodeGuideExpanded] = useState<boolean | null>(null);
+  const [seasonLoadStateByNumber, setSeasonLoadStateByNumber] = useState<
+    Record<number, SeasonLoadState>
+  >({});
+  const [seasonLoadErrorByNumber, setSeasonLoadErrorByNumber] = useState<
+    Record<number, string>
+  >({});
+  const [visibleSeasonCount, setVisibleSeasonCount] = useState(INITIAL_VISIBLE_SEASONS);
   const [selectedEpisode, setSelectedEpisode] = useState<{
     episode: any;
     seasonName: string;
+    seasonNumber: number;
   } | null>(null);
   const [episodeSheetVisible, setEpisodeSheetVisible] = useState(false);
   const [rating, setRating] = useState(0);
@@ -127,6 +180,34 @@ export default function ShowScreen() {
   const [spoiler, setSpoiler] = useState(false);
   const [listPickerVisible, setListPickerVisible] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
+  const [episodeReviewExpanded, setEpisodeReviewExpanded] = useState(false);
+  const [episodeReviewText, setEpisodeReviewText] = useState("");
+  const seasonDetailsByNumberRef = useRef<Record<number, any>>({});
+  const seasonLoadStateByNumberRef = useRef<Record<number, SeasonLoadState>>({});
+  const seasonLoadErrorByNumberRef = useRef<Record<number, string>>({});
+  const seasonLoadPromisesRef = useRef<Map<number, Promise<any>>>(new Map());
+  const seasonLoadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const activeShowExternalIdRef = useRef<string | null>(null);
+  const episodeCommunityReviews = useQuery(
+    api.reviews.listForEpisodeDetailed,
+    selectedEpisode
+      ? {
+          showId,
+          seasonNumber: selectedEpisode.seasonNumber,
+          episodeNumber: selectedEpisode.episode.episodeNumber,
+        }
+      : "skip",
+  );
+  const episodeStats = useQuery(
+    api.reviews.getEpisodeStats,
+    selectedEpisode
+      ? {
+          showId,
+          seasonNumber: selectedEpisode.seasonNumber,
+          episodeNumber: selectedEpisode.episode.episodeNumber,
+        }
+      : "skip",
+  );
 
   useEffect(() => {
     const fetchExtendedDetails = async () => {
@@ -144,6 +225,102 @@ export default function ShowScreen() {
     fetchExtendedDetails();
   }, [show?.externalId, getExtendedDetails]);
 
+  useEffect(() => {
+    if (!isAuthenticated || !watchState || !episodeProgress || !extendedDetails) {
+      return;
+    }
+
+    if (extendedDetails.status !== "Ended") {
+      return;
+    }
+
+    const totalEpisodes =
+      typeof extendedDetails.numberOfEpisodes === "number"
+        ? extendedDetails.numberOfEpisodes
+        : 0;
+    if (totalEpisodes <= 0) {
+      return;
+    }
+
+    const watchedCount = episodeProgress.length;
+    if (watchState.status === "watching" && watchedCount >= totalEpisodes) {
+      void setStatus({ showId, status: "completed" });
+    }
+  }, [
+    episodeProgress,
+    extendedDetails,
+    isAuthenticated,
+    setStatus,
+    showId,
+    watchState,
+  ]);
+
+  const isEpisodeAvailable = useCallback(
+    (airDate?: string | null) => {
+      if (extendedDetails?.status === "Ended") {
+        return true;
+      }
+
+      const timestamp = new Date(airDate ?? "").getTime();
+      return Number.isFinite(timestamp) && timestamp <= Date.now();
+    },
+    [extendedDetails?.status],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSimilarShows = async () => {
+      if (!showId) {
+        return;
+      }
+      setLoadingSimilarShows(true);
+      try {
+        const items = await getSimilarShows({ showId, limit: 10 });
+        if (!cancelled) {
+          setSimilarShows(items);
+        }
+      } catch {
+        if (!cancelled) {
+          setSimilarShows([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingSimilarShows(false);
+        }
+      }
+    };
+
+    fetchSimilarShows();
+    return () => {
+      cancelled = true;
+    };
+  }, [getSimilarShows, showId]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !showId) {
+      setTasteSocialProof(null);
+      return;
+    }
+
+    let cancelled = false;
+    getShowTasteSocialProof({ showId })
+      .then((result) => {
+        if (!cancelled) {
+          setTasteSocialProof(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTasteSocialProof(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getShowTasteSocialProof, isAuthenticated, showId]);
+
   const seasonOptions = useMemo(
     () =>
       (extendedDetails?.seasons ?? [])
@@ -153,9 +330,162 @@ export default function ShowScreen() {
   );
 
   useEffect(() => {
+    seasonDetailsByNumberRef.current = seasonDetailsByNumber;
+  }, [seasonDetailsByNumber]);
+
+  useEffect(() => {
+    seasonLoadStateByNumberRef.current = seasonLoadStateByNumber;
+  }, [seasonLoadStateByNumber]);
+
+  useEffect(() => {
+    seasonLoadErrorByNumberRef.current = seasonLoadErrorByNumber;
+  }, [seasonLoadErrorByNumber]);
+
+  useEffect(() => {
+    activeShowExternalIdRef.current = show?.externalId ?? null;
+  }, [show?.externalId]);
+
+  const setSeasonRequestState = useCallback(
+    (seasonNumber: number, nextState: SeasonLoadState, errorMessage?: string) => {
+      setSeasonLoadStateByNumber((current) => {
+        const next = { ...current, [seasonNumber]: nextState };
+        seasonLoadStateByNumberRef.current = next;
+        return next;
+      });
+      setSeasonLoadErrorByNumber((current) => {
+        const next = { ...current };
+        if (nextState === "error" && errorMessage) {
+          next[seasonNumber] = errorMessage;
+        } else {
+          delete next[seasonNumber];
+        }
+        seasonLoadErrorByNumberRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const cacheSeasonDetails = useCallback((seasonNumber: number, details: any) => {
+    setSeasonDetailsByNumber((current) => {
+      const next = { ...current, [seasonNumber]: details };
+      seasonDetailsByNumberRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const loadSeasonDetails = useCallback(
+    async (seasonNumber: number, options?: { forceRetry?: boolean }) => {
+      const existingDetails = seasonDetailsByNumberRef.current[seasonNumber];
+      if (existingDetails !== undefined) {
+        return existingDetails;
+      }
+
+      const inFlight = seasonLoadPromisesRef.current.get(seasonNumber);
+      if (inFlight) {
+        return await inFlight;
+      }
+
+      const currentState = seasonLoadStateByNumberRef.current[seasonNumber] ?? "idle";
+      if (currentState === "error" && !options?.forceRetry) {
+        throw new Error(
+          seasonLoadErrorByNumberRef.current[seasonNumber] ??
+            "Couldn't load episodes for this season.",
+        );
+      }
+
+      const runLoad = async () => {
+        const externalId = show?.externalId;
+        if (!externalId) {
+          throw new Error("Missing show details");
+        }
+
+        setSeasonRequestState(seasonNumber, "loading");
+        try {
+          const details = await getSeasonDetails({
+            externalId,
+            seasonNumber,
+          });
+          if (activeShowExternalIdRef.current !== externalId) {
+            return details;
+          }
+          cacheSeasonDetails(seasonNumber, details);
+          setSeasonRequestState(seasonNumber, "loaded");
+          return details;
+        } catch (error) {
+          if (activeShowExternalIdRef.current !== externalId) {
+            throw error;
+          }
+          const errorMessage = getSeasonLoadErrorMessage(error);
+          setSeasonRequestState(seasonNumber, "error", errorMessage);
+          throw new Error(errorMessage, { cause: error });
+        } finally {
+          seasonLoadPromisesRef.current.delete(seasonNumber);
+        }
+      };
+
+      const queuedLoad = seasonLoadQueueRef.current.then(runLoad, runLoad);
+      seasonLoadPromisesRef.current.set(seasonNumber, queuedLoad);
+      seasonLoadQueueRef.current = queuedLoad.then(
+        () => undefined,
+        () => undefined,
+      );
+      return await queuedLoad;
+    },
+    [cacheSeasonDetails, getSeasonDetails, setSeasonRequestState, show?.externalId],
+  );
+
+  const ensureSeasonDetailsLoaded = useCallback(
+    async (seasonNumbers: number[], options?: { forceRetry?: boolean }) => {
+      const loadedSeasonDetails = new Map<number, any>();
+      const uniqueSeasonNumbers = Array.from(new Set(seasonNumbers));
+
+      for (const seasonNumber of uniqueSeasonNumbers) {
+        const existingDetails = seasonDetailsByNumberRef.current[seasonNumber];
+        if (existingDetails !== undefined) {
+          loadedSeasonDetails.set(seasonNumber, existingDetails);
+          continue;
+        }
+
+        const requestState = seasonLoadStateByNumberRef.current[seasonNumber] ?? "idle";
+        if (requestState === "error" && !options?.forceRetry) {
+          continue;
+        }
+
+        try {
+          const details = await loadSeasonDetails(seasonNumber, options);
+          loadedSeasonDetails.set(seasonNumber, details);
+        } catch (error) {
+          console.error("Failed to fetch season details:", error);
+        }
+      }
+
+      return loadedSeasonDetails;
+    },
+    [loadSeasonDetails],
+  );
+
+  const seasonsWithEpisodes = useMemo(
+    () =>
+      seasonOptions.filter((season: any) => {
+        const details = seasonDetailsByNumber[season.season_number];
+        const episodes = details?.episodes ?? [];
+        const episodeCount = season.episode_count ?? 0;
+        return details ? episodes.length > 0 : episodeCount > 0;
+      }),
+    [seasonDetailsByNumber, seasonOptions],
+  );
+
+  useEffect(() => {
     setSeasonDetailsByNumber({});
-    setLoadingSeasonNumbers(new Set());
-    setEpisodeGuideExpanded(null);
+    seasonDetailsByNumberRef.current = {};
+    setSeasonLoadStateByNumber({});
+    seasonLoadStateByNumberRef.current = {};
+    setSeasonLoadErrorByNumber({});
+    seasonLoadErrorByNumberRef.current = {};
+    seasonLoadPromisesRef.current = new Map();
+    seasonLoadQueueRef.current = Promise.resolve();
+    setVisibleSeasonCount(INITIAL_VISIBLE_SEASONS);
     setSelectedEpisode(null);
     setEpisodeSheetVisible(false);
   }, [show?.externalId]);
@@ -170,65 +500,95 @@ export default function ShowScreen() {
 
   const visibleSeasonNumbers = useMemo<number[]>(
     () =>
-      (episodeGuideExpanded ?? false
-        ? seasonOptions
-        : seasonOptions.slice(0, INITIAL_VISIBLE_SEASONS)
-      ).map((season: any) => season.season_number),
-    [episodeGuideExpanded, seasonOptions],
+      seasonsWithEpisodes
+        .slice(0, visibleSeasonCount)
+        .map((season: any) => season.season_number),
+    [seasonsWithEpisodes, visibleSeasonCount],
   );
 
   useEffect(() => {
     if (!show?.externalId || visibleSeasonNumbers.length === 0) return;
 
     let cancelled = false;
-    const missingSeasonNumbers = visibleSeasonNumbers.filter(
-      (seasonNumber: number) =>
-        seasonDetailsByNumber[seasonNumber] === undefined &&
-        !loadingSeasonNumbers.has(seasonNumber),
-    );
-
-    if (missingSeasonNumbers.length === 0) return;
 
     const loadVisibleSeasons = async () => {
-      await Promise.all(
-        missingSeasonNumbers.map(async (seasonNumber: number) => {
-          setLoadingSeasonNumbers((prev) => new Set(prev).add(seasonNumber));
-          try {
-            const details = await getSeasonDetails({
-              externalId: show.externalId,
-              seasonNumber,
-            });
-            if (cancelled) return;
-            setSeasonDetailsByNumber((current) => ({
-              ...current,
-              [seasonNumber]: details,
-            }));
-          } catch (error) {
-            if (!cancelled) {
-              console.error("Failed to fetch season details:", error);
-            }
-          } finally {
-            if (!cancelled) {
-              setLoadingSeasonNumbers((prev) => {
-                const next = new Set(prev);
-                next.delete(seasonNumber);
-                return next;
-              });
-            }
-          }
-        }),
-      );
+      const missingSeasonNumbers = visibleSeasonNumbers.filter((seasonNumber: number) => {
+        const requestState = seasonLoadStateByNumberRef.current[seasonNumber] ?? "idle";
+        return (
+          seasonDetailsByNumberRef.current[seasonNumber] === undefined &&
+          requestState !== "loading" &&
+          requestState !== "error"
+        );
+      });
+
+      if (missingSeasonNumbers.length === 0) {
+        return;
+      }
+
+      await ensureSeasonDetailsLoaded(missingSeasonNumbers);
+      if (cancelled) {
+        return;
+      }
     };
 
-    loadVisibleSeasons();
+    void loadVisibleSeasons();
 
     return () => {
       cancelled = true;
     };
   }, [
-    getSeasonDetails,
+    ensureSeasonDetailsLoaded,
     show?.externalId,
     visibleSeasonNumbers,
+  ]);
+
+  const markCurrentlyAvailableEpisodesWatched = useCallback(async () => {
+    if (!show?.externalId) {
+      return;
+    }
+
+    const seasonsToSync = seasonOptions.map((season: any) => season.season_number);
+    await ensureSeasonDetailsLoaded(seasonsToSync, { forceRetry: true });
+
+    const missingSeasonNumbers = seasonsToSync.filter(
+      (seasonNumber: number) =>
+        seasonDetailsByNumberRef.current[seasonNumber] === undefined,
+    );
+
+    if (missingSeasonNumbers.length > 0) {
+      throw new Error("Couldn't load every season. Try again in a moment.");
+    }
+
+    for (const seasonNumber of seasonsToSync) {
+      const details = seasonDetailsByNumberRef.current[seasonNumber];
+      const airedEpisodes = (details?.episodes ?? []).filter((episode: any) => {
+        if (typeof episode?.episodeNumber !== "number") {
+          return false;
+        }
+        return isEpisodeAvailable(episode.airDate);
+      });
+
+      if (airedEpisodes.length === 0) {
+        continue;
+      }
+
+      await markSeasonWatched({
+        showId,
+        seasonNumber,
+        createLog: false,
+        episodes: airedEpisodes.map((episode: any) => ({
+          episodeNumber: episode.episodeNumber,
+          title: episode.name,
+        })),
+      });
+    }
+  }, [
+    ensureSeasonDetailsLoaded,
+    isEpisodeAvailable,
+    markSeasonWatched,
+    seasonOptions,
+    show?.externalId,
+    showId,
   ]);
 
   const handleStatus = useCallback(
@@ -237,9 +597,16 @@ export default function ShowScreen() {
         Alert.alert("Sign in required", "Set your watch status after signing in.");
         return;
       }
-      await setStatus({ showId, status: value });
+      try {
+        if (value === "completed") {
+          await markCurrentlyAvailableEpisodesWatched();
+        }
+        await setStatus({ showId, status: value });
+      } catch (error) {
+        Alert.alert("Couldn't update status", String(error));
+      }
     },
-    [isAuthenticated, setStatus, showId]
+    [isAuthenticated, markCurrentlyAvailableEpisodesWatched, setStatus, showId]
   );
 
   const handleRemoveStatus = useCallback(async () => {
@@ -360,6 +727,7 @@ export default function ShowScreen() {
       reviewCount: reviews.length,
     };
   }, [reviews]);
+  const tasteAudienceSummary = tasteSocialProof?.similarAudience ?? null;
 
   const handleProviderPress = useCallback(async (provider: { deepLinkUrl?: string | null }) => {
     if (!provider.deepLinkUrl) {
@@ -368,7 +736,7 @@ export default function ShowScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await Linking.openURL(provider.deepLinkUrl);
-    } catch (error) {
+    } catch {
       Alert.alert("Couldn't open provider", "Try again in a moment.");
     }
   }, []);
@@ -829,185 +1197,58 @@ export default function ShowScreen() {
             </View>
           )}
 
-        {/* ─── Episode Guide ─── */}
-        {!loadingDetails && seasonOptions.length > 0 && (() => {
-          const seasonsWithEpisodes = seasonOptions.filter((s: any) => {
-            const details = seasonDetailsByNumber[s.season_number];
-            const episodes = details?.episodes ?? [];
-            const epCount = s.episode_count ?? 0;
-            return details ? episodes.length > 0 : epCount > 0;
-          });
-
-          if (seasonsWithEpisodes.length === 0) return null;
-
-          const hasMore = seasonsWithEpisodes.length > INITIAL_VISIBLE_SEASONS;
-          const isExpanded = episodeGuideExpanded ?? false;
-          const visibleSeasons = isExpanded
-            ? seasonsWithEpisodes
-            : seasonsWithEpisodes.slice(0, INITIAL_VISIBLE_SEASONS);
-
-          return (
-          <View className="mt-10">
-            <View className="px-6">
-              <Text
-                className="text-xs font-bold uppercase text-text-tertiary"
-                style={{ letterSpacing: 1.5 }}
-              >
-                Episode Guide
-              </Text>
-              <Text
-                className="mt-2 text-sm text-text-secondary"
-                style={{ lineHeight: 21 }}
-              >
-                Browse episodes by season.
-              </Text>
-            </View>
-
-            <View className="mt-4 gap-10">
-            {visibleSeasons.map((season: any) => {
-              const details = seasonDetailsByNumber[season.season_number];
-              const isLoading = loadingSeasonNumbers.has(season.season_number);
-              const episodes = details?.episodes ?? [];
-
-              return (
-                <View key={season.id}>
-                  <View className="flex-row items-center gap-3 px-6 mb-4">
-                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                      {season.name}
-                    </Text>
-                    <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-                      <Text className="text-xs font-medium text-text-tertiary">
-                        {episodes.length > 0 ? episodes.length : season.episode_count}{" "}
-                        eps
-                      </Text>
-                    </View>
-                    {season.air_date ? (
-                      <Text className="text-xs text-text-tertiary">
-                        {new Date(season.air_date).getFullYear()}
-                      </Text>
-                    ) : null}
-                    <View className="flex-1 h-px bg-dark-border" />
-                  </View>
-
-                  {isLoading ? (
-                    <View className="items-center justify-center py-12">
-                      <ActivityIndicator color="#38bdf8" size="small" />
-                      <Text className="mt-2 text-sm text-text-tertiary">
-                        Loading episodes...
-                      </Text>
-                    </View>
-                  ) : episodes.length > 0 ? (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{
-                        paddingHorizontal: 24,
-                        gap: 14,
-                        paddingRight: 24,
-                      }}
-                    >
-                      {episodes.map((episode: any) => {
-                        const rating =
-                          episode.voteCount > 0 && episode.voteAverage > 0
-                            ? episode.voteAverage.toFixed(1)
-                            : "N/A";
-                        return (
-                          <Pressable
-                            key={episode.id}
-                            className="active:opacity-80"
-                            style={{ width: 144 }}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              setSelectedEpisode({
-                                episode,
-                                seasonName: season.name,
-                              });
-                              setEpisodeSheetVisible(true);
-                            }}
-                          >
-                            <View
-                              className="overflow-hidden rounded-xl border border-dark-border bg-dark-card"
-                              style={{ width: 144, height: 180 }}
-                            >
-                              {episode.stillPath ? (
-                                <Image
-                                  source={{ uri: episode.stillPath }}
-                                  style={{
-                                    width: 144,
-                                    height: 81,
-                                    borderRadius: 0,
-                                  }}
-                                  contentFit="cover"
-                                  transition={200}
-                                />
-                              ) : (
-                                <View
-                                  className="items-center justify-center bg-dark-elevated"
-                                  style={{ width: 144, height: 81 }}
-                                >
-                                  <Ionicons name="tv-outline" size={24} color="#5A6070" />
-                                </View>
-                              )}
-                              <View className="flex-1 w-full p-2">
-                                <Text
-                                  className="text-sm font-semibold text-text-primary"
-                                  numberOfLines={2}
-                                >
-                                  {episode.name}
-                                </Text>
-                                <View className="mt-1 flex-row items-center gap-1">
-                                  <Ionicons name="star" size={11} color="#FBBF24" />
-                                  <Text className="text-xs font-medium text-text-secondary">
-                                    {rating}
-                                  </Text>
-                                </View>
-                                <Text
-                                  className="mt-1 text-xs text-text-tertiary"
-                                  numberOfLines={2}
-                                >
-                                  {episode.overview || "No synopsis available."}
-                                </Text>
-                              </View>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                  ) : (
-                    <View className="px-6">
-                      <Text className="text-sm text-text-tertiary">
-                        No episodes found for this season.
-                      </Text>
-                    </View>
-                  )}
-                </View>
+        {!loadingDetails && seasonsWithEpisodes.length > 0 && (
+          <EpisodeGuide
+            seasons={seasonsWithEpisodes}
+            visibleSeasonCount={visibleSeasonCount}
+            seasonDetailsByNumber={seasonDetailsByNumber}
+            seasonLoadStateByNumber={seasonLoadStateByNumber}
+            seasonLoadErrorByNumber={seasonLoadErrorByNumber}
+            isAuthenticated={isAuthenticated}
+            watchedEpisodeSet={watchedEpisodeSet}
+            myEpisodeRatingMap={myEpisodeRatingMap}
+            isEpisodeAvailable={isEpisodeAvailable}
+            onLoadMoreSeasons={() => {
+              setVisibleSeasonCount((current) =>
+                current >= seasonsWithEpisodes.length
+                  ? getInitialVisibleSeasonCount(seasonsWithEpisodes.length)
+                  : getNextVisibleSeasonCount(current, seasonsWithEpisodes.length),
               );
-            })}
-
-            {hasMore && (
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setEpisodeGuideExpanded(!isExpanded);
-                }}
-                className="mx-6 flex-row items-center justify-center gap-2 rounded-xl border border-dark-border bg-dark-elevated py-3 active:opacity-80"
-              >
-                  <Text className="text-sm font-semibold text-text-secondary">
-                  {isExpanded
-                    ? "Show less"
-                    : `Show ${seasonsWithEpisodes.length - INITIAL_VISIBLE_SEASONS} more seasons`}
-                </Text>
-                <Ionicons
-                  name={isExpanded ? "chevron-up" : "chevron-down"}
-                  size={18}
-                  color="#5A6070"
-                />
-              </Pressable>
-            )}
-            </View>
-          </View>
-          );
-        })()}
+            }}
+            onRetrySeason={(seasonNumber) => {
+              void ensureSeasonDetailsLoaded([seasonNumber], { forceRetry: true });
+            }}
+            onMarkSeasonWatched={(seasonNumber, episodes) => {
+              void markSeasonWatched({
+                showId,
+                seasonNumber,
+                episodes,
+              });
+            }}
+            onUnmarkSeasonWatched={(seasonNumber) => {
+              void unmarkSeasonWatched({
+                showId,
+                seasonNumber,
+              });
+            }}
+            onToggleEpisode={(seasonNumber, episode) => {
+              void toggleEpisode({
+                showId,
+                seasonNumber,
+                episodeNumber: episode.episodeNumber,
+                episodeTitle: episode.name,
+              });
+            }}
+            onSelectEpisode={(seasonName, seasonNumber, episode) => {
+              setSelectedEpisode({
+                episode,
+                seasonName,
+                seasonNumber,
+              });
+              setEpisodeSheetVisible(true);
+            }}
+          />
+        )}
 
         {/* ─── Trailers & Videos ─── */}
         {!loadingDetails &&
@@ -1042,6 +1283,98 @@ export default function ShowScreen() {
 
         {/* ─── Divider ─── */}
         <View className="mx-6 mt-10 h-px bg-dark-border" />
+
+        {/* ─── Taste Signals ─── */}
+        {(tasteSocialProof?.friendsWhoLiked?.length > 0 || tasteAudienceSummary) ? (
+          <View className="mt-8 px-6">
+            <Text
+              className="mb-4 text-xs font-bold uppercase text-text-tertiary"
+              style={{ letterSpacing: 1.5 }}
+            >
+              Taste Signals
+            </Text>
+
+            {tasteSocialProof?.friendsWhoLiked?.length > 0 ? (
+              <View className="mb-4 rounded-2xl border border-dark-border bg-dark-card p-4">
+                <Text className="text-sm font-semibold text-text-primary">
+                  Friends who liked this
+                </Text>
+                <View className="mt-3 gap-3">
+                  {tasteSocialProof.friendsWhoLiked.map((entry: any) => (
+                    <View
+                      key={entry.reviewId}
+                      className="flex-row items-center gap-3 rounded-2xl bg-dark-bg px-3 py-3"
+                    >
+                      <Pressable
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          router.push(`/profile/${entry.user?._id}`);
+                        }}
+                        className="flex-row flex-1 items-center gap-3 active:opacity-80"
+                      >
+                        <Avatar
+                          uri={entry.avatarUrl}
+                          label={entry.user?.displayName ?? entry.user?.name ?? entry.user?.username}
+                          size={40}
+                        />
+                        <View className="flex-1">
+                          <Text className="text-sm font-semibold text-text-primary" numberOfLines={1}>
+                            {entry.user?.displayName ?? entry.user?.name ?? entry.user?.username ?? "Friend"}
+                          </Text>
+                          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={2}>
+                            {entry.reviewText ? entry.reviewText : "Left a strong review for this show."}
+                          </Text>
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          router.push(`/review/${entry.reviewId}`);
+                        }}
+                        className="rounded-full bg-amber-500/12 px-3 py-2 active:opacity-80"
+                      >
+                        <Text className="text-xs font-semibold text-amber-300">
+                          ★ {entry.rating}/5
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {tasteAudienceSummary ? (
+              <View className="rounded-2xl border border-brand-500/20 bg-brand-500/8 p-4">
+                <Text className="text-sm font-semibold text-text-primary">
+                  People like you finished this
+                </Text>
+                <Text className="mt-2 text-sm leading-6 text-text-secondary">
+                  Among {tasteAudienceSummary.sampleSize} people with taste similar to yours who
+                  tracked this show, {tasteAudienceSummary.finishedCount} finished it and{" "}
+                  {tasteAudienceSummary.droppedCount} dropped it.
+                </Text>
+                <View className="mt-3 flex-row gap-3">
+                  <View className="flex-1 rounded-2xl bg-dark-card px-3 py-3">
+                    <Text className="text-lg font-bold text-green-400">
+                      {tasteAudienceSummary.finishedPercent}%
+                    </Text>
+                    <Text className="mt-1 text-xs uppercase tracking-wide text-text-tertiary">
+                      Finished
+                    </Text>
+                  </View>
+                  <View className="flex-1 rounded-2xl bg-dark-card px-3 py-3">
+                    <Text className="text-lg font-bold text-amber-300">
+                      {tasteAudienceSummary.droppedPercent}%
+                    </Text>
+                    <Text className="mt-1 text-xs uppercase tracking-wide text-text-tertiary">
+                      Dropped
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* ─── Community Reviews ─── */}
         <View className="mt-8 px-6">
@@ -1108,27 +1441,38 @@ export default function ShowScreen() {
         </View>
 
         {/* ─── Similar Shows ─── */}
-        {!loadingDetails &&
-          extendedDetails?.similar &&
-          extendedDetails.similar.length > 0 && (
+        {!loadingSimilarShows &&
+          ((similarShows.length > 0) ||
+            (!similarShows.length && !loadingDetails && extendedDetails?.similar?.length > 0)) && (
             <View className="mt-10">
               <Text
                 className="mb-4 px-6 text-xs font-bold uppercase text-text-tertiary"
                 style={{ letterSpacing: 1.5 }}
               >
-                Similar Shows
+                More Like This
               </Text>
               <FlashList
-                data={extendedDetails.similar}
+                data={
+                  similarShows.length > 0
+                    ? similarShows
+                    : extendedDetails?.similar ?? []
+                }
                 renderItem={({ item }: { item: any }) => (
                   <SimilarShowCard
-                    externalId={String(item.id)}
+                    showId={item.showId}
+                    externalId={item.showId ? undefined : String(item.id)}
                     title={item.title}
+                    posterUrl={item.posterUrl}
                     posterPath={item.posterPath}
-                    rating={item.voteAverage}
+                    rating={typeof item.score === "number" ? undefined : item.voteAverage}
+                    subtitle={
+                      item.sharedGenres?.length
+                        ? item.sharedGenres.join(" • ")
+                        : undefined
+                    }
                   />
                 )}
-                keyExtractor={(item: any) => String(item.id)}
+                keyExtractor={(item: any) => String(item.showId ?? item.id)}
                 estimatedItemSize={160}
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -1331,16 +1675,34 @@ export default function ShowScreen() {
         animationType="slide"
         presentationStyle="pageSheet"
         statusBarTranslucent
-        onRequestClose={() => setEpisodeSheetVisible(false)}
-        onDismiss={() => setSelectedEpisode(null)}
+        onRequestClose={() => {
+          setEpisodeSheetVisible(false);
+          setEpisodeReviewExpanded(false);
+          setEpisodeReviewText("");
+        }}
+        onDismiss={() => {
+          setSelectedEpisode(null);
+          setEpisodeReviewExpanded(false);
+          setEpisodeReviewText("");
+        }}
       >
-        {selectedEpisode && (
+        {selectedEpisode && (() => {
+          const sheetEpKey = `S${selectedEpisode.seasonNumber}E${selectedEpisode.episode.episodeNumber}`;
+          const sheetIsWatched = watchedEpisodeSet.has(sheetEpKey);
+          const sheetIsAvailable = isEpisodeAvailable(selectedEpisode.episode.airDate);
+          const myEpData = myEpisodeRatingMap.get(sheetEpKey);
+          const myEpRating = myEpData?.rating ?? 0;
+          const myEpReviewText = myEpData?.reviewText;
+
+          return (
           <View className="flex-1 bg-dark-bg" style={{ backgroundColor: "#0D0F14" }}>
             <View className="flex-row items-center justify-between border-b border-dark-border px-6 py-4">
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setEpisodeSheetVisible(false);
+                  setEpisodeReviewExpanded(false);
+                  setEpisodeReviewText("");
                 }}
               >
                 <Text className="text-base text-text-tertiary">Close</Text>
@@ -1355,6 +1717,7 @@ export default function ShowScreen() {
               className="flex-1"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+              keyboardShouldPersistTaps="handled"
             >
               {selectedEpisode.episode.stillPath ? (
                 <Image
@@ -1400,6 +1763,250 @@ export default function ShowScreen() {
                     <Text className="text-sm text-text-tertiary">
                       ({selectedEpisode.episode.voteCount.toLocaleString()} ratings)
                     </Text>
+                  </View>
+                )}
+
+                {/* Mark as Watched */}
+                {isAuthenticated && (
+                  <Pressable
+                    className="mt-4 flex-row items-center gap-3 rounded-xl border px-4 py-3 active:opacity-80"
+                    disabled={!sheetIsAvailable}
+                    style={{
+                      borderColor: sheetIsWatched
+                        ? "#0ea5e9"
+                        : !sheetIsAvailable
+                          ? "rgba(42, 46, 56, 0.45)"
+                          : "rgba(42, 46, 56, 0.8)",
+                      backgroundColor: sheetIsWatched
+                        ? "rgba(14, 165, 233, 0.1)"
+                        : "transparent",
+                      opacity: sheetIsAvailable ? 1 : 0.6,
+                    }}
+                    onPress={() => {
+                      if (!sheetIsAvailable) {
+                        return;
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      toggleEpisode({
+                        showId,
+                        seasonNumber: selectedEpisode.seasonNumber,
+                        episodeNumber: selectedEpisode.episode.episodeNumber,
+                        episodeTitle: selectedEpisode.episode.name,
+                      });
+                    }}
+                  >
+                    <Ionicons
+                      name={sheetIsWatched ? "checkmark-circle" : "checkmark-circle-outline"}
+                      size={22}
+                      color={
+                        sheetIsWatched
+                          ? "#0ea5e9"
+                          : sheetIsAvailable
+                            ? "#5A6070"
+                            : "#404654"
+                      }
+                    />
+                    <Text
+                      className="text-sm font-semibold"
+                      style={{
+                        color: sheetIsWatched
+                          ? "#0ea5e9"
+                          : sheetIsAvailable
+                            ? "#A0A8B8"
+                            : "#6B7280",
+                      }}
+                    >
+                      {sheetIsWatched
+                        ? "Watched"
+                        : sheetIsAvailable
+                          ? "Mark as Watched"
+                          : selectedEpisode.episode.airDate
+                            ? `Airs ${formatDate(new Date(selectedEpisode.episode.airDate).getTime())}`
+                            : "Not available yet"}
+                    </Text>
+                  </Pressable>
+                )}
+
+                {/* ─── Your Rating ─── */}
+                {isAuthenticated && sheetIsAvailable && (
+                  <View className="mt-6">
+                    <View className="rounded-2xl border border-dark-border bg-dark-card p-4">
+                      <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
+                        Your Rating
+                      </Text>
+                      <View className="flex-row items-center justify-between">
+                        <StarRating
+                          value={myEpRating}
+                          onChange={(val) => {
+                            if (val === 0 && myEpRating > 0) {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              removeEpisodeRating({
+                                showId,
+                                seasonNumber: selectedEpisode.seasonNumber,
+                                episodeNumber: selectedEpisode.episode.episodeNumber,
+                              });
+                            } else if (val > 0) {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                              rateEpisode({
+                                showId,
+                                seasonNumber: selectedEpisode.seasonNumber,
+                                episodeNumber: selectedEpisode.episode.episodeNumber,
+                                episodeTitle: selectedEpisode.episode.name,
+                                rating: val,
+                              });
+                            }
+                          }}
+                          size={32}
+                        />
+                        {myEpRating > 0 && (
+                          <Text className="text-sm text-text-tertiary">
+                            {myEpRating} / 5
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* Review text */}
+                      {myEpRating > 0 && (
+                        <View className="mt-3">
+                          {myEpReviewText && !episodeReviewExpanded ? (
+                            <Pressable
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setEpisodeReviewText(myEpReviewText);
+                                setEpisodeReviewExpanded(true);
+                              }}
+                              className="rounded-xl border border-dark-border bg-dark-bg p-3"
+                            >
+                              <View className="flex-row items-center gap-1.5 mb-1.5">
+                                <Ionicons name="chatbubble" size={12} color="#9BA1B0" />
+                                <Text className="text-xs font-medium text-text-tertiary">
+                                  Your review
+                                </Text>
+                              </View>
+                              <Text className="text-sm text-text-secondary" numberOfLines={4}>
+                                {myEpReviewText}
+                              </Text>
+                            </Pressable>
+                          ) : !episodeReviewExpanded ? (
+                            <Pressable
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setEpisodeReviewExpanded(true);
+                              }}
+                              className="flex-row items-center gap-1.5"
+                            >
+                              <Ionicons name="chatbubble-outline" size={14} color="#9BA1B0" />
+                              <Text className="text-sm text-text-secondary">
+                                Write a review...
+                              </Text>
+                            </Pressable>
+                          ) : (
+                            <View>
+                              <TextInput
+                                value={episodeReviewText}
+                                onChangeText={setEpisodeReviewText}
+                                placeholder="What did you think of this episode?"
+                                placeholderTextColor="#5A6070"
+                                multiline
+                                autoFocus
+                                className="min-h-[80px] rounded-xl border border-dark-border bg-dark-bg px-3 py-2.5 text-sm text-text-primary"
+                                style={{ textAlignVertical: "top" }}
+                                maxLength={5000}
+                              />
+                              <View className="mt-2 flex-row items-center justify-end gap-3">
+                                <Pressable
+                                  onPress={() => {
+                                    setEpisodeReviewExpanded(false);
+                                    setEpisodeReviewText("");
+                                  }}
+                                >
+                                  <Text className="text-sm text-text-tertiary">Cancel</Text>
+                                </Pressable>
+                                <Pressable
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    rateEpisode({
+                                      showId,
+                                      seasonNumber: selectedEpisode.seasonNumber,
+                                      episodeNumber: selectedEpisode.episode.episodeNumber,
+                                      episodeTitle: selectedEpisode.episode.name,
+                                      rating: myEpRating,
+                                      reviewText: episodeReviewText || undefined,
+                                    });
+                                    setEpisodeReviewExpanded(false);
+                                    setEpisodeReviewText("");
+                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                  }}
+                                  disabled={!episodeReviewText.trim()}
+                                >
+                                  <Text
+                                    className={`text-sm font-semibold ${
+                                      episodeReviewText.trim()
+                                        ? "text-brand-500"
+                                        : "text-text-tertiary"
+                                    }`}
+                                  >
+                                    Save
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+
+                {/* ─── Community Episode Reviews ─── */}
+                {(episodeStats || (episodeCommunityReviews && episodeCommunityReviews.length > 0)) && (
+                  <View className="mt-6">
+                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
+                      Community Reviews
+                    </Text>
+                    {episodeStats && (
+                      <View className="mt-3 flex-row items-center rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
+                        <View className="mr-3 rounded-full bg-amber-500/12 px-2.5 py-1">
+                          <Text className="text-sm font-semibold text-amber-300">
+                            ★ {episodeStats.averageRating.toFixed(1)}
+                          </Text>
+                        </View>
+                        <Text className="text-xs text-text-tertiary">
+                          from {episodeStats.reviewCount} rating{episodeStats.reviewCount === 1 ? "" : "s"}
+                        </Text>
+                      </View>
+                    )}
+                    {episodeCommunityReviews && episodeCommunityReviews.length > 0 && (
+                      <View className="mt-3 gap-3">
+                        {episodeCommunityReviews.map((item: any) => (
+                          <View
+                            key={item.review._id}
+                            className="rounded-2xl border border-dark-border bg-dark-card p-3"
+                          >
+                            <View className="flex-row items-center gap-2.5">
+                              <Avatar
+                                uri={item.authorAvatarUrl}
+                                label={item.author?.displayName ?? item.author?.username ?? "?"}
+                                size={28}
+                              />
+                              <View className="flex-1">
+                                <Text className="text-sm font-semibold text-text-primary">
+                                  {item.author?.displayName ?? item.author?.username ?? "User"}
+                                </Text>
+                              </View>
+                              <View className="rounded-full bg-amber-500/12 px-2 py-0.5">
+                                <Text className="text-xs font-semibold text-amber-300">
+                                  ★ {item.review.rating}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text className="mt-2 text-sm text-text-secondary" numberOfLines={4}>
+                              {item.review.reviewText}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 )}
 
@@ -1457,7 +2064,8 @@ export default function ShowScreen() {
               </View>
             </ScrollView>
           </View>
-        )}
+          );
+        })()}
       </Modal>
     </View>
   );

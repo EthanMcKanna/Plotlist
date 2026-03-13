@@ -24,6 +24,7 @@ Fill in:
 
 - `EXPO_PUBLIC_CONVEX_URL` – your Convex deployment URL (from `npx convex dev`)
 - `TMDB_API_KEY` – API key for The Movie Database (TMDB)
+- `GEMINI_API_KEY` – Google Gemini API key used for embeddings and semantic recommendations
 - `TWILIO_ACCOUNT_SID` – Twilio account SID
 - `TWILIO_AUTH_TOKEN` – Twilio auth token
 - `TWILIO_VERIFY_SERVICE_SID` – Twilio Verify service used to send one-time sign-in codes

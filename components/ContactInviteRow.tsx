@@ -13,7 +13,7 @@ function formatInviteState(invitedAt?: number | null) {
   if (!invitedAt) {
     return "Invite by SMS";
   }
-  return "Invite sent";
+  return "Invite again";
 }
 
 export function ContactInviteRow({
@@ -22,8 +22,6 @@ export function ContactInviteRow({
   onInvite,
   disabled = false,
 }: ContactInviteRowProps) {
-  const buttonDisabled = disabled || Boolean(invitedAt);
-
   return (
     <View className="flex-row items-center justify-between rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
       <View className="flex-1 flex-row items-center gap-3 pr-3">
@@ -39,14 +37,14 @@ export function ContactInviteRow({
       </View>
       <Pressable
         onPress={onInvite}
-        disabled={buttonDisabled}
+        disabled={disabled}
         className={`rounded-full px-4 py-2 ${
-          buttonDisabled ? "border border-dark-border bg-dark-card" : "bg-brand-500"
+          disabled ? "border border-dark-border bg-dark-card" : "bg-brand-500"
         }`}
       >
         <Text
           className={`text-xs font-semibold ${
-            buttonDisabled ? "text-text-secondary" : "text-white"
+            disabled ? "text-text-secondary" : "text-white"
           }`}
         >
           {formatInviteState(invitedAt)}

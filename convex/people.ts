@@ -1,3 +1,5 @@
+import { v } from "convex/values";
+import { internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
 type ViewerContext = {
@@ -109,3 +111,21 @@ export async function buildPersonPreviews(
     uniqueCandidates.map((candidate) => buildPersonPreview(ctx, context, candidate)),
   );
 }
+
+export const buildPreviewsByUserIds = internalQuery({
+  args: {
+    viewerId: v.id("users"),
+    candidateIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const candidates = await Promise.all(
+      args.candidateIds.map((candidateId) => ctx.db.get(candidateId)),
+    );
+
+    return await buildPersonPreviews(
+      ctx,
+      args.viewerId,
+      candidates.filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)),
+    );
+  },
+});

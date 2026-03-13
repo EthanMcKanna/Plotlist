@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getCurrentUserOrThrow } from "./utils";
 import { rateLimit } from "./rateLimit";
@@ -150,5 +150,19 @@ export const listFollowingDetailed = query({
     );
 
     return { ...page, page: previews };
+  },
+});
+
+export const getFolloweeIds = internalQuery({
+  args: {
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const follows = await ctx.db
+      .query("follows")
+      .withIndex("by_follower_createdAt", (q) => q.eq("followerId", args.userId))
+      .collect();
+
+    return follows.map((follow) => follow.followeeId);
   },
 });

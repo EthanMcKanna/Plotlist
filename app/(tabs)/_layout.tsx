@@ -48,6 +48,20 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="log"
+        options={{
+          title: "Log",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="journal-outline" size={iconSize} color={color} />
+          ),
+        }}
+        listeners={{
+          tabPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          },
+        }}
+      />
+      <Tabs.Screen
         name="search"
         options={{
           title: "Search",

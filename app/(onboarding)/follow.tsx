@@ -10,7 +10,9 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { UserRow } from "../../components/UserRow";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
 import { api } from "../../convex/_generated/api";
+import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { setContactsSyncDismissed } from "../../lib/preferences";
 
 export default function OnboardingFollow() {
   const router = useRouter();
@@ -42,12 +44,9 @@ export default function OnboardingFollow() {
       setIsSyncingContacts(true);
       const entries = await loadDeviceContacts();
       const result = await syncContacts({ entries });
-      Alert.alert(
-        "Contacts synced",
-        result.matchedCount > 0
-          ? `We found ${result.matchedCount} people already on Plotlist.`
-          : "No existing Plotlist profiles matched yet, but you can still search and invite people later.",
-      );
+      await setContactsSyncDismissed(false);
+      const copy = getContactSyncAlertCopy(result);
+      Alert.alert(copy.title, copy.message);
     } catch (error) {
       Alert.alert("Could not sync contacts", String(error));
     } finally {

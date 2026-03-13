@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Text, View } from "react-native";
 
 export function SectionHeader({
@@ -6,7 +7,7 @@ export function SectionHeader({
   uppercase = false,
 }: {
   title: string;
-  action?: string;
+  action?: ReactNode;
   uppercase?: boolean;
 }) {
   return (
@@ -16,9 +17,7 @@ export function SectionHeader({
       >
         {title}
       </Text>
-      {action ? (
-        <Text className="text-sm font-semibold text-text-tertiary">{action}</Text>
-      ) : null}
+      {action ? action : null}
     </View>
   );
 }

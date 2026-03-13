@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
+import { Ionicons } from "@expo/vector-icons";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 
@@ -12,6 +13,24 @@ import { SearchResultRow } from "../../components/SearchResultRow";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
 import { api } from "../../convex/_generated/api";
 
+const STARTER_THEMES = [
+  "slow-burn sci-fi",
+  "comfort comedy",
+  "dark crime",
+  "smart funny mystery",
+  "prestige drama",
+  "workplace thriller",
+  "good with parents",
+  "mind-bending",
+];
+
+type SelectedShow = {
+  showId: string;
+  title: string;
+  year?: number;
+  posterUrl?: string;
+};
+
 type ListItem =
   | { type: "section"; title: string }
   | { type: "local"; item: any }
@@ -21,19 +40,25 @@ type ListItem =
 
 export default function OnboardingShows() {
   const router = useRouter();
-  const setOnboardingStep = useMutation(api.users.setOnboardingStep);
-  const setStatus = useMutation(api.watchStates.setStatus);
-  const trending = useQuery(api.trending.shows, { windowHours: 96, limit: 10 }) ?? [];
   const searchCatalog = useAction(api.shows.searchCatalog);
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
+  const saveViewerTastePreferences = useAction(api.embeddings.saveViewerTastePreferences);
+  const setOnboardingStep = useMutation(api.users.setOnboardingStep);
+  const trending = useQuery(api.trending.shows, { windowHours: 96, limit: 10 }) ?? [];
+  const savedPreferences = useQuery(api.embeddings.getViewerTastePreferences, {}) ?? {
+    favoriteShowIds: [],
+    favoriteThemes: [],
+  };
 
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [catalogResults, setCatalogResults] = useState<any[]>([]);
   const [isSearchingCatalog, setIsSearchingCatalog] = useState(false);
-  const [addedShowIds, setAddedShowIds] = useState<string[]>([]);
-  const [addedCatalogKeys, setAddedCatalogKeys] = useState<string[]>([]);
+  const [selectedShows, setSelectedShows] = useState<SelectedShow[]>([]);
+  const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
+  const [customTheme, setCustomTheme] = useState("");
   const [pendingKeys, setPendingKeys] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   const trimmedQuery = query.trim();
   const localResults =
@@ -41,6 +66,12 @@ export default function OnboardingShows() {
       api.shows.search,
       trimmedQuery.length > 0 ? { text: trimmedQuery, limit: 10 } : "skip",
     ) ?? [];
+
+  useEffect(() => {
+    if (selectedThemes.length === 0 && savedPreferences.favoriteThemes.length > 0) {
+      setSelectedThemes(savedPreferences.favoriteThemes);
+    }
+  }, [savedPreferences.favoriteThemes, selectedThemes.length]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -78,9 +109,9 @@ export default function OnboardingShows() {
     };
   }, [debouncedQuery, searchCatalog]);
 
-  const listContentStyle = useMemo(
-    () => ({ paddingBottom: 40 }),
-    [],
+  const selectedShowIds = useMemo(
+    () => new Set(selectedShows.map((show) => show.showId)),
+    [selectedShows],
   );
 
   const isPending = useCallback(
@@ -96,51 +127,53 @@ export default function OnboardingShows() {
     setPendingKeys((prev) => prev.filter((item) => item !== key));
   }, []);
 
-  const markAddedShow = useCallback((showId: string) => {
-    setAddedShowIds((prev) => (prev.includes(showId) ? prev : [...prev, showId]));
+  const toggleTheme = useCallback((theme: string) => {
+    setSelectedThemes((prev) =>
+      prev.includes(theme)
+        ? prev.filter((item) => item !== theme)
+        : [...prev, theme].slice(0, 5),
+    );
   }, []);
 
-  const markAddedCatalog = useCallback((key: string) => {
-    setAddedCatalogKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  const addSelectedShow = useCallback((show: SelectedShow) => {
+    setSelectedShows((prev) => {
+      if (prev.some((item) => item.showId === show.showId)) {
+        return prev;
+      }
+      return [...prev, show].slice(0, 5);
+    });
   }, []);
 
-  const handleAddLocal = useCallback(
+  const removeSelectedShow = useCallback((showId: string) => {
+    setSelectedShows((prev) => prev.filter((show) => show.showId !== showId));
+  }, []);
+
+  const handleSelectLocal = useCallback(
     async (show: any) => {
-      const key = String(show._id);
-      if (isPending(key)) return;
-
-      if (addedShowIds.includes(key)) {
-        router.push(`/show/${show._id}`);
+      if (selectedShowIds.has(String(show._id))) {
+        removeSelectedShow(String(show._id));
         return;
       }
-
-      markPending(key);
-      try {
-        await setStatus({ showId: show._id, status: "watchlist" });
-        markAddedShow(key);
-      } catch (error) {
-        Alert.alert("Could not add show", String(error));
-      } finally {
-        clearPending(key);
-      }
+      addSelectedShow({
+        showId: String(show._id),
+        title: show.title,
+        year: show.year,
+        posterUrl: show.posterUrl,
+      });
     },
-    [
-      addedShowIds,
-      clearPending,
-      isPending,
-      markAddedShow,
-      markPending,
-      router,
-      setStatus,
-    ],
+    [addSelectedShow, removeSelectedShow, selectedShowIds],
   );
 
-  const handleAddCatalog = useCallback(
+  const handleSelectCatalog = useCallback(
     async (item: any) => {
       const key = `${item.externalSource}:${item.externalId}`;
       if (isPending(key)) return;
 
-      if (addedCatalogKeys.includes(key)) {
+      const existingSelected = selectedShows.find(
+        (show) => show.title === item.title && show.year === item.year,
+      );
+      if (existingSelected) {
+        removeSelectedShow(existingSelected.showId);
         return;
       }
 
@@ -154,9 +187,12 @@ export default function OnboardingShows() {
           overview: item.overview,
           posterUrl: item.posterUrl,
         });
-        await setStatus({ showId, status: "watchlist" });
-        markAddedShow(String(showId));
-        markAddedCatalog(key);
+        addSelectedShow({
+          showId: String(showId),
+          title: item.title,
+          year: item.year,
+          posterUrl: item.posterUrl,
+        });
       } catch (error) {
         Alert.alert("Could not add show", String(error));
       } finally {
@@ -164,39 +200,71 @@ export default function OnboardingShows() {
       }
     },
     [
-      addedCatalogKeys,
+      addSelectedShow,
       clearPending,
       ingestFromCatalog,
       isPending,
-      markAddedCatalog,
-      markAddedShow,
       markPending,
-      setStatus,
+      removeSelectedShow,
+      selectedShows,
     ],
   );
 
-  const handleFinish = async () => {
-    await setOnboardingStep({ step: "complete" });
-    router.replace("/home");
-  };
+  const handleAddCustomTheme = useCallback(() => {
+    const nextTheme = customTheme.trim().toLowerCase();
+    if (!nextTheme) return;
+    if (selectedThemes.includes(nextTheme)) {
+      setCustomTheme("");
+      return;
+    }
+    setSelectedThemes((prev) => [...prev, nextTheme].slice(0, 5));
+    setCustomTheme("");
+  }, [customTheme, selectedThemes]);
 
-  const handleSkip = async () => {
+  const canFinish =
+    selectedShows.length >= 3 || (selectedShows.length >= 2 && selectedThemes.length >= 1);
+
+  const handleFinish = useCallback(async () => {
+    if (!canFinish) {
+      Alert.alert(
+        "Pick a little more",
+        "Choose 3 favorites, or pick 2 favorites and at least 1 theme.",
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await saveViewerTastePreferences({
+        favoriteShowIds: selectedShows.map((show) => show.showId as any),
+        favoriteThemes: selectedThemes,
+      });
+      await setOnboardingStep({ step: "complete" });
+      router.replace("/home");
+    } catch (error) {
+      Alert.alert("Could not save your taste", String(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [canFinish, router, saveViewerTastePreferences, selectedShows, selectedThemes, setOnboardingStep]);
+
+  const handleSkip = useCallback(async () => {
     await setOnboardingStep({ step: "complete" });
     router.replace("/home");
-  };
+  }, [router, setOnboardingStep]);
 
   const data: ListItem[] = useMemo(() => {
     const items: ListItem[] = [];
 
     if (trimmedQuery.length > 0) {
-      items.push({ type: "section", title: "In your catalog" });
+      items.push({ type: "section", title: "Already on Plotlist" });
       if (localResults.length > 0) {
         localResults.forEach((item: any) => items.push({ type: "local", item }));
       } else {
         items.push({
           type: "empty",
           title: "No local matches yet",
-          description: "Try searching a different title.",
+          description: "Try another title or look in the wider catalog.",
         });
       }
 
@@ -204,19 +272,19 @@ export default function OnboardingShows() {
       if (catalogResults.length > 0) {
         catalogResults.forEach((item: any) => items.push({ type: "catalog", item }));
       } else if (isSearchingCatalog) {
-        items.push({ type: "loading", label: "Searching the catalog..." });
+        items.push({ type: "loading", label: "Searching the full catalog..." });
       } else if (debouncedQuery.length >= 3) {
         items.push({
           type: "empty",
-          title: "No external matches",
-          description: "Try another search or check your spelling.",
+          title: "No matches",
+          description: "Try another title or a broader phrase.",
         });
       }
     } else {
       items.push({
         type: "empty",
-        title: "Search for a show",
-        description: "Type a title to add it to your watchlist.",
+        title: "Search for favorites",
+        description: "Pick 3 to 5 shows so Plotlist can personalize your feed immediately.",
       });
     }
 
@@ -241,7 +309,7 @@ export default function OnboardingShows() {
             </View>
           );
         case "local": {
-          const isAdded = addedShowIds.includes(String(item.item._id));
+          const isSelected = selectedShowIds.has(String(item.item._id));
           return (
             <View className="px-6 pt-3">
               <SearchResultRow
@@ -249,15 +317,16 @@ export default function OnboardingShows() {
                 year={item.item.year}
                 overview={item.item.overview}
                 posterUrl={item.item.posterUrl}
-                actionLabel={isAdded ? "Added" : "Add to watchlist"}
-                onPress={() => handleAddLocal(item.item)}
+                actionLabel={isSelected ? "Selected favorite" : "Add as favorite"}
+                onPress={() => handleSelectLocal(item.item)}
               />
             </View>
           );
         }
         case "catalog": {
-          const key = `${item.item.externalSource}:${item.item.externalId}`;
-          const isAdded = addedCatalogKeys.includes(key);
+          const existingSelected = selectedShows.some(
+            (show) => show.title === item.item.title && show.year === item.item.year,
+          );
           return (
             <View className="px-6 pt-3">
               <SearchResultRow
@@ -265,8 +334,8 @@ export default function OnboardingShows() {
                 year={item.item.year}
                 overview={item.item.overview}
                 posterUrl={item.item.posterUrl}
-                actionLabel={isAdded ? "Added" : "Add to watchlist"}
-                onPress={() => handleAddCatalog(item.item)}
+                actionLabel={existingSelected ? "Selected favorite" : item.item.matchLabel ?? "Add as favorite"}
+                onPress={() => handleSelectCatalog(item.item)}
               />
             </View>
           );
@@ -287,7 +356,7 @@ export default function OnboardingShows() {
           return null;
       }
     },
-    [addedCatalogKeys, addedShowIds, handleAddCatalog, handleAddLocal],
+    [handleSelectCatalog, handleSelectLocal, selectedShowIds, selectedShows],
   );
 
   return (
@@ -297,38 +366,121 @@ export default function OnboardingShows() {
         renderItem={renderItem}
         keyExtractor={(item: ListItem, index: number) => `${item.type}-${index}`}
         estimatedItemSize={120}
-        contentContainerStyle={listContentStyle}
+        contentContainerStyle={{ paddingBottom: 40 }}
         ListHeaderComponent={
           <>
             <OnboardingHeader
               step={3}
               totalSteps={3}
-              title="Add your first show"
-              description="Build your watchlist and get tailored recommendations."
+              title="Teach Plotlist your taste"
+              description="Pick 3 to 5 favorite shows and a few themes so your Home feed starts strong."
               onSkip={handleSkip}
             />
+
+            <View className="px-6 pt-6">
+              <View className="rounded-3xl border border-dark-border bg-dark-card p-4">
+                <Text className="text-sm font-semibold text-text-primary">
+                  Favorite seeds
+                </Text>
+                <Text className="mt-1 text-sm text-text-tertiary">
+                  {selectedShows.length}/5 selected. Choose at least 3, or pick 2 shows and 1 theme.
+                </Text>
+                {selectedShows.length > 0 ? (
+                  <View className="mt-4 gap-2">
+                    {selectedShows.map((show) => (
+                      <View
+                        key={show.showId}
+                        className="flex-row items-center justify-between rounded-2xl border border-dark-border bg-dark-elevated px-3 py-3"
+                      >
+                        <View className="flex-1 pr-3">
+                          <Text className="text-sm font-semibold text-text-primary">
+                            {show.title}
+                          </Text>
+                          {show.year ? (
+                            <Text className="mt-1 text-xs text-text-tertiary">
+                              {show.year}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Pressable onPress={() => removeSelectedShow(show.showId)}>
+                          <Ionicons name="close-circle" size={20} color="#94a3b8" />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
             <View className="px-6 pt-6">
               <Text className="text-sm font-semibold text-text-primary">
-                Search for a show
+                Themes and vibes
+              </Text>
+              <Text className="mt-1 text-sm text-text-tertiary">
+                Choose a few shortcuts for the kinds of shows you want more of.
+              </Text>
+              <View className="mt-4 flex-row flex-wrap gap-2">
+                {STARTER_THEMES.map((theme) => {
+                  const isSelected = selectedThemes.includes(theme);
+                  return (
+                    <Pressable
+                      key={theme}
+                      onPress={() => toggleTheme(theme)}
+                      className={`rounded-full px-3 py-2 ${
+                        isSelected ? "bg-brand-500" : "border border-dark-border bg-dark-card"
+                      }`}
+                    >
+                      <Text className={`text-xs font-semibold ${isSelected ? "text-white" : "text-text-secondary"}`}>
+                        {theme}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View className="mt-4 flex-row items-center gap-3">
+                <TextInput
+                  value={customTheme}
+                  onChangeText={setCustomTheme}
+                  placeholder="Add your own theme"
+                  className="flex-1 rounded-2xl border border-dark-border bg-dark-card px-4 py-3 text-[16px] text-text-primary"
+                  placeholderTextColor="#5A6070"
+                  onSubmitEditing={handleAddCustomTheme}
+                />
+                <Pressable
+                  onPress={handleAddCustomTheme}
+                  className="rounded-2xl bg-dark-elevated px-4 py-3"
+                >
+                  <Text className="text-xs font-semibold uppercase tracking-wide text-text-primary">
+                    Add
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View className="px-6 pt-6">
+              <Text className="text-sm font-semibold text-text-primary">
+                Search for favorites
               </Text>
               <View className="mt-3">
                 <TextInput
                   value={query}
                   onChangeText={setQuery}
-                  placeholder="Search by title"
+                  placeholder="Search by title or describe what you like"
                   className="rounded-2xl border border-dark-border bg-dark-card px-4 py-3 text-[16px] text-text-primary"
                   placeholderTextColor="#5A6070"
                 />
               </View>
             </View>
+
             {trending.length > 0 ? (
               <View className="px-6 pt-6">
-                <SectionHeader title="Trending now" />
+                <SectionHeader title="Easy starters" />
                 <View className="mt-4 gap-3">
                   {trending.map((item: any) => {
                     const show = item.show;
                     if (!show) return null;
-                    const isAdded = addedShowIds.includes(String(show._id));
+                    const isSelected = selectedShowIds.has(String(show._id));
                     return (
                       <SearchResultRow
                         key={String(show._id)}
@@ -336,8 +488,8 @@ export default function OnboardingShows() {
                         year={show.year}
                         overview={show.overview}
                         posterUrl={show.posterUrl}
-                        actionLabel={isAdded ? "Added" : "Add to watchlist"}
-                        onPress={() => handleAddLocal(show)}
+                        actionLabel={isSelected ? "Selected favorite" : "Add as favorite"}
+                        onPress={() => handleSelectLocal(show)}
                       />
                     );
                   })}
@@ -348,7 +500,12 @@ export default function OnboardingShows() {
         }
         ListFooterComponent={
           <View className="px-6 pt-8">
-            <PrimaryButton label="Finish" onPress={handleFinish} />
+            <PrimaryButton
+              label="Finish taste setup"
+              onPress={handleFinish}
+              loading={isSaving}
+              disabled={!canFinish}
+            />
           </View>
         }
       />

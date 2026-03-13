@@ -6,6 +6,7 @@ export type PublicUser = {
   displayName?: string;
   name?: string;
   bio?: string;
+  createdAt?: number;
 };
 
 export function toPublicUser(
@@ -21,5 +22,6 @@ export function toPublicUser(
     displayName: user.displayName,
     name: user.name,
     bio: user.bio,
+    createdAt: user.createdAt,
   };
 }

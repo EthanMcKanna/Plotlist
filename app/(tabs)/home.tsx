@@ -13,10 +13,15 @@ import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { FeedItem, FeedItemProps } from "../../components/FeedItem";
+import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
+import { RecommendationRail } from "../../components/RecommendationRail";
+import { ReleaseCalendarPreview } from "../../components/ReleaseCalendarPreview";
+import { UpNextRail } from "../../components/UpNextRail";
 import { SecondaryButton } from "../../components/SecondaryButton";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../convex/_generated/api";
+import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
 
@@ -59,8 +64,14 @@ function getCarouselShow(item: CarouselItem) {
 
 type SectionData =
   | { type: "header" }
+  | { type: "up-next" }
+  | { type: "release-calendar" }
   | { type: "contact-sync" }
   | { type: "contacts"; items: Array<any> }
+  | { type: "for-you"; items: Array<any> }
+  | { type: "taste-rail"; title: string; description?: string; items: Array<any> }
+  | { type: "similar-taste"; items: Array<any> }
+  | { type: "taste-lists"; items: Array<any> }
   | { type: "trending"; items: Array<{ rank: number; score: number; show: any }> }
   | { type: "most-reviewed"; items: Array<{ rank: number; reviewCount: number; avgRating: number; show: any }> }
   | { type: "popular-tmdb"; items: CatalogItem[] }
@@ -102,15 +113,24 @@ export default function HomeScreen() {
   const syncContacts = useAction(api.contacts.syncSnapshot);
   const getTmdbList = useAction(api.shows.getTmdbList);
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
+  const getPersonalizedRecommendations = useAction(api.embeddings.getPersonalizedRecommendations);
+  const getHomeRecommendationRails = useAction(api.embeddings.getHomeRecommendationRails);
+  const getSimilarTasteUsers = useAction(api.embeddings.getSimilarTasteUsers);
+  const getListsFromSimilarTasteUsers = useAction(api.embeddings.getListsFromSimilarTasteUsers);
+  const getSmartLists = useAction(api.embeddings.getSmartLists);
 
   const feedIsEmpty = feed.length === 0 && feedStatus !== "LoadingFirstPage";
 
   const [popularShows, setPopularShows] = useState<CatalogItem[]>([]);
   const [onTheAirShows, setOnTheAirShows] = useState<CatalogItem[]>([]);
+  const [forYouShows, setForYouShows] = useState<any[]>([]);
+  const [tasteRails, setTasteRails] = useState<any[]>([]);
+  const [smartLists, setSmartLists] = useState<any[]>([]);
+  const [similarTasteUsers, setSimilarTasteUsers] = useState<any[]>([]);
+  const [tasteLists, setTasteLists] = useState<any[]>([]);
   const [providerSections, setProviderSections] = useState<
     Array<{ key: string; label: string; logoUrl: string; items: CatalogItem[] }>
   >([]);
-  const [isLoadingDiscover, setIsLoadingDiscover] = useState(false);
 
   const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
   const providers = useMemo(() => [
@@ -128,33 +148,129 @@ export default function HomeScreen() {
   }, [hasProfile]);
 
   useEffect(() => {
-    if (!isAuthenticated || !feedIsEmpty) return;
+    if (!hasProfile) {
+      setForYouShows([]);
+      setTasteRails([]);
+      setSmartLists([]);
+      setSimilarTasteUsers([]);
+      setTasteLists([]);
+      return;
+    }
+
+    setForYouShows([]);
+    setTasteRails([]);
+    setSmartLists([]);
+    setSimilarTasteUsers([]);
+    setTasteLists([]);
+
     let cancelled = false;
-    setIsLoadingDiscover(true);
-    Promise.all([
-      getTmdbList({ category: "popular", limit: 12 }),
-      getTmdbList({ category: "on_the_air", limit: 12 }),
-      ...providers.map((p) => getTmdbList({ category: p.category, limit: 12 })),
-    ])
-      .then((results) => {
-        if (cancelled) return;
-        setPopularShows(results[0] ?? []);
-        setOnTheAirShows(results[1] ?? []);
-        setProviderSections(
-          providers
-            .map((p, i) => ({
-              key: p.key,
-              label: p.label,
-              logoUrl: p.logoUrl,
-              items: (results[i + 2] ?? []) as CatalogItem[],
-            }))
-            .filter((s) => s.items.length > 0),
-        );
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setIsLoadingDiscover(false);
-      });
+    const runLoader = async <T,>(
+      loader: () => Promise<T>,
+      onSuccess: (value: T) => void,
+    ) => {
+      try {
+        const value = await loader();
+        if (!cancelled) {
+          onSuccess(value);
+        }
+      } catch {
+        // Keep the rest of the home screen rendering even if one rail fails.
+      }
+    };
+
+    void runLoader(
+      () => getPersonalizedRecommendations({ limit: 12 }),
+      (personalized) => setForYouShows(personalized),
+    );
+    void runLoader(
+      () => getHomeRecommendationRails({ limitPerRail: 10 }),
+      (rails) => setTasteRails(rails),
+    );
+    void runLoader(
+      () => getSimilarTasteUsers({ limit: 4 }),
+      (similarUsers) => setSimilarTasteUsers(similarUsers),
+    );
+    void runLoader(
+      () => getListsFromSimilarTasteUsers({ limit: 4 }),
+      (lists) => setTasteLists(lists),
+    );
+    void runLoader(
+      () => getSmartLists({ limitPerList: 10 }),
+      (smart) => setSmartLists(smart),
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    getHomeRecommendationRails,
+    getListsFromSimilarTasteUsers,
+    getPersonalizedRecommendations,
+    getSimilarTasteUsers,
+    getSmartLists,
+    hasProfile,
+  ]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !feedIsEmpty) return;
+
+    setPopularShows([]);
+    setOnTheAirShows([]);
+    setProviderSections([]);
+
+    let cancelled = false;
+    const providerOrder = new Map(
+      providers.map((provider, index) => [provider.key, index]),
+    );
+    const runLoader = async <T,>(
+      loader: () => Promise<T>,
+      onSuccess: (value: T) => void,
+    ) => {
+      try {
+        const value = await loader();
+        if (!cancelled) {
+          onSuccess(value);
+        }
+      } catch {
+        // Ignore individual discovery rail failures so the rest can render.
+      }
+    };
+
+    void runLoader(
+      () => getTmdbList({ category: "popular", limit: 12 }),
+      (results) => setPopularShows(results),
+    );
+    void runLoader(
+      () => getTmdbList({ category: "on_the_air", limit: 12 }),
+      (results) => setOnTheAirShows(results),
+    );
+
+    providers.forEach((provider) => {
+      void runLoader(
+        () => getTmdbList({ category: provider.category, limit: 12 }),
+        (items) => {
+          setProviderSections((current) => {
+            const next = current.filter((section) => section.key !== provider.key);
+            if (items.length > 0) {
+              next.push({
+                key: provider.key,
+                label: provider.label,
+                logoUrl: provider.logoUrl,
+                items,
+              });
+            }
+
+            next.sort(
+              (left, right) =>
+                (providerOrder.get(left.key) ?? 0) - (providerOrder.get(right.key) ?? 0),
+            );
+
+            return next;
+          });
+        },
+      );
+    });
+
     return () => { cancelled = true; };
   }, [isAuthenticated, feedIsEmpty, getTmdbList, providers]);
 
@@ -170,12 +286,10 @@ export default function HomeScreen() {
       setSyncingContacts(true);
       const entries = await loadDeviceContacts();
       const result = await syncContacts({ entries });
-      Alert.alert(
-        "Contacts synced",
-        result.matchedCount > 0
-          ? `We found ${result.matchedCount} people from your contacts on Plotlist.`
-          : "No Plotlist accounts matched yet. You can still invite or search people manually.",
-      );
+      await setContactsSyncDismissed(false);
+      setContactsSyncDismissedState(false);
+      const copy = getContactSyncAlertCopy(result);
+      Alert.alert(copy.title, copy.message);
     } catch (error) {
       Alert.alert("Could not sync contacts", String(error));
     } finally {
@@ -218,9 +332,48 @@ export default function HomeScreen() {
       result.push({ type: "contacts", items: contactMatches });
     }
 
+    if (hasProfile) {
+      result.push({ type: "up-next" });
+      result.push({ type: "release-calendar" });
+    }
+
     if (trending.length >= 5) {
       result.push({ type: "trending", items: trending });
     }
+
+    if (forYouShows.length > 0) {
+      result.push({ type: "for-you", items: forYouShows });
+    }
+
+    tasteRails.forEach((rail) => {
+      if (rail.items?.length > 0) {
+        result.push({
+          type: "taste-rail",
+          title: rail.title,
+          description: rail.description,
+          items: rail.items,
+        });
+      }
+    });
+
+    if (similarTasteUsers.length > 0) {
+      result.push({ type: "similar-taste", items: similarTasteUsers });
+    }
+
+    if (tasteLists.length > 0) {
+      result.push({ type: "taste-lists", items: tasteLists });
+    }
+
+    smartLists.forEach((rail) => {
+      if (rail.items?.length > 0) {
+        result.push({
+          type: "taste-rail",
+          title: rail.title,
+          description: rail.description,
+          items: rail.items,
+        });
+      }
+    });
 
     if (feedIsEmpty && mostReviewed.length > 0) {
       const trendingShowIds = new Set(
@@ -283,7 +436,12 @@ export default function HomeScreen() {
     onTheAirShows,
     popularShows,
     providerSections,
+    forYouShows,
+    smartLists,
     suggested,
+    similarTasteUsers,
+    tasteLists,
+    tasteRails,
     trending,
   ]);
 
@@ -339,6 +497,12 @@ export default function HomeScreen() {
             </View>
           );
 
+        case "up-next":
+          return <UpNextRail />;
+
+        case "release-calendar":
+          return <ReleaseCalendarPreview />;
+
         case "trending":
           return (
             <View className="mt-6">
@@ -351,6 +515,92 @@ export default function HomeScreen() {
                     router.push(`/show/${trendingItem.show._id}`);
                   }
                 })}
+              </View>
+            </View>
+          );
+
+        case "for-you":
+          return (
+            <View className="mt-6">
+              <View className="px-6 flex-row items-center gap-2">
+                <Ionicons name="sparkles" size={16} color="#22c55e" />
+                <Text className="text-lg font-semibold text-text-primary">
+                  Picked for You
+                </Text>
+              </View>
+              <View className="mt-4 h-56">
+                {renderShowCarousel(
+                  item.items.map((entry: any) => ({ show: { ...entry, _id: entry.showId } })),
+                  (recommendedItem) => {
+                    if (isRankedCarouselItem(recommendedItem) && recommendedItem.show?._id) {
+                      router.push(`/show/${recommendedItem.show._id}`);
+                    }
+                  },
+                )}
+              </View>
+            </View>
+          );
+
+        case "taste-rail":
+          return (
+            <RecommendationRail
+              title={item.title}
+              description={item.description}
+              items={item.items}
+            />
+          );
+
+        case "similar-taste":
+          return (
+            <View className="mt-8 px-6">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-lg font-semibold text-text-primary">People with similar taste</Text>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/search?mode=people");
+                  }}
+                  className="active:opacity-80"
+                >
+                  <Text className="text-sm font-semibold text-text-tertiary">See more</Text>
+                </Pressable>
+              </View>
+              <View className="mt-4 gap-3">
+                {item.items.map((candidate) => (
+                  <UserRow
+                    key={candidate.user._id}
+                    userId={candidate.user._id}
+                    displayName={candidate.user.displayName ?? candidate.user.name}
+                    username={candidate.user.username}
+                    avatarUrl={candidate.avatarUrl}
+                    isFollowing={candidate.isFollowing}
+                    followsYou={candidate.followsYou}
+                    isMutualFollow={candidate.isMutualFollow}
+                    mutualCount={candidate.mutualCount}
+                    inContacts={candidate.inContacts}
+                    subtitle={candidate.subtitle}
+                    taste={candidate.taste}
+                  />
+                ))}
+              </View>
+            </View>
+          );
+
+        case "taste-lists":
+          return (
+            <View className="mt-8 px-6">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-lg font-semibold text-text-primary">Lists from people like you</Text>
+              </View>
+              <View className="mt-4 gap-3">
+                {item.items.map((listItem) => (
+                  <ListRow
+                    key={listItem._id}
+                    id={listItem._id}
+                    title={listItem.title}
+                    description={listItem.description ?? `By ${listItem.ownerName}`}
+                  />
+                ))}
               </View>
             </View>
           );

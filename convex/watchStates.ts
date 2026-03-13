@@ -1,7 +1,14 @@
-import { mutation, query, QueryCtx } from "./_generated/server";
+import { internalQuery, mutation, query, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { getCurrentUserOrThrow } from "./utils";
 import { paginationOptsValidator } from "convex/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import {
+  canViewerSeeSection,
+  getOwnerFollowsViewer,
+  getProfileVisibilitySettings,
+} from "./profileVisibility";
 
 const Status = v.union(
   v.literal("watchlist"),
@@ -15,6 +22,78 @@ const SortBy = v.union(
   v.literal("title"),
   v.literal("year"),
 );
+
+function parsePaginationCursor(cursor: string | null) {
+  if (cursor === null) {
+    return 0;
+  }
+
+  const offset = Number(cursor);
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error("Invalid pagination cursor");
+  }
+
+  return offset;
+}
+
+function sortDetailedResults(
+  results: Array<{
+    state: any;
+    show: { title?: string | null; year?: number | null } | null;
+  }>,
+  sortBy: "date" | "title" | "year",
+) {
+  if (sortBy === "title") {
+    results.sort((a, b) => {
+      const titleA =
+        typeof a.show?.title === "string" ? a.show.title.toLowerCase() : "";
+      const titleB =
+        typeof b.show?.title === "string" ? b.show.title.toLowerCase() : "";
+      return (
+        titleA.localeCompare(titleB) ||
+        b.state.updatedAt - a.state.updatedAt
+      );
+    });
+    return;
+  }
+
+  if (sortBy === "year") {
+    results.sort((a, b) => {
+      const yearA = a.show?.year ?? 0;
+      const yearB = b.show?.year ?? 0;
+      return (
+        yearB - yearA ||
+        b.state.updatedAt - a.state.updatedAt
+      );
+    });
+  }
+}
+
+function paginateSortedResults<T>(
+  values: T[],
+  paginationOpts: {
+    cursor: string | null;
+    endCursor?: string | null;
+    numItems: number;
+  },
+) {
+  const start = parsePaginationCursor(paginationOpts.cursor);
+  const requestedEnd =
+    paginationOpts.endCursor === undefined || paginationOpts.endCursor === null
+      ? values.length
+      : parsePaginationCursor(paginationOpts.endCursor);
+  const end = Math.min(values.length, requestedEnd, start + paginationOpts.numItems);
+  const page = values.slice(start, end);
+  const continueOffset = start + page.length;
+
+  return {
+    page,
+    isDone: continueOffset >= values.length || continueOffset >= requestedEnd,
+    continueCursor: String(continueOffset),
+    splitCursor: null,
+    pageStatus: null,
+  };
+}
 
 async function listStates(
   ctx: QueryCtx,
@@ -59,6 +138,9 @@ export const setStatus = mutation({
         status: args.status,
         updatedAt: now,
       });
+      await ctx.scheduler.runAfter(0, internal.embeddings.clearUserTasteArtifacts, {
+        userId: user._id,
+      });
       return existing._id;
     }
 
@@ -73,6 +155,9 @@ export const setStatus = mutation({
     await ctx.db.patch(user._id, {
       countsTotalShows: (user.countsTotalShows ?? 0) + 1,
       [statusKey]: ((user as any)[statusKey] ?? 0) + 1,
+    });
+    await ctx.scheduler.runAfter(0, internal.embeddings.clearUserTasteArtifacts, {
+      userId: user._id,
     });
 
     return insertedId;
@@ -99,6 +184,9 @@ export const removeStatus = mutation({
     });
 
     await ctx.db.delete(existing._id);
+    await ctx.scheduler.runAfter(0, internal.embeddings.clearUserTasteArtifacts, {
+      userId: user._id,
+    });
   },
 });
 
@@ -161,6 +249,68 @@ export const listForUserDetailed = query({
   },
 });
 
+export const listPublicWatchlistDetailed = query({
+  args: {
+    userId: v.id("users"),
+    paginationOpts: paginationOptsValidator,
+    sortBy: v.optional(SortBy),
+  },
+  handler: async (ctx, args) => {
+    const owner = await ctx.db.get(args.userId);
+    if (!owner) {
+      throw new Error("User not found");
+    }
+
+    const viewerId = await getAuthUserId(ctx);
+    const profileVisibility = getProfileVisibilitySettings(owner);
+    const ownerFollowsViewer = await getOwnerFollowsViewer(ctx, owner._id, viewerId);
+    const canViewWatchlist = canViewerSeeSection({
+      ownerId: owner._id,
+      viewerId,
+      visibility: profileVisibility.watchlist,
+      ownerFollowsViewer,
+    });
+
+    if (!canViewWatchlist) {
+      throw new Error("Not allowed");
+    }
+
+    const sortBy = args.sortBy ?? "date";
+    if (sortBy === "date") {
+      const page = await ctx.db
+        .query("watchStates")
+        .withIndex("by_user_updatedAt", (q) => q.eq("userId", args.userId))
+        .filter((q) => q.eq(q.field("status"), "watchlist"))
+        .order("desc")
+        .paginate(args.paginationOpts);
+
+      const shows = await Promise.all(page.page.map((state) => ctx.db.get(state.showId)));
+      return {
+        ...page,
+        page: page.page.map((state, index) => ({
+          state,
+          show: shows[index] ?? null,
+        })),
+      };
+    }
+
+    const states = await ctx.db
+      .query("watchStates")
+      .withIndex("by_user_updatedAt", (q) => q.eq("userId", args.userId))
+      .filter((q) => q.eq(q.field("status"), "watchlist"))
+      .order("desc")
+      .collect();
+    const shows = await Promise.all(states.map((state) => ctx.db.get(state.showId)));
+    const results = states.map((state, index) => ({
+      state,
+      show: shows[index] ?? null,
+    }));
+
+    sortDetailedResults(results, sortBy);
+    return paginateSortedResults(results, args.paginationOpts);
+  },
+});
+
 export const getForShow = query({
   args: { showId: v.id("shows") },
   handler: async (ctx, args) => {
@@ -185,5 +335,29 @@ export const getCounts = query({
       dropped: user.countsDropped ?? 0,
       total: user.countsTotalShows ?? 0,
     };
+  },
+});
+
+export const getStatesForShowByUserIds = internalQuery({
+  args: {
+    showId: v.id("shows"),
+    userIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const uniqueUserIds = Array.from(new Set(args.userIds));
+    const states = await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const state = await ctx.db
+          .query("watchStates")
+          .withIndex("by_user_show", (q) =>
+            q.eq("userId", userId).eq("showId", args.showId),
+          )
+          .unique();
+
+        return state ? { userId, state } : null;
+      }),
+    );
+
+    return states.filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   },
 });

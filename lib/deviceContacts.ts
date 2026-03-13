@@ -1,5 +1,7 @@
 import * as Contacts from "expo-contacts";
 
+import { normalizePhoneNumber } from "./phone";
+
 export type DeviceContactEntry = {
   sourceRecordId: string;
   displayName: string;
@@ -29,7 +31,11 @@ export async function loadDeviceContacts() {
       if (!rawNumber) {
         return;
       }
-      const dedupeKey = rawNumber.replace(/\s+/g, "");
+      const normalizedPhone = normalizePhoneNumber(rawNumber);
+      if (!normalizedPhone) {
+        return;
+      }
+      const dedupeKey = normalizedPhone;
       if (deduped.has(dedupeKey)) {
         return;
       }

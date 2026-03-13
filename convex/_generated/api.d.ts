@@ -102,6 +102,120 @@ export declare const api: {
       any
     >;
   };
+  embeddings: {
+    getHomeRecommendationRails: FunctionReference<
+      "action",
+      "public",
+      { limitPerRail?: number },
+      any
+    >;
+    getListsFromSimilarTasteUsers: FunctionReference<
+      "action",
+      "public",
+      { limit?: number },
+      any
+    >;
+    getPersonalizedRecommendations: FunctionReference<
+      "action",
+      "public",
+      { limit?: number; theme?: string },
+      any
+    >;
+    getProfileTasteExperience: FunctionReference<
+      "action",
+      "public",
+      { userId: Id<"users"> },
+      any
+    >;
+    getRelevantReviewsForShow: FunctionReference<
+      "action",
+      "public",
+      { limit?: number; showId: Id<"shows"> },
+      any
+    >;
+    getShowRecommendationRails: FunctionReference<
+      "action",
+      "public",
+      { limitPerRail?: number; showId: Id<"shows"> },
+      any
+    >;
+    getShowTasteSocialProof: FunctionReference<
+      "action",
+      "public",
+      { showId: Id<"shows"> },
+      any
+    >;
+    getSimilarShows: FunctionReference<
+      "action",
+      "public",
+      { limit?: number; showId: Id<"shows"> },
+      any
+    >;
+    getSimilarTasteUsers: FunctionReference<
+      "action",
+      "public",
+      { limit?: number; userId?: Id<"users"> },
+      any
+    >;
+    getSmartLists: FunctionReference<
+      "action",
+      "public",
+      { limitPerList?: number },
+      any
+    >;
+    getViewerTastePreferences: FunctionReference<"query", "public", {}, any>;
+    saveViewerTastePreferences: FunctionReference<
+      "action",
+      "public",
+      { favoriteShowIds: Array<Id<"shows">>; favoriteThemes: Array<string> },
+      any
+    >;
+    searchShows: FunctionReference<
+      "action",
+      "public",
+      { limit?: number; text: string },
+      any
+    >;
+  };
+  episodeProgress: {
+    getProgressForShow: FunctionReference<
+      "query",
+      "public",
+      { showId: Id<"shows"> },
+      any
+    >;
+    getStats: FunctionReference<"query", "public", {}, any>;
+    getUpNext: FunctionReference<"query", "public", {}, any>;
+    markSeasonWatched: FunctionReference<
+      "mutation",
+      "public",
+      {
+        createLog?: boolean;
+        episodes: Array<{ episodeNumber: number; title?: string }>;
+        seasonNumber: number;
+        showId: Id<"shows">;
+      },
+      any
+    >;
+    toggleEpisode: FunctionReference<
+      "mutation",
+      "public",
+      {
+        createLog?: boolean;
+        episodeNumber: number;
+        episodeTitle?: string;
+        seasonNumber: number;
+        showId: Id<"shows">;
+      },
+      any
+    >;
+    unmarkSeasonWatched: FunctionReference<
+      "mutation",
+      "public",
+      { seasonNumber: number; showId: Id<"shows"> },
+      any
+    >;
+  };
   feed: {
     forUser: FunctionReference<"query", "public", { limit?: number }, any>;
     listForUser: FunctionReference<
@@ -317,6 +431,33 @@ export declare const api: {
       any
     >;
   };
+  releaseCalendar: {
+    getHomePreview: FunctionReference<
+      "query",
+      "public",
+      { today: string },
+      any
+    >;
+    listForMe: FunctionReference<
+      "query",
+      "public",
+      {
+        cursor?: string;
+        limit?: number;
+        selectedProvidersOverride?: Array<string>;
+        today: string;
+        view: "tonight" | "upcoming" | "premieres" | "returning" | "finales";
+      },
+      any
+    >;
+    refreshForMe: FunctionReference<"action", "public", {}, any>;
+    setProviderFilter: FunctionReference<
+      "mutation",
+      "public",
+      { selectedProviders: Array<string> },
+      any
+    >;
+  };
   reports: {
     create: FunctionReference<
       "mutation",
@@ -355,8 +496,11 @@ export declare const api: {
       "mutation",
       "public",
       {
+        episodeNumber?: number;
+        episodeTitle?: string;
         rating: number;
-        reviewText: string;
+        reviewText?: string;
+        seasonNumber?: number;
         showId: Id<"shows">;
         spoiler: boolean;
       },
@@ -384,6 +528,35 @@ export declare const api: {
       "query",
       "public",
       { reviewId: Id<"reviews"> },
+      any
+    >;
+    getEpisodeStats: FunctionReference<
+      "query",
+      "public",
+      { episodeNumber: number; seasonNumber: number; showId: Id<"shows"> },
+      any
+    >;
+    getMyEpisodeRating: FunctionReference<
+      "query",
+      "public",
+      { episodeNumber: number; seasonNumber: number; showId: Id<"shows"> },
+      any
+    >;
+    getMyEpisodeRatings: FunctionReference<
+      "query",
+      "public",
+      { showId: Id<"shows"> },
+      any
+    >;
+    listForEpisodeDetailed: FunctionReference<
+      "query",
+      "public",
+      {
+        episodeNumber: number;
+        limit?: number;
+        seasonNumber: number;
+        showId: Id<"shows">;
+      },
       any
     >;
     listForShow: FunctionReference<
@@ -428,6 +601,26 @@ export declare const api: {
         };
         userId: Id<"users">;
       },
+      any
+    >;
+    rateEpisode: FunctionReference<
+      "mutation",
+      "public",
+      {
+        episodeNumber: number;
+        episodeTitle?: string;
+        rating: number;
+        reviewText?: string;
+        seasonNumber: number;
+        showId: Id<"shows">;
+        spoiler?: boolean;
+      },
+      any
+    >;
+    removeEpisodeRating: FunctionReference<
+      "mutation",
+      "public",
+      { episodeNumber: number; seasonNumber: number; showId: Id<"shows"> },
       any
     >;
   };
@@ -522,6 +715,13 @@ export declare const api: {
       any
     >;
     exportData: FunctionReference<"query", "public", {}, any>;
+    getFavoriteShows: FunctionReference<"query", "public", {}, any>;
+    getShowsById: FunctionReference<
+      "query",
+      "public",
+      { showIds: Array<Id<"shows">> },
+      any
+    >;
     me: FunctionReference<"query", "public", {}, any>;
     profile: FunctionReference<"query", "public", { userId: Id<"users"> }, any>;
     search: FunctionReference<
@@ -544,6 +744,13 @@ export declare const api: {
         avatarStorageId?: Id<"_storage">;
         bio?: string;
         displayName?: string;
+        favoriteGenres?: Array<string>;
+        favoriteShowIds?: Array<Id<"shows">>;
+        profileVisibility?: {
+          currentlyWatching: "public" | "following" | "private";
+          favorites: "public" | "following" | "private";
+          watchlist: "public" | "following" | "private";
+        };
         username?: string;
       },
       any
@@ -553,13 +760,26 @@ export declare const api: {
     add: FunctionReference<
       "mutation",
       "public",
-      { note?: string; showId: Id<"shows">; watchedAt: number },
+      {
+        episodeNumber?: number;
+        episodeTitle?: string;
+        note?: string;
+        seasonNumber?: number;
+        showId: Id<"shows">;
+        watchedAt: number;
+      },
       any
     >;
     deleteLog: FunctionReference<
       "mutation",
       "public",
       { logId: Id<"watchLogs"> },
+      any
+    >;
+    listActivityForUser: FunctionReference<
+      "query",
+      "public",
+      { limit?: number; userId: Id<"users"> },
       any
     >;
     listForShow: FunctionReference<
@@ -644,6 +864,23 @@ export declare const api: {
         };
         sortBy?: "date" | "title" | "year";
         status?: "watchlist" | "watching" | "completed" | "dropped";
+      },
+      any
+    >;
+    listPublicWatchlistDetailed: FunctionReference<
+      "query",
+      "public",
+      {
+        paginationOpts: {
+          cursor: string | null;
+          endCursor?: string | null;
+          id?: number;
+          maximumBytesRead?: number;
+          maximumRowsRead?: number;
+          numItems: number;
+        };
+        sortBy?: "date" | "title" | "year";
+        userId: Id<"users">;
       },
       any
     >;
@@ -777,14 +1014,418 @@ export declare const internal: {
       any
     >;
   };
+  embeddings: {
+    advanceEmbeddingJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        embeddedCount: number;
+        jobId: Id<"showEmbeddingJobs">;
+        nextCursor?: string;
+        processedCount: number;
+        skippedCount: number;
+      },
+      any
+    >;
+    clearUserTasteArtifacts: FunctionReference<
+      "mutation",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    clearUserTasteCaches: FunctionReference<
+      "mutation",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    completeEmbeddingJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        embeddedCount: number;
+        jobId: Id<"showEmbeddingJobs">;
+        processedCount: number;
+        skippedCount: number;
+      },
+      any
+    >;
+    countEmbeddings: FunctionReference<"query", "internal", {}, any>;
+    countTmdbShows: FunctionReference<"query", "internal", {}, any>;
+    createEmbeddingJob: FunctionReference<
+      "mutation",
+      "internal",
+      { totalCount?: number },
+      any
+    >;
+    ensureShowEmbedding: FunctionReference<
+      "action",
+      "internal",
+      { showId: Id<"shows"> },
+      any
+    >;
+    ensureUserTasteProfile: FunctionReference<
+      "action",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    failEmbeddingJob: FunctionReference<
+      "mutation",
+      "internal",
+      { error: string; jobId: Id<"showEmbeddingJobs"> },
+      any
+    >;
+    getEmbeddingByShowId: FunctionReference<
+      "query",
+      "internal",
+      { showId: Id<"shows"> },
+      any
+    >;
+    getEmbeddingJob: FunctionReference<
+      "query",
+      "internal",
+      { jobId: Id<"showEmbeddingJobs"> },
+      any
+    >;
+    getEmbeddingsByIds: FunctionReference<
+      "query",
+      "internal",
+      { embeddingIds: Array<Id<"showEmbeddings">> },
+      any
+    >;
+    getEmbeddingsByShowIds: FunctionReference<
+      "query",
+      "internal",
+      { showIds: Array<Id<"shows">> },
+      any
+    >;
+    getLatestEmbeddingJob: FunctionReference<"query", "internal", {}, any>;
+    getLexicalSearchResults: FunctionReference<
+      "query",
+      "internal",
+      { limit?: number; text: string },
+      any
+    >;
+    getShowsByIds: FunctionReference<
+      "query",
+      "internal",
+      { showIds: Array<Id<"shows">> },
+      any
+    >;
+    getUsersByIds: FunctionReference<
+      "query",
+      "internal",
+      { userIds: Array<Id<"users">> },
+      any
+    >;
+    getUserTasteCache: FunctionReference<
+      "query",
+      "internal",
+      { themeKey: string; userId: Id<"users"> },
+      any
+    >;
+    getUserTastePreferences: FunctionReference<
+      "query",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    getUserTasteProfile: FunctionReference<
+      "query",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    getUserTasteProfilesByIds: FunctionReference<
+      "query",
+      "internal",
+      { profileIds: Array<Id<"userTasteProfiles">> },
+      any
+    >;
+    getUserTasteSignals: FunctionReference<
+      "query",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    listTmdbShowsForEmbedding: FunctionReference<
+      "query",
+      "internal",
+      { batchSize?: number; cursor?: string },
+      any
+    >;
+    markEmbeddingJobRunning: FunctionReference<
+      "mutation",
+      "internal",
+      { jobId: Id<"showEmbeddingJobs"> },
+      any
+    >;
+    previewPersonalizedRecommendationsForUser: FunctionReference<
+      "action",
+      "internal",
+      { limit?: number; theme?: string; userId: Id<"users"> },
+      any
+    >;
+    previewRecommendationsFromShows: FunctionReference<
+      "action",
+      "internal",
+      {
+        excludeShowIds?: Array<Id<"shows">>;
+        limit?: number;
+        showIds: Array<Id<"shows">>;
+        theme?: string;
+      },
+      any
+    >;
+    runEmbeddingBackfillBatch: FunctionReference<
+      "action",
+      "internal",
+      { jobId: Id<"showEmbeddingJobs"> },
+      any
+    >;
+    setEmbeddingJobBatchSize: FunctionReference<
+      "mutation",
+      "internal",
+      { batchSize: number; jobId: Id<"showEmbeddingJobs"> },
+      any
+    >;
+    startEmbeddingBackfill: FunctionReference<"action", "internal", {}, any>;
+    upsertShowEmbeddingsBatch: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        rows: Array<{
+          externalId: string;
+          externalSource: string;
+          inputHash: string;
+          inputText: string;
+          retrievalEmbedding: Array<number>;
+          showId: Id<"shows">;
+          similarityEmbedding: Array<number>;
+        }>;
+      },
+      any
+    >;
+    upsertUserTasteCache: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        expiresAt: number;
+        negativeShowIds: Array<Id<"shows">>;
+        positiveShowIds: Array<Id<"shows">>;
+        recommendations: Array<{
+          overview?: string;
+          posterUrl?: string;
+          reason: string;
+          score: number;
+          showId: Id<"shows">;
+          title: string;
+          year?: number;
+        }>;
+        signalFingerprint: string;
+        themeKey: string;
+        userId: Id<"users">;
+      },
+      any
+    >;
+    upsertUserTastePreferences: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        favoriteShowIds: Array<Id<"shows">>;
+        favoriteThemes: Array<string>;
+        userId: Id<"users">;
+      },
+      any
+    >;
+    upsertUserTasteProfile: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        favoriteShowIds: Array<Id<"shows">>;
+        favoriteThemes: Array<string>;
+        negativeShowIds: Array<Id<"shows">>;
+        positiveShowIds: Array<Id<"shows">>;
+        signalFingerprint: string;
+        similarityEmbedding: Array<number>;
+        userId: Id<"users">;
+      },
+      any
+    >;
+  };
+  follows: {
+    getFolloweeIds: FunctionReference<
+      "query",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+  };
+  lists: {
+    listPublicByOwnerIds: FunctionReference<
+      "query",
+      "internal",
+      { limit?: number; limitPerOwner?: number; ownerIds: Array<Id<"users">> },
+      any
+    >;
+  };
   maintenance: {
     cleanupTmdbCache: FunctionReference<"mutation", "internal", {}, any>;
+    scheduleEmbeddingRefresh: FunctionReference<"action", "internal", {}, any>;
+    scheduleEpisodeCacheRefresh: FunctionReference<
+      "action",
+      "internal",
+      { batchSize?: number; minFreshMs?: number; targetShowCount: number },
+      any
+    >;
+    scheduleFullCatalogMaintenance: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleFullEpisodeCacheRefresh: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleFullShowCatalogRefresh: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleHotCatalogMaintenance: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleHotEpisodeCacheRefresh: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleHotShowCatalogRefresh: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    scheduleTopTvImport: FunctionReference<
+      "action",
+      "internal",
+      { minFreshMs?: number; pagesPerBatch?: number; targetCount: number },
+      any
+    >;
+  };
+  people: {
+    buildPreviewsByUserIds: FunctionReference<
+      "query",
+      "internal",
+      { candidateIds: Array<Id<"users">>; viewerId: Id<"users"> },
+      any
+    >;
   };
   rateLimit: {
     enforce: FunctionReference<
       "mutation",
       "internal",
       { key: string; limit: number; windowMs: number },
+      any
+    >;
+  };
+  releaseCalendar: {
+    beginShowRefreshInternal: FunctionReference<
+      "mutation",
+      "internal",
+      { now: number; showId: Id<"shows"> },
+      any
+    >;
+    claimShowRefreshInternal: FunctionReference<
+      "mutation",
+      "internal",
+      { now: number; showId: Id<"shows"> },
+      any
+    >;
+    getShowByIdInternal: FunctionReference<
+      "query",
+      "internal",
+      { showId: Id<"shows"> },
+      any
+    >;
+    getShowSyncStateInternal: FunctionReference<
+      "query",
+      "internal",
+      { showId: Id<"shows"> },
+      any
+    >;
+    getStaleTrackedShowIdsInternal: FunctionReference<
+      "query",
+      "internal",
+      { limit?: number; now: number },
+      any
+    >;
+    getTrackedShowIdsForUserInternal: FunctionReference<
+      "query",
+      "internal",
+      { userId: Id<"users"> },
+      any
+    >;
+    refreshTrackedShowsBatch: FunctionReference<
+      "action",
+      "internal",
+      { showIds: Array<Id<"shows">> },
+      any
+    >;
+    replaceReleaseEventsForShowInternal: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        events: Array<{
+          airDate: string;
+          airDateTs: number;
+          episodeNumber: number;
+          episodeTitle?: string;
+          isPremiere: boolean;
+          isReturningSeason: boolean;
+          isSeasonFinale: boolean;
+          isSeriesFinale: boolean;
+          seasonNumber: number;
+          showId: Id<"shows">;
+        }>;
+        showId: Id<"shows">;
+      },
+      any
+    >;
+    scheduleStaleTrackedShowRefresh: FunctionReference<
+      "action",
+      "internal",
+      {},
+      any
+    >;
+    upsertShowSyncStateInternal: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        expiresAt?: number;
+        lastError?: string;
+        showId: Id<"shows">;
+        status: "idle" | "scheduled" | "running" | "ready" | "failed";
+        syncedAt?: number;
+        updatedAt: number;
+      },
+      any
+    >;
+  };
+  reviews: {
+    listForShowDetailedByAuthors: FunctionReference<
+      "query",
+      "internal",
+      { authorIds: Array<Id<"users">>; limit?: number; showId: Id<"shows"> },
       any
     >;
   };
@@ -801,6 +1442,12 @@ export declare const internal: {
       { externalId: string; externalSource: string },
       any
     >;
+    getExtendedDetailsInternal: FunctionReference<
+      "action",
+      "internal",
+      { externalId: string },
+      any
+    >;
     getListCache: FunctionReference<
       "query",
       "internal",
@@ -811,6 +1458,12 @@ export declare const internal: {
       "query",
       "internal",
       { query: string },
+      any
+    >;
+    getSeasonDetailsInternal: FunctionReference<
+      "action",
+      "internal",
+      { externalId: string; seasonNumber: number },
       any
     >;
     upsertDetailsCache: FunctionReference<
@@ -852,11 +1505,195 @@ export declare const internal: {
       any
     >;
   };
+  tmdbEpisodes: {
+    advanceEpisodeCacheJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        cachedSeasonCount: number;
+        failedShowCount: number;
+        jobId: Id<"tmdbEpisodeCacheJobs">;
+        nextOffset: number;
+        processedShowCount: number;
+        skippedSeasonCount: number;
+        totalShowCount?: number;
+      },
+      any
+    >;
+    completeEpisodeCacheJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        cachedSeasonCount: number;
+        failedShowCount: number;
+        jobId: Id<"tmdbEpisodeCacheJobs">;
+        nextOffset: number;
+        processedShowCount: number;
+        skippedSeasonCount: number;
+        totalShowCount?: number;
+      },
+      any
+    >;
+    createEpisodeCacheJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        batchSize?: number;
+        requestedBy?: Id<"users">;
+        targetShowCount?: number;
+        totalShowCount?: number;
+      },
+      any
+    >;
+    failEpisodeCacheJob: FunctionReference<
+      "mutation",
+      "internal",
+      { error: string; jobId: Id<"tmdbEpisodeCacheJobs"> },
+      any
+    >;
+    getEpisodeCacheJob: FunctionReference<
+      "query",
+      "internal",
+      { jobId: Id<"tmdbEpisodeCacheJobs"> },
+      any
+    >;
+    getLatestEpisodeCacheJob: FunctionReference<"query", "internal", {}, any>;
+    listTopTmdbShowsForEpisodeCache: FunctionReference<
+      "query",
+      "internal",
+      { batchSize: number; offset: number },
+      any
+    >;
+    markEpisodeCacheJobRunning: FunctionReference<
+      "mutation",
+      "internal",
+      { jobId: Id<"tmdbEpisodeCacheJobs"> },
+      any
+    >;
+    runEpisodeCacheBatch: FunctionReference<
+      "action",
+      "internal",
+      { jobId: Id<"tmdbEpisodeCacheJobs"> },
+      any
+    >;
+    startEpisodeCacheBackfill: FunctionReference<
+      "action",
+      "internal",
+      {
+        batchSize?: number;
+        requestedBy?: Id<"users">;
+        targetShowCount?: number;
+      },
+      any
+    >;
+  };
+  tmdbImport: {
+    advanceImportJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        jobId: Id<"tmdbImportJobs">;
+        nextPage: number;
+        pagesProcessed: number;
+        showsProcessed: number;
+        totalPages?: number;
+      },
+      any
+    >;
+    completeImportJob: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        jobId: Id<"tmdbImportJobs">;
+        nextPage: number;
+        pagesProcessed: number;
+        showsProcessed: number;
+        totalPages?: number;
+      },
+      any
+    >;
+    countTmdbShows: FunctionReference<"query", "internal", {}, any>;
+    createTopTvImportJob: FunctionReference<
+      "mutation",
+      "internal",
+      { requestedBy?: Id<"users">; targetCount?: number },
+      any
+    >;
+    failImportJob: FunctionReference<
+      "mutation",
+      "internal",
+      { error: string; jobId: Id<"tmdbImportJobs"> },
+      any
+    >;
+    getImportJob: FunctionReference<
+      "query",
+      "internal",
+      { jobId: Id<"tmdbImportJobs"> },
+      any
+    >;
+    getLatestTopTvImportJob: FunctionReference<"query", "internal", {}, any>;
+    markJobRunning: FunctionReference<
+      "mutation",
+      "internal",
+      { jobId: Id<"tmdbImportJobs"> },
+      any
+    >;
+    runTopTvImportBatch: FunctionReference<
+      "action",
+      "internal",
+      { jobId: Id<"tmdbImportJobs">; pagesPerBatch?: number },
+      any
+    >;
+    startTopTvImport: FunctionReference<
+      "action",
+      "internal",
+      { pagesPerBatch?: number; targetCount?: number },
+      any
+    >;
+    upsertTmdbShowsBatch: FunctionReference<
+      "mutation",
+      "internal",
+      {
+        shows: Array<{
+          backdropUrl?: string;
+          externalId: string;
+          externalSource: string;
+          genreIds?: Array<number>;
+          originCountries?: Array<string>;
+          originalLanguage?: string;
+          originalTitle?: string;
+          overview?: string;
+          posterUrl?: string;
+          searchText: string;
+          title: string;
+          tmdbPopularity?: number;
+          tmdbVoteAverage?: number;
+          tmdbVoteCount?: number;
+          year?: number;
+        }>;
+      },
+      any
+    >;
+  };
   users: {
     getById: FunctionReference<
       "query",
       "internal",
       { userId: Id<"users"> },
+      any
+    >;
+    getVisibleFavoriteShowsByUserIds: FunctionReference<
+      "query",
+      "internal",
+      { userIds: Array<Id<"users">>; viewerId: Id<"users"> },
+      any
+    >;
+  };
+  watchStates: {
+    getStatesForShowByUserIds: FunctionReference<
+      "query",
+      "internal",
+      { showId: Id<"shows">; userIds: Array<Id<"users">> },
       any
     >;
   };

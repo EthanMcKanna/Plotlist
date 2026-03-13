@@ -236,6 +236,40 @@ export type DataModel = {
     searchIndexes: {};
     vectorIndexes: {};
   };
+  episodeProgress: {
+    document: {
+      episodeNumber: number;
+      seasonNumber: number;
+      showId: Id<"shows">;
+      userId: Id<"users">;
+      watchedAt: number;
+      _id: Id<"episodeProgress">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "episodeNumber"
+      | "seasonNumber"
+      | "showId"
+      | "userId"
+      | "watchedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_user_show: ["userId", "showId", "_creationTime"];
+      by_user_show_season_episode: [
+        "userId",
+        "showId",
+        "seasonNumber",
+        "episodeNumber",
+        "_creationTime",
+      ];
+      by_user_watchedAt: ["userId", "watchedAt", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
   feedItems: {
     document: {
       actorId: Id<"users">;
@@ -394,6 +428,43 @@ export type DataModel = {
     searchIndexes: {};
     vectorIndexes: {};
   };
+  releaseEvents: {
+    document: {
+      airDate: string;
+      airDateTs: number;
+      episodeNumber: number;
+      episodeTitle?: string;
+      isPremiere: boolean;
+      isReturningSeason: boolean;
+      isSeasonFinale: boolean;
+      isSeriesFinale: boolean;
+      seasonNumber: number;
+      showId: Id<"shows">;
+      _id: Id<"releaseEvents">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "airDate"
+      | "airDateTs"
+      | "episodeNumber"
+      | "episodeTitle"
+      | "isPremiere"
+      | "isReturningSeason"
+      | "isSeasonFinale"
+      | "isSeriesFinale"
+      | "seasonNumber"
+      | "showId";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_airDateTs: ["airDateTs", "_creationTime"];
+      by_show_airDateTs: ["showId", "airDateTs", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
   reports: {
     document: {
       action?: "dismiss" | "delete";
@@ -432,8 +503,11 @@ export type DataModel = {
     document: {
       authorId: Id<"users">;
       createdAt: number;
+      episodeNumber?: number;
+      episodeTitle?: string;
       rating: number;
-      reviewText: string;
+      reviewText?: string;
+      seasonNumber?: number;
       showId: Id<"shows">;
       spoiler: boolean;
       updatedAt?: number;
@@ -445,8 +519,11 @@ export type DataModel = {
       | "_id"
       | "authorId"
       | "createdAt"
+      | "episodeNumber"
+      | "episodeTitle"
       | "rating"
       | "reviewText"
+      | "seasonNumber"
       | "showId"
       | "spoiler"
       | "updatedAt";
@@ -457,19 +534,165 @@ export type DataModel = {
       by_author_show: ["authorId", "showId", "_creationTime"];
       by_createdAt: ["createdAt", "_creationTime"];
       by_show_createdAt: ["showId", "createdAt", "_creationTime"];
+      by_show_episode: [
+        "showId",
+        "seasonNumber",
+        "episodeNumber",
+        "_creationTime",
+      ];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  showEmbeddingJobs: {
+    document: {
+      batchSize: number;
+      completedAt?: number;
+      createdAt: number;
+      dimensions: number;
+      embeddedCount: number;
+      embeddingVersion: string;
+      error?: string;
+      failedAt?: number;
+      kind: "show_catalog";
+      model: string;
+      nextCursor?: string;
+      processedCount: number;
+      skippedCount: number;
+      startedAt?: number;
+      status: "queued" | "running" | "completed" | "failed";
+      totalCount?: number;
+      updatedAt: number;
+      _id: Id<"showEmbeddingJobs">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "batchSize"
+      | "completedAt"
+      | "createdAt"
+      | "dimensions"
+      | "embeddedCount"
+      | "embeddingVersion"
+      | "error"
+      | "failedAt"
+      | "kind"
+      | "model"
+      | "nextCursor"
+      | "processedCount"
+      | "skippedCount"
+      | "startedAt"
+      | "status"
+      | "totalCount"
+      | "updatedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_createdAt: ["createdAt", "_creationTime"];
+      by_status_createdAt: ["status", "createdAt", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  showEmbeddings: {
+    document: {
+      dimensions: number;
+      embeddingVersion: string;
+      externalId: string;
+      externalSource: string;
+      inputHash: string;
+      inputText: string;
+      model: string;
+      retrievalEmbedding: Array<number>;
+      showId: Id<"shows">;
+      similarityEmbedding: Array<number>;
+      updatedAt: number;
+      _id: Id<"showEmbeddings">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "dimensions"
+      | "embeddingVersion"
+      | "externalId"
+      | "externalSource"
+      | "inputHash"
+      | "inputText"
+      | "model"
+      | "retrievalEmbedding"
+      | "showId"
+      | "similarityEmbedding"
+      | "updatedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_external: ["externalSource", "externalId", "_creationTime"];
+      by_showId: ["showId", "_creationTime"];
+      by_version_updatedAt: ["embeddingVersion", "updatedAt", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {
+      by_retrieval_embedding: {
+        vectorField: "retrievalEmbedding";
+        dimensions: number;
+        filterFields: "embeddingVersion";
+      };
+      by_similarity_embedding: {
+        vectorField: "similarityEmbedding";
+        dimensions: number;
+        filterFields: "embeddingVersion";
+      };
+    };
+  };
+  showReleaseSyncState: {
+    document: {
+      expiresAt?: number;
+      lastError?: string;
+      showId: Id<"shows">;
+      status: "idle" | "scheduled" | "running" | "ready" | "failed";
+      syncedAt?: number;
+      updatedAt: number;
+      _id: Id<"showReleaseSyncState">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "expiresAt"
+      | "lastError"
+      | "showId"
+      | "status"
+      | "syncedAt"
+      | "updatedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_expiresAt: ["expiresAt", "_creationTime"];
+      by_showId: ["showId", "_creationTime"];
+      by_status_updatedAt: ["status", "updatedAt", "_creationTime"];
     };
     searchIndexes: {};
     vectorIndexes: {};
   };
   shows: {
     document: {
+      backdropUrl?: string;
       createdAt: number;
       externalId: string;
       externalSource: string;
+      genreIds?: Array<number>;
+      originCountries?: Array<string>;
+      originalLanguage?: string;
+      originalTitle?: string;
       overview?: string;
       posterUrl?: string;
       searchText: string;
       title: string;
+      tmdbPopularity?: number;
+      tmdbVoteAverage?: number;
+      tmdbVoteCount?: number;
       updatedAt: number;
       year?: number;
       _id: Id<"shows">;
@@ -478,13 +701,21 @@ export type DataModel = {
     fieldPaths:
       | "_creationTime"
       | "_id"
+      | "backdropUrl"
       | "createdAt"
       | "externalId"
       | "externalSource"
+      | "genreIds"
+      | "originalLanguage"
+      | "originalTitle"
+      | "originCountries"
       | "overview"
       | "posterUrl"
       | "searchText"
       | "title"
+      | "tmdbPopularity"
+      | "tmdbVoteAverage"
+      | "tmdbVoteCount"
       | "updatedAt"
       | "year";
     indexes: {
@@ -523,6 +754,106 @@ export type DataModel = {
       by_creation_time: ["_creationTime"];
       by_expiresAt: ["expiresAt", "_creationTime"];
       by_external: ["externalSource", "externalId", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  tmdbEpisodeCacheJobs: {
+    document: {
+      batchSize: number;
+      cachedSeasonCount: number;
+      completedAt?: number;
+      createdAt: number;
+      error?: string;
+      failedAt?: number;
+      failedShowCount: number;
+      kind: "season_cache";
+      nextOffset: number;
+      processedShowCount: number;
+      requestedBy?: Id<"users">;
+      skippedSeasonCount: number;
+      startedAt?: number;
+      status: "queued" | "running" | "completed" | "failed";
+      targetShowCount: number;
+      totalShowCount?: number;
+      updatedAt: number;
+      _id: Id<"tmdbEpisodeCacheJobs">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "batchSize"
+      | "cachedSeasonCount"
+      | "completedAt"
+      | "createdAt"
+      | "error"
+      | "failedAt"
+      | "failedShowCount"
+      | "kind"
+      | "nextOffset"
+      | "processedShowCount"
+      | "requestedBy"
+      | "skippedSeasonCount"
+      | "startedAt"
+      | "status"
+      | "targetShowCount"
+      | "totalShowCount"
+      | "updatedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_createdAt: ["createdAt", "_creationTime"];
+      by_status_createdAt: ["status", "createdAt", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  tmdbImportJobs: {
+    document: {
+      completedAt?: number;
+      createdAt: number;
+      error?: string;
+      failedAt?: number;
+      kind: "top_tv";
+      maxPage: number;
+      nextPage: number;
+      pageSize: number;
+      pagesProcessed: number;
+      requestedBy?: Id<"users">;
+      showsProcessed: number;
+      startedAt?: number;
+      status: "queued" | "running" | "completed" | "failed";
+      targetCount: number;
+      totalPages?: number;
+      updatedAt: number;
+      _id: Id<"tmdbImportJobs">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "completedAt"
+      | "createdAt"
+      | "error"
+      | "failedAt"
+      | "kind"
+      | "maxPage"
+      | "nextPage"
+      | "pageSize"
+      | "pagesProcessed"
+      | "requestedBy"
+      | "showsProcessed"
+      | "startedAt"
+      | "status"
+      | "targetCount"
+      | "totalPages"
+      | "updatedAt";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_createdAt: ["createdAt", "_creationTime"];
+      by_status_createdAt: ["status", "createdAt", "_creationTime"];
     };
     searchIndexes: {};
     vectorIndexes: {};
@@ -595,6 +926,8 @@ export type DataModel = {
       displayName?: string;
       email?: string;
       emailVerificationTime?: number;
+      favoriteGenres?: Array<string>;
+      favoriteShowIds?: Array<Id<"shows">>;
       image?: string;
       isAdmin?: boolean;
       isAnonymous?: boolean;
@@ -605,6 +938,12 @@ export type DataModel = {
       phone?: string;
       phoneHash?: string;
       phoneVerificationTime?: number;
+      profileVisibility?: {
+        currentlyWatching: "public" | "following" | "private";
+        favorites: "public" | "following" | "private";
+        watchlist: "public" | "following" | "private";
+      };
+      releaseCalendarPreferences?: { selectedProviders: Array<string> };
       searchText?: string;
       username?: string;
       _id: Id<"users">;
@@ -629,6 +968,8 @@ export type DataModel = {
       | "displayName"
       | "email"
       | "emailVerificationTime"
+      | "favoriteGenres"
+      | "favoriteShowIds"
       | "image"
       | "isAdmin"
       | "isAnonymous"
@@ -639,6 +980,12 @@ export type DataModel = {
       | "phone"
       | "phoneHash"
       | "phoneVerificationTime"
+      | "profileVisibility"
+      | "profileVisibility.currentlyWatching"
+      | "profileVisibility.favorites"
+      | "profileVisibility.watchlist"
+      | "releaseCalendarPreferences"
+      | "releaseCalendarPreferences.selectedProviders"
       | "searchText"
       | "username";
     indexes: {
@@ -659,9 +1006,126 @@ export type DataModel = {
     };
     vectorIndexes: {};
   };
+  userTasteCaches: {
+    document: {
+      createdAt: number;
+      embeddingVersion: string;
+      expiresAt: number;
+      negativeShowIds: Array<Id<"shows">>;
+      positiveShowIds: Array<Id<"shows">>;
+      recommendations: Array<{
+        overview?: string;
+        posterUrl?: string;
+        reason: string;
+        score: number;
+        showId: Id<"shows">;
+        title: string;
+        year?: number;
+      }>;
+      signalFingerprint: string;
+      themeKey: string;
+      updatedAt: number;
+      userId: Id<"users">;
+      _id: Id<"userTasteCaches">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "createdAt"
+      | "embeddingVersion"
+      | "expiresAt"
+      | "negativeShowIds"
+      | "positiveShowIds"
+      | "recommendations"
+      | "signalFingerprint"
+      | "themeKey"
+      | "updatedAt"
+      | "userId";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_user_theme: ["userId", "themeKey", "_creationTime"];
+      by_user_updatedAt: ["userId", "updatedAt", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  userTastePreferences: {
+    document: {
+      createdAt: number;
+      favoriteShowIds: Array<Id<"shows">>;
+      favoriteThemes: Array<string>;
+      updatedAt: number;
+      userId: Id<"users">;
+      _id: Id<"userTastePreferences">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "createdAt"
+      | "favoriteShowIds"
+      | "favoriteThemes"
+      | "updatedAt"
+      | "userId";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_userId: ["userId", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {};
+  };
+  userTasteProfiles: {
+    document: {
+      createdAt: number;
+      embeddingVersion: string;
+      favoriteShowIds: Array<Id<"shows">>;
+      favoriteThemes: Array<string>;
+      negativeShowIds: Array<Id<"shows">>;
+      positiveShowIds: Array<Id<"shows">>;
+      signalFingerprint: string;
+      similarityEmbedding: Array<number>;
+      updatedAt: number;
+      userId: Id<"users">;
+      _id: Id<"userTasteProfiles">;
+      _creationTime: number;
+    };
+    fieldPaths:
+      | "_creationTime"
+      | "_id"
+      | "createdAt"
+      | "embeddingVersion"
+      | "favoriteShowIds"
+      | "favoriteThemes"
+      | "negativeShowIds"
+      | "positiveShowIds"
+      | "signalFingerprint"
+      | "similarityEmbedding"
+      | "updatedAt"
+      | "userId";
+    indexes: {
+      by_id: ["_id"];
+      by_creation_time: ["_creationTime"];
+      by_updatedAt: ["updatedAt", "_creationTime"];
+      by_userId: ["userId", "_creationTime"];
+    };
+    searchIndexes: {};
+    vectorIndexes: {
+      by_similarity_embedding: {
+        vectorField: "similarityEmbedding";
+        dimensions: number;
+        filterFields: "embeddingVersion";
+      };
+    };
+  };
   watchLogs: {
     document: {
+      episodeNumber?: number;
+      episodeTitle?: string;
       note?: string;
+      seasonNumber?: number;
       showId: Id<"shows">;
       userId: Id<"users">;
       watchedAt: number;
@@ -671,7 +1135,10 @@ export type DataModel = {
     fieldPaths:
       | "_creationTime"
       | "_id"
+      | "episodeNumber"
+      | "episodeTitle"
       | "note"
+      | "seasonNumber"
       | "showId"
       | "userId"
       | "watchedAt";

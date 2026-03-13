@@ -11,6 +11,9 @@ export const add = mutation({
     showId: v.id("shows"),
     watchedAt: v.number(),
     note: v.optional(v.string()),
+    seasonNumber: v.optional(v.number()),
+    episodeNumber: v.optional(v.number()),
+    episodeTitle: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getCurrentUserOrThrow(ctx);
@@ -21,6 +24,15 @@ export const add = mutation({
       showId: args.showId,
       watchedAt: args.watchedAt,
       note: args.note?.slice(0, 500),
+      ...(args.seasonNumber !== undefined && {
+        seasonNumber: args.seasonNumber,
+      }),
+      ...(args.episodeNumber !== undefined && {
+        episodeNumber: args.episodeNumber,
+      }),
+      ...(args.episodeTitle !== undefined && {
+        episodeTitle: args.episodeTitle.slice(0, 200),
+      }),
     });
 
     const followers = await ctx.db
@@ -163,6 +175,89 @@ export const listForShowDetailed = query({
         log,
         user: toPublicUser(users[index] ?? null),
       })),
+    };
+  },
+});
+
+export const listActivityForUser = query({
+  args: { userId: v.id("users"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 60, 20), 160);
+    const perSourceLimit = limit + 1;
+
+    const [logs, reviews] = await Promise.all([
+      ctx.db
+        .query("watchLogs")
+        .withIndex("by_user_watchedAt", (q) => q.eq("userId", args.userId))
+        .order("desc")
+        .take(perSourceLimit),
+      ctx.db
+        .query("reviews")
+        .withIndex("by_author_createdAt", (q) => q.eq("authorId", args.userId))
+        .order("desc")
+        .take(perSourceLimit),
+    ]);
+
+    const showIds = new Set<Id<"shows">>();
+    for (const log of logs) {
+      showIds.add(log.showId);
+    }
+    for (const review of reviews) {
+      showIds.add(review.showId);
+    }
+
+    const shows = await Promise.all(
+      Array.from(showIds).map((showId) => ctx.db.get(showId)),
+    );
+    const showMap = new Map(
+      shows.filter(Boolean).map((show) => [show!._id, show!]),
+    );
+
+    const merged = [
+      ...logs.map((log) => ({
+        id: log._id,
+        type: "log" as const,
+        timestamp: log.watchedAt,
+        show: showMap.get(log.showId) ?? null,
+        log,
+      })),
+      ...reviews.map((review) => ({
+        id: review._id,
+        type: "review" as const,
+        timestamp: review.updatedAt ?? review.createdAt,
+        show: showMap.get(review.showId) ?? null,
+        review,
+      })),
+    ].sort((a, b) => b.timestamp - a.timestamp);
+
+    const visibleItems = merged.slice(0, limit);
+    const sourceLogs = logs.slice(0, limit);
+    const sourceReviews = reviews.slice(0, limit);
+
+    return {
+      items: visibleItems,
+      hasMore: merged.length > limit,
+      stats: {
+        noteCount:
+          sourceLogs.filter((log) => Boolean(log.note?.trim())).length +
+          sourceReviews.filter((review) => Boolean(review.reviewText?.trim()))
+            .length,
+        episodeCount:
+          sourceLogs.filter(
+            (log) =>
+              log.seasonNumber !== undefined && log.episodeNumber !== undefined,
+          ).length +
+          sourceReviews.filter(
+            (review) =>
+              review.seasonNumber !== undefined &&
+              review.episodeNumber !== undefined,
+          ).length,
+        showCount: new Set(
+          visibleItems
+            .map((item) => item.show?._id)
+            .filter((showId): showId is Id<"shows"> => showId !== undefined),
+        ).size,
+      },
     };
   },
 });

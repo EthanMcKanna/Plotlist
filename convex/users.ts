@@ -5,6 +5,13 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { buildPersonPreviews } from "./people";
 import { hashPhoneNumber, normalizePhoneNumber } from "./phone";
 import { toPublicUser } from "./publicUser";
+import {
+  canViewerSeeSection,
+  DEFAULT_PROFILE_VISIBILITY,
+  getOwnerFollowsViewer,
+  getProfileVisibilitySettings,
+  ProfileVisibility,
+} from "./profileVisibility";
 
 const DEFAULT_COUNTS = {
   countsFollowers: 0,
@@ -113,6 +120,7 @@ export const ensureProfile = mutation({
         displayName: nextDisplayName,
         username: nextUsername,
         onboardingStep: existing.onboardingStep ?? "profile",
+        profileVisibility: existing.profileVisibility ?? DEFAULT_PROFILE_VISIBILITY,
         searchText,
         phoneHash,
         ...countUpdates,
@@ -149,6 +157,7 @@ export const ensureProfile = mutation({
       createdAt: now,
       lastSeenAt: now,
       onboardingStep: "profile",
+      profileVisibility: DEFAULT_PROFILE_VISIBILITY,
       ...DEFAULT_COUNTS,
     });
 
@@ -162,16 +171,79 @@ export const profile = query({
     const user = await ctx.db.get(args.userId);
     if (!user) return null;
     const viewerId = await getAuthUserId(ctx);
+    const profileVisibility = getProfileVisibilitySettings(user);
+    const ownerFollowsViewer = await getOwnerFollowsViewer(ctx, user._id, viewerId);
+    const sectionVisibility = {
+      favorites: canViewerSeeSection({
+        ownerId: user._id,
+        viewerId,
+        visibility: profileVisibility.favorites,
+        ownerFollowsViewer,
+      }),
+      currentlyWatching: canViewerSeeSection({
+        ownerId: user._id,
+        viewerId,
+        visibility: profileVisibility.currentlyWatching,
+        ownerFollowsViewer,
+      }),
+      watchlist: canViewerSeeSection({
+        ownerId: user._id,
+        viewerId,
+        visibility: profileVisibility.watchlist,
+        ownerFollowsViewer,
+      }),
+    };
 
-    const recentReviews = await ctx.db
+    const showReviews = await ctx.db
       .query("reviews")
       .withIndex("by_author_createdAt", (q) => q.eq("authorId", user._id))
+      .filter((q) => q.eq(q.field("seasonNumber"), undefined))
       .order("desc")
-      .take(5);
+      .take(100);
 
     const avatarUrl = user.avatarStorageId
       ? await ctx.storage.getUrl(user.avatarStorageId)
       : null;
+
+    const favoriteShowDocs = user.favoriteShowIds?.length
+      ? await Promise.all(user.favoriteShowIds.slice(0, 4).map((id) => ctx.db.get(id)))
+      : [];
+
+    const watchStates = await ctx.db
+      .query("watchStates")
+      .withIndex("by_user_updatedAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(200);
+
+    const watchingStates = watchStates
+      .filter((s) => s.status === "watching")
+      .slice(0, 10);
+    const watchingShows = await Promise.all(
+      watchingStates.map((s) => ctx.db.get(s.showId)),
+    );
+    const watchlistStates = watchStates
+      .filter((s) => s.status === "watchlist")
+      .slice(0, 12);
+    const watchlistShows = await Promise.all(
+      watchlistStates.map((s) => ctx.db.get(s.showId)),
+    );
+
+    const avgRating =
+      showReviews.length > 0
+        ? Number(
+            (
+              showReviews.reduce((sum, r) => sum + r.rating, 0) /
+              showReviews.length
+            ).toFixed(1),
+          )
+        : null;
+
+    const topRated = [...showReviews]
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, 5);
+    const topRatedShows = await Promise.all(
+      topRated.map((review) => ctx.db.get(review.showId)),
+    );
 
     return {
       user: toPublicUser(user),
@@ -180,10 +252,64 @@ export const profile = query({
         followers: user.countsFollowers ?? 0,
         following: user.countsFollowing ?? 0,
         reviews: user.countsReviews ?? 0,
+        shows: user.countsTotalShows ?? 0,
+        completed: user.countsCompleted ?? 0,
+        watching: sectionVisibility.currentlyWatching
+          ? (user.countsWatching ?? 0)
+          : null,
+        watchlist: sectionVisibility.watchlist ? (user.countsWatchlist ?? 0) : null,
+        dropped: user.countsDropped ?? 0,
       },
+      favoriteShows: sectionVisibility.favorites
+        ? favoriteShowDocs
+            .filter((s): s is NonNullable<typeof s> => s !== null)
+            .map((show) => ({
+              _id: show._id,
+              title: show.title,
+              posterUrl: show.posterUrl,
+              year: show.year,
+            }))
+        : [],
+      favoriteGenres: sectionVisibility.favorites ? (user.favoriteGenres ?? []) : [],
+      currentlyWatching: sectionVisibility.currentlyWatching
+        ? watchingShows
+            .filter((s): s is NonNullable<typeof s> => s !== null)
+            .map((show) => ({
+              _id: show._id,
+              title: show.title,
+              posterUrl: show.posterUrl,
+              year: show.year,
+            }))
+        : [],
+      watchlistPreview: sectionVisibility.watchlist
+        ? watchlistShows
+            .filter((s): s is NonNullable<typeof s> => s !== null)
+            .map((show) => ({
+              _id: show._id,
+              title: show.title,
+              posterUrl: show.posterUrl,
+              year: show.year,
+            }))
+        : [],
+      topRated: topRated
+        .map((review, i) => {
+          const show = topRatedShows[i];
+          if (!show) return null;
+          return {
+            reviewId: review._id,
+            rating: review.rating,
+            showId: show._id,
+            title: show.title,
+            posterUrl: show.posterUrl,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null),
+      averageRating: avgRating,
+      memberSince: user.createdAt ?? null,
       recent: {
-        reviews: recentReviews,
+        reviews: showReviews.slice(0, 5),
       },
+      permissions: sectionVisibility,
       relationship:
         viewerId && viewerId !== user._id
           ? (await buildPersonPreviews(ctx, viewerId, [user]))[0] ?? null
@@ -198,6 +324,9 @@ export const updateProfile = mutation({
     bio: v.optional(v.string()),
     username: v.optional(v.string()),
     avatarStorageId: v.optional(v.id("_storage")),
+    favoriteShowIds: v.optional(v.array(v.id("shows"))),
+    favoriteGenres: v.optional(v.array(v.string())),
+    profileVisibility: v.optional(ProfileVisibility),
   },
   handler: async (ctx, args) => {
     const user = await getCurrentUserOrThrow(ctx);
@@ -225,16 +354,26 @@ export const updateProfile = mutation({
     const countUpdates = ensureCounts(user);
     const phoneHash = await maybeHashPhone(user.phone);
 
-    await ctx.db.patch(user._id, {
+    const patch: Record<string, unknown> = {
       displayName: nextDisplayName,
       bio: args.bio ?? user.bio,
       username: nextUsername,
       avatarStorageId: args.avatarStorageId ?? user.avatarStorageId,
+      profileVisibility: args.profileVisibility ?? getProfileVisibilitySettings(user),
       searchText,
       phoneHash,
       lastSeenAt: Date.now(),
       ...countUpdates,
-    });
+    };
+
+    if (args.favoriteShowIds !== undefined) {
+      patch.favoriteShowIds = args.favoriteShowIds.slice(0, 4);
+    }
+    if (args.favoriteGenres !== undefined) {
+      patch.favoriteGenres = args.favoriteGenres.slice(0, 5);
+    }
+
+    await ctx.db.patch(user._id, patch);
   },
 });
 
@@ -467,10 +606,100 @@ export const me = query({
   },
 });
 
+export const getFavoriteShows = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getCurrentUserOrThrow(ctx);
+    const showIds = user.favoriteShowIds ?? [];
+    if (showIds.length === 0) return [];
+
+    const shows = await Promise.all(showIds.map((id) => ctx.db.get(id)));
+    return shows
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .map((show) => ({
+        _id: show._id,
+        title: show.title,
+        posterUrl: show.posterUrl,
+        year: show.year,
+      }));
+  },
+});
+
+export const getShowsById = query({
+  args: { showIds: v.array(v.id("shows")) },
+  handler: async (ctx, args) => {
+    await getCurrentUserOrThrow(ctx);
+    if (args.showIds.length === 0) return [];
+
+    const shows = await Promise.all(args.showIds.map((id) => ctx.db.get(id)));
+    return shows
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .map((show) => ({
+        _id: show._id,
+        title: show.title,
+        posterUrl: show.posterUrl,
+        year: show.year,
+      }));
+  },
+});
+
 export const getById = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.userId);
+  },
+});
+
+export const getVisibleFavoriteShowsByUserIds = internalQuery({
+  args: {
+    viewerId: v.id("users"),
+    userIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const uniqueUserIds = Array.from(new Set(args.userIds));
+
+    const rows = await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const user = await ctx.db.get(userId);
+        if (!user) {
+          return null;
+        }
+
+        const ownerFollowsViewer = await getOwnerFollowsViewer(ctx, user._id, args.viewerId);
+        const canViewFavorites = canViewerSeeSection({
+          ownerId: user._id,
+          viewerId: args.viewerId,
+          visibility: getProfileVisibilitySettings(user).favorites,
+          ownerFollowsViewer,
+        });
+
+        if (!canViewFavorites) {
+          return {
+            userId: user._id,
+            favoriteShows: [],
+          };
+        }
+
+        const favoriteShowIds = user.favoriteShowIds ?? [];
+        const favoriteShowDocs = await Promise.all(
+          favoriteShowIds.map((showId) => ctx.db.get(showId)),
+        );
+
+        return {
+          userId: user._id,
+          favoriteShows: favoriteShowDocs
+            .filter((show): show is NonNullable<typeof show> => Boolean(show))
+            .map((show) => ({
+              _id: show._id,
+              title: show.title,
+              posterUrl: show.posterUrl,
+              year: show.year,
+            })),
+        };
+      }),
+    );
+
+    return rows.filter((row): row is NonNullable<typeof row> => Boolean(row));
   },
 });
 

@@ -12,11 +12,14 @@ import * as Sharing from "expo-sharing";
 
 import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
+import { SegmentedControl } from "../../components/SegmentedControl";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
 import { api } from "../../convex/_generated/api";
 import { clearAuthTokens } from "../../lib/authStorage";
+import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { setContactsSyncDismissed } from "../../lib/preferences";
 
 function formatPhone(raw?: string | null): string {
   if (!raw) return "Unknown number";
@@ -88,11 +91,57 @@ function SettingsRow({
   );
 }
 
+type ProfileVisibilitySetting = "public" | "following" | "private";
+
+type ProfileVisibilitySettings = {
+  favorites: ProfileVisibilitySetting;
+  currentlyWatching: ProfileVisibilitySetting;
+  watchlist: ProfileVisibilitySetting;
+};
+
+const DEFAULT_PROFILE_VISIBILITY: ProfileVisibilitySettings = {
+  favorites: "public",
+  currentlyWatching: "public",
+  watchlist: "public",
+};
+
+const PRIVACY_OPTIONS = [
+  { value: "public", label: "Public" },
+  { value: "following", label: "Following" },
+  { value: "private", label: "Only me" },
+] satisfies { value: ProfileVisibilitySetting; label: string }[];
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
       {title}
     </Text>
+  );
+}
+
+function PrivacyCard({
+  title,
+  description,
+  value,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  value: ProfileVisibilitySetting;
+  onChange: (value: ProfileVisibilitySetting) => void;
+}) {
+  return (
+    <View className="rounded-2xl border border-dark-border bg-dark-card p-4">
+      <Text className="text-sm font-semibold text-text-primary">{title}</Text>
+      <Text className="mt-1 text-sm leading-5 text-text-tertiary">{description}</Text>
+      <View className="mt-3">
+        <SegmentedControl
+          options={PRIVACY_OPTIONS}
+          value={value}
+          onChange={(next) => onChange(next as ProfileVisibilitySetting)}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -129,6 +178,10 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [syncingContacts, setSyncingContacts] = useState(false);
+  const [privacyLoaded, setPrivacyLoaded] = useState(false);
+  const [profileVisibility, setProfileVisibility] = useState<ProfileVisibilitySettings>(
+    DEFAULT_PROFILE_VISIBILITY,
+  );
   const [cropImage, setCropImage] = useState<{
     uri: string;
     width: number;
@@ -147,6 +200,16 @@ export default function SettingsScreen() {
     }
   }, [bio, displayName, me, username]);
 
+  useEffect(() => {
+    if (me && !privacyLoaded) {
+      setProfileVisibility({
+        ...DEFAULT_PROFILE_VISIBILITY,
+        ...(me.profileVisibility ?? {}),
+      });
+      setPrivacyLoaded(true);
+    }
+  }, [me, privacyLoaded]);
+
   const handleUsernameChange = useCallback((raw: string) => {
     setUsername(sanitizeUsername(raw));
   }, []);
@@ -161,9 +224,16 @@ export default function SettingsScreen() {
     return (
       displayName !== origName ||
       bio !== origBio ||
-      username !== origUsername
+      username !== origUsername ||
+      profileVisibility.favorites !==
+        (me.profileVisibility?.favorites ?? DEFAULT_PROFILE_VISIBILITY.favorites) ||
+      profileVisibility.currentlyWatching !==
+        (me.profileVisibility?.currentlyWatching ??
+          DEFAULT_PROFILE_VISIBILITY.currentlyWatching) ||
+      profileVisibility.watchlist !==
+        (me.profileVisibility?.watchlist ?? DEFAULT_PROFILE_VISIBILITY.watchlist)
     );
-  }, [me, displayName, bio, username]);
+  }, [me, displayName, bio, username, profileVisibility]);
 
   const canSave = isDirty && !usernameError && !saving;
 
@@ -175,6 +245,7 @@ export default function SettingsScreen() {
         displayName: displayName || undefined,
         bio: bio || undefined,
         username: username || undefined,
+        profileVisibility,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -312,10 +383,9 @@ export default function SettingsScreen() {
       setSyncingContacts(true);
       const entries = await loadDeviceContacts();
       const result = await syncContacts({ entries });
-      Alert.alert(
-        "Contacts synced",
-        `${result.matchedCount} matches, ${result.invitedCount} people ready to invite.`,
-      );
+      await setContactsSyncDismissed(false);
+      const copy = getContactSyncAlertCopy(result);
+      Alert.alert(copy.title, copy.message);
     } catch (error) {
       Alert.alert("Sync failed", String(error));
     } finally {
@@ -335,6 +405,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               await clearSync({});
+              await setContactsSyncDismissed(false);
             } catch (error) {
               Alert.alert("Could not clear contacts", String(error));
             }
@@ -472,6 +543,43 @@ export default function SettingsScreen() {
               </Text>
             </View>
           </Pressable>
+        </View>
+
+        <View className="mt-10">
+          <SectionHeader title="Privacy" />
+          <Text className="mt-2 text-sm leading-5 text-text-tertiary">
+            Choose what anyone can see on your public profile. Following means only
+            people you follow can see that section.
+          </Text>
+          <View className="mt-4 gap-3">
+            <PrivacyCard
+              title="Favorite shows"
+              description="Controls your favorite shows and favorite genres on your profile."
+              value={profileVisibility.favorites}
+              onChange={(value) =>
+                setProfileVisibility((current) => ({ ...current, favorites: value }))
+              }
+            />
+            <PrivacyCard
+              title="Currently watching"
+              description="Controls the Now Watching shelf and the watching count on your profile."
+              value={profileVisibility.currentlyWatching}
+              onChange={(value) =>
+                setProfileVisibility((current) => ({
+                  ...current,
+                  currentlyWatching: value,
+                }))
+              }
+            />
+            <PrivacyCard
+              title="Watchlist"
+              description="Controls your public watchlist preview, full watchlist page, and watchlist count."
+              value={profileVisibility.watchlist}
+              onChange={(value) =>
+                setProfileVisibility((current) => ({ ...current, watchlist: value }))
+              }
+            />
+          </View>
         </View>
 
         {/* ── Contacts ── */}

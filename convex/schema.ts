@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
+import { ProfileVisibility } from "./profileVisibility";
 
 const Status = v.union(
   v.literal("watchlist"),
@@ -57,6 +58,14 @@ export default defineSchema({
       ),
     ),
     onboardingCompletedAt: v.optional(v.number()),
+    favoriteShowIds: v.optional(v.array(v.id("shows"))),
+    favoriteGenres: v.optional(v.array(v.string())),
+    profileVisibility: v.optional(ProfileVisibility),
+    releaseCalendarPreferences: v.optional(
+      v.object({
+        selectedProviders: v.array(v.string()),
+      }),
+    ),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -73,9 +82,17 @@ export default defineSchema({
     externalSource: v.string(),
     externalId: v.string(),
     title: v.string(),
+    originalTitle: v.optional(v.string()),
     year: v.optional(v.number()),
     overview: v.optional(v.string()),
     posterUrl: v.optional(v.string()),
+    backdropUrl: v.optional(v.string()),
+    genreIds: v.optional(v.array(v.number())),
+    originalLanguage: v.optional(v.string()),
+    originCountries: v.optional(v.array(v.string())),
+    tmdbPopularity: v.optional(v.number()),
+    tmdbVoteAverage: v.optional(v.number()),
+    tmdbVoteCount: v.optional(v.number()),
     searchText: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -100,24 +117,47 @@ export default defineSchema({
     showId: v.id("shows"),
     watchedAt: v.number(),
     note: v.optional(v.string()),
+    seasonNumber: v.optional(v.number()),
+    episodeNumber: v.optional(v.number()),
+    episodeTitle: v.optional(v.string()),
   })
     .index("by_user_watchedAt", ["userId", "watchedAt"])
     .index("by_show_watchedAt", ["showId", "watchedAt"])
     .index("by_watchedAt", ["watchedAt"]),
 
+  episodeProgress: defineTable({
+    userId: v.id("users"),
+    showId: v.id("shows"),
+    seasonNumber: v.number(),
+    episodeNumber: v.number(),
+    watchedAt: v.number(),
+  })
+    .index("by_user_show", ["userId", "showId"])
+    .index("by_user_watchedAt", ["userId", "watchedAt"])
+    .index("by_user_show_season_episode", [
+      "userId",
+      "showId",
+      "seasonNumber",
+      "episodeNumber",
+    ]),
+
   reviews: defineTable({
     authorId: v.id("users"),
     showId: v.id("shows"),
     rating: v.number(),
-    reviewText: v.string(),
+    reviewText: v.optional(v.string()),
     spoiler: v.boolean(),
+    seasonNumber: v.optional(v.number()),
+    episodeNumber: v.optional(v.number()),
+    episodeTitle: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   })
     .index("by_show_createdAt", ["showId", "createdAt"])
     .index("by_author_createdAt", ["authorId", "createdAt"])
     .index("by_author_show", ["authorId", "showId"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_show_episode", ["showId", "seasonNumber", "episodeNumber"]),
 
   follows: defineTable({
     followerId: v.id("users"),
@@ -220,6 +260,199 @@ export default defineSchema({
   })
     .index("by_category", ["category"])
     .index("by_expiresAt", ["expiresAt"]),
+
+  tmdbImportJobs: defineTable({
+    kind: v.literal("top_tv"),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    requestedBy: v.optional(v.id("users")),
+    targetCount: v.number(),
+    pageSize: v.number(),
+    maxPage: v.number(),
+    nextPage: v.number(),
+    pagesProcessed: v.number(),
+    showsProcessed: v.number(),
+    totalPages: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_status_createdAt", ["status", "createdAt"]),
+
+  tmdbEpisodeCacheJobs: defineTable({
+    kind: v.literal("season_cache"),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    requestedBy: v.optional(v.id("users")),
+    targetShowCount: v.number(),
+    batchSize: v.number(),
+    nextOffset: v.number(),
+    processedShowCount: v.number(),
+    cachedSeasonCount: v.number(),
+    skippedSeasonCount: v.number(),
+    failedShowCount: v.number(),
+    totalShowCount: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_status_createdAt", ["status", "createdAt"]),
+
+  showReleaseSyncState: defineTable({
+    showId: v.id("shows"),
+    syncedAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+    status: v.union(
+      v.literal("idle"),
+      v.literal("scheduled"),
+      v.literal("running"),
+      v.literal("ready"),
+      v.literal("failed"),
+    ),
+    lastError: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_showId", ["showId"])
+    .index("by_status_updatedAt", ["status", "updatedAt"])
+    .index("by_expiresAt", ["expiresAt"]),
+
+  releaseEvents: defineTable({
+    showId: v.id("shows"),
+    airDate: v.string(),
+    airDateTs: v.number(),
+    seasonNumber: v.number(),
+    episodeNumber: v.number(),
+    episodeTitle: v.optional(v.string()),
+    isPremiere: v.boolean(),
+    isReturningSeason: v.boolean(),
+    isSeasonFinale: v.boolean(),
+    isSeriesFinale: v.boolean(),
+  })
+    .index("by_show_airDateTs", ["showId", "airDateTs"])
+    .index("by_airDateTs", ["airDateTs"]),
+
+  showEmbeddings: defineTable({
+    showId: v.id("shows"),
+    externalSource: v.string(),
+    externalId: v.string(),
+    embeddingVersion: v.string(),
+    model: v.string(),
+    dimensions: v.number(),
+    inputText: v.string(),
+    inputHash: v.string(),
+    similarityEmbedding: v.array(v.float64()),
+    retrievalEmbedding: v.array(v.float64()),
+    updatedAt: v.number(),
+  })
+    .index("by_showId", ["showId"])
+    .index("by_external", ["externalSource", "externalId"])
+    .index("by_version_updatedAt", ["embeddingVersion", "updatedAt"])
+    .vectorIndex("by_similarity_embedding", {
+      vectorField: "similarityEmbedding",
+      dimensions: 1536,
+      filterFields: ["embeddingVersion"],
+    })
+    .vectorIndex("by_retrieval_embedding", {
+      vectorField: "retrievalEmbedding",
+      dimensions: 1536,
+      filterFields: ["embeddingVersion"],
+    }),
+
+  showEmbeddingJobs: defineTable({
+    kind: v.literal("show_catalog"),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    embeddingVersion: v.string(),
+    model: v.string(),
+    dimensions: v.number(),
+    batchSize: v.number(),
+    nextCursor: v.optional(v.string()),
+    processedCount: v.number(),
+    embeddedCount: v.number(),
+    skippedCount: v.number(),
+    totalCount: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    failedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_status_createdAt", ["status", "createdAt"]),
+
+  userTasteCaches: defineTable({
+    userId: v.id("users"),
+    themeKey: v.string(),
+    embeddingVersion: v.string(),
+    signalFingerprint: v.string(),
+    recommendations: v.array(
+      v.object({
+        showId: v.id("shows"),
+        title: v.string(),
+        year: v.optional(v.number()),
+        posterUrl: v.optional(v.string()),
+        overview: v.optional(v.string()),
+        reason: v.string(),
+        score: v.number(),
+      }),
+    ),
+    positiveShowIds: v.array(v.id("shows")),
+    negativeShowIds: v.array(v.id("shows")),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_theme", ["userId", "themeKey"])
+    .index("by_user_updatedAt", ["userId", "updatedAt"]),
+
+  userTastePreferences: defineTable({
+    userId: v.id("users"),
+    favoriteShowIds: v.array(v.id("shows")),
+    favoriteThemes: v.array(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
+
+  userTasteProfiles: defineTable({
+    userId: v.id("users"),
+    embeddingVersion: v.string(),
+    signalFingerprint: v.string(),
+    favoriteShowIds: v.array(v.id("shows")),
+    favoriteThemes: v.array(v.string()),
+    positiveShowIds: v.array(v.id("shows")),
+    negativeShowIds: v.array(v.id("shows")),
+    similarityEmbedding: v.array(v.float64()),
+    updatedAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_updatedAt", ["updatedAt"])
+    .vectorIndex("by_similarity_embedding", {
+      vectorField: "similarityEmbedding",
+      dimensions: 1536,
+      filterFields: ["embeddingVersion"],
+    }),
 
   reports: defineTable({
     reporterId: v.id("users"),

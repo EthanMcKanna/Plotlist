@@ -27,13 +27,24 @@ import { SearchResultRow } from "../../components/SearchResultRow";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../convex/_generated/api";
+import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { setContactsSyncDismissed } from "../../lib/preferences";
 
 type SearchMode = "shows" | "people";
 
 const modeOptions = [
   { value: "shows", label: "Shows" },
   { value: "people", label: "People" },
+];
+
+const SEMANTIC_PROMPTS = [
+  "smart funny mystery with great dialogue",
+  "slow-burn sci-fi",
+  "comfort comedy",
+  "shows like Severance but less dark",
+  "dark crime",
+  "good with parents",
 ];
 
 /* ─── Section Header ───────────────────────────────────────────────── */
@@ -92,7 +103,6 @@ export default function SearchScreen() {
   >({});
   const [isFocused, setIsFocused] = useState(false);
 
-  const isSearching = trimmedQuery.length >= 3;
   const searchReady = trimmedQuery.length >= 3 && debouncedQuery.length >= 3;
   const hasSearchResults = catalogResults.length > 0 || !isSearchingCatalog;
   const showDiscover =
@@ -318,12 +328,9 @@ export default function SearchScreen() {
         Object.fromEntries(entries.map((e) => [e.sourceRecordId, e.phone])),
       );
       const result = await syncContacts({ entries });
-      Alert.alert(
-        "Contacts synced",
-        result.matchedCount > 0
-          ? `We found ${result.matchedCount} people already on Plotlist.`
-          : "No current matches, but you can still invite people.",
-      );
+      await setContactsSyncDismissed(false);
+      const copy = getContactSyncAlertCopy(result);
+      Alert.alert(copy.title, copy.message);
     } catch (error) {
       Alert.alert("Could not sync contacts", String(error));
     } finally {
@@ -393,7 +400,7 @@ export default function SearchScreen() {
           year={item.year}
           overview={item.overview}
           posterUrl={item.posterUrl}
-          actionLabel="Add to Plotlist"
+          actionLabel={item.matchLabel ?? "Add to Plotlist"}
           onPress={() => handleAddFromCatalog(item)}
         />
       </View>
@@ -432,7 +439,7 @@ export default function SearchScreen() {
           </Text>
           <Text className="mt-1 text-sm text-text-tertiary">
             {mode === "shows"
-              ? "Find any TV series and add it to your watchlist."
+              ? "Search by title or describe the vibe you want."
               : "Search by name or @username, or sync your contacts."}
           </Text>
         </View>
@@ -461,7 +468,7 @@ export default function SearchScreen() {
               onBlur={() => setIsFocused(false)}
               placeholder={
                 mode === "shows"
-                  ? "Search for a show\u2026"
+                  ? "Try: slow-burn sci-fi or shows like Severance…"
                   : "Search people or @username\u2026"
               }
               placeholderTextColor="#5A6070"
@@ -489,6 +496,29 @@ export default function SearchScreen() {
             }}
           />
         </View>
+
+        {mode === "shows" ? (
+          <View className="mt-4 px-5">
+            <SectionLine label="Try Searching" icon="sparkles" />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 10, paddingRight: 16 }}
+            >
+              {SEMANTIC_PROMPTS.map((prompt) => (
+                <Pressable
+                  key={prompt}
+                  onPress={() => setQuery(prompt)}
+                  className="rounded-full border border-dark-border bg-dark-card px-3 py-2"
+                >
+                  <Text className="text-xs font-semibold text-text-secondary">
+                    {prompt}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
         {/* ── Shows: Discover (before 3-char search) ───────────── */}
         {showDiscover && (
@@ -590,7 +620,7 @@ export default function SearchScreen() {
         {mode === "shows" && searchReady && hasSearchResults && (
           <View className="mt-6 px-5">
             <SectionLine
-              label="Results"
+              label="Best Matches"
               count={
                 catalogResults.length > 0
                   ? catalogResults.length
