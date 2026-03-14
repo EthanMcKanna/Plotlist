@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -29,13 +30,18 @@ import { formatRelativeTime } from "../../lib/format";
 type FilterValue = "all" | "entries" | "reviews" | "notes" | "episodes";
 type SortValue = "recent" | "oldest" | "title" | "rating";
 
-const FILTER_LABELS: Record<FilterValue, string> = {
-  all: "All",
-  entries: "Entries",
-  reviews: "Reviews",
-  notes: "Notes",
-  episodes: "Episodes",
-};
+const FILTERS: { value: FilterValue; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "entries", label: "Entries" },
+  { value: "reviews", label: "Reviews" },
+];
+
+const SORT_OPTIONS: { value: SortValue; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: "recent", label: "Newest first", icon: "time-outline" },
+  { value: "oldest", label: "Oldest first", icon: "hourglass-outline" },
+  { value: "title", label: "By title", icon: "text-outline" },
+  { value: "rating", label: "Best rated", icon: "star-outline" },
+];
 
 type ActivityItem =
   | {
@@ -122,7 +128,7 @@ function buildEpisodeLabel(
   }
 
   const code = `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
-  return episodeTitle ? `${code} • ${episodeTitle}` : code;
+  return episodeTitle ? `${code} · ${episodeTitle}` : code;
 }
 
 function getItemSubtitle(item: ActivityItem) {
@@ -141,6 +147,42 @@ function getItemSubtitle(item: ActivityItem) {
   );
 }
 
+/* ─── Filter pill ───────────────────────────────────────────────── */
+
+function FilterPill({
+  label,
+  isActive,
+  onPress,
+}: {
+  label: string;
+  isActive: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress();
+      }}
+      className="rounded-full px-3.5 py-1.5 active:opacity-80"
+      style={{
+        backgroundColor: isActive ? "rgba(14, 165, 233, 0.15)" : "rgba(90, 96, 112, 0.1)",
+        borderWidth: 1,
+        borderColor: isActive ? "rgba(14, 165, 233, 0.3)" : "transparent",
+      }}
+    >
+      <Text
+        className="text-[13px] font-semibold"
+        style={{ color: isActive ? "#7dd3fc" : "#9BA1B0" }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/* ─── Activity card ─────────────────────────────────────────────── */
+
 const LogActivityCard = memo(function LogActivityCard({
   item,
   onDeleteLog,
@@ -153,32 +195,24 @@ const LogActivityCard = memo(function LogActivityCard({
   const title = getShowTitle(item);
   const subtitle = getItemSubtitle(item);
   const note = item.type === "log" ? item.log.note : item.review.reviewText;
-  const typeLabel =
-    item.type === "review"
-      ? subtitle
-        ? "Episode review"
-        : "Show review"
-      : subtitle
-        ? "Watched episode"
-        : "Logged watch";
+  const isReview = item.type === "review";
 
   return (
     <Pressable
-      className="mb-3 flex-row gap-4 rounded-2xl border border-dark-border bg-dark-card p-3 active:bg-dark-hover"
+      className="mb-3 flex-row gap-3.5 rounded-2xl border border-dark-border bg-dark-card p-3 active:bg-dark-hover"
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (item.type === "review") {
+        if (isReview) {
           router.push(`/review/${item.review._id}`);
           return;
         }
-
         if (item.show?._id) {
           router.push(`/show/${item.show._id}`);
         }
       }}
       onLongPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        if (item.type === "review") {
+        if (isReview) {
           onDeleteReview(item.review._id, title);
           return;
         }
@@ -191,69 +225,59 @@ const LogActivityCard = memo(function LogActivityCard({
         <View className="flex-row items-start justify-between gap-3">
           <View className="flex-1">
             <Text
-              className="text-base font-semibold text-text-primary"
+              className="text-[15px] font-semibold text-text-primary"
               numberOfLines={1}
             >
               {title}
             </Text>
-            <View className="mt-1 flex-row flex-wrap items-center gap-2">
-              <Text className="text-xs text-text-tertiary">{typeLabel}</Text>
-              {subtitle ? (
-                <>
-                  <Text className="text-xs text-text-tertiary">•</Text>
-                  <Text className="text-xs text-brand-400" numberOfLines={1}>
-                    {subtitle}
-                  </Text>
-                </>
-              ) : null}
-            </View>
-          </View>
-
-          <View className="items-end">
-            {item.type === "review" ? (
-              <Text className="text-xs font-semibold text-amber-300">
-                ★ {item.review.rating.toFixed(1)}
+            {subtitle ? (
+              <Text
+                className="mt-0.5 text-xs text-brand-400"
+                numberOfLines={1}
+              >
+                {subtitle}
               </Text>
             ) : null}
-            <Text className="mt-1 text-xs text-text-tertiary">
-              {formatRelativeTime(item.timestamp)}
-            </Text>
           </View>
+
+          <Text className="text-[11px] text-text-tertiary">
+            {formatRelativeTime(item.timestamp)}
+          </Text>
         </View>
+
+        {isReview && (
+          <View className="mt-1.5 flex-row items-center gap-1">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Ionicons
+                key={i}
+                name={i < Math.round(item.review.rating) ? "star" : "star-outline"}
+                size={12}
+                color={i < Math.round(item.review.rating) ? "#fbbf24" : "#4b5563"}
+              />
+            ))}
+          </View>
+        )}
 
         {note ? (
           <Text className="mt-2 text-sm leading-5 text-text-secondary" numberOfLines={3}>
             {note}
           </Text>
-        ) : (
-          <Text className="mt-2 text-sm text-text-tertiary">
-            {item.type === "review"
-              ? "No written review."
-              : "No note."}
-          </Text>
-        )}
+        ) : null}
 
-        <View className="mt-3 flex-row flex-wrap items-center gap-2">
-          {hasEpisodeMetadata(item) ? (
-            <View className="rounded-full bg-dark-elevated px-2.5 py-1">
-              <Text className="text-[11px] text-text-secondary">Episode</Text>
-            </View>
-          ) : null}
-          {hasNote(item) ? (
-            <View className="rounded-full bg-dark-elevated px-2.5 py-1">
-              <Text className="text-[11px] text-text-secondary">Notes</Text>
-            </View>
-          ) : null}
-          {item.type === "review" && item.review.spoiler ? (
-            <View className="rounded-full bg-dark-elevated px-2.5 py-1">
-              <Text className="text-[11px] text-text-secondary">Spoilers</Text>
-            </View>
-          ) : null}
-        </View>
+        {isReview && item.review.spoiler ? (
+          <View className="mt-2 flex-row items-center gap-1">
+            <Ionicons name="warning-outline" size={11} color="#9BA1B0" />
+            <Text className="text-[11px] text-text-tertiary">
+              Contains spoilers
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
 });
+
+/* ─── Main screen ───────────────────────────────────────────────── */
 
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
@@ -261,7 +285,7 @@ export default function LogScreen() {
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("recent");
-  const [filterSheetVisible, setFilterSheetVisible] = useState(false);
+  const [sortSheetVisible, setSortSheetVisible] = useState(false);
   const [limit, setLimit] = useState(60);
 
   const activity = useQuery(
@@ -276,47 +300,19 @@ export default function LogScreen() {
 
   const filteredItems = useMemo(() => {
     const matching = items.filter((item: ActivityItem) => matchesFilter(item, filter));
-
     return [...matching].sort((left, right) => compareItems(left, right, sort));
   }, [filter, items, sort]);
-  const headerSubtitle =
-    items.length > 0
-      ? "Reviews and watch entries."
-      : "Every watch entry and review you make will land here.";
-  const activeFilterLabel = FILTER_LABELS[filter];
-  const hasActiveFilter = filter !== "all" || sort !== "recent";
 
-  const filterSheetOptions = useMemo<ActionSheetOption[]>(
-    () => [
-      ...((Object.keys(FILTER_LABELS) as FilterValue[]).map((value) => ({
-        label:
-          value === filter ? `${FILTER_LABELS[value]} ✓` : FILTER_LABELS[value],
-        icon: value === filter ? "checkmark" : "funnel-outline",
-        onPress: () => setFilter(value),
-      })) as ActionSheetOption[]),
-      {
-        label:
-          sort === "recent"
-            ? "Newest first ✓"
-            : sort === "oldest"
-              ? "Oldest first ✓"
-              : sort === "title"
-                ? "Title ✓"
-                : "Best rated ✓",
-        icon: "swap-vertical-outline",
-        onPress: () =>
-          setSort((current) =>
-            current === "recent"
-              ? "oldest"
-              : current === "oldest"
-                ? "title"
-                : current === "title"
-                  ? "rating"
-                  : "recent",
-          ),
-      },
-    ],
-    [filter, sort],
+  const currentSort = SORT_OPTIONS.find((o) => o.value === sort) ?? SORT_OPTIONS[0];
+
+  const sortSheetOptions = useMemo<ActionSheetOption[]>(
+    () =>
+      SORT_OPTIONS.map((option) => ({
+        label: option.value === sort ? `${option.label} ✓` : option.label,
+        icon: option.icon,
+        onPress: () => setSort(option.value),
+      })),
+    [sort],
   );
 
   const handleDeleteLog = useCallback(
@@ -376,50 +372,52 @@ export default function LogScreen() {
 
   const header = useMemo(
     () => (
-      <View className="px-6 pt-6 pb-4">
-        <View className="flex-row items-center justify-between gap-4">
-          <View className="flex-1">
-            <Text className="text-3xl font-bold tracking-tight text-text-primary">
-              Log
-            </Text>
-            <Text className="mt-1 text-sm text-text-tertiary">
-              {headerSubtitle}
-            </Text>
-          </View>
+      <View className="pb-5 pt-6">
+        {/* Title row */}
+        <View className="px-6">
+          <Text className="text-3xl font-bold tracking-tight text-text-primary">
+            Log
+          </Text>
+          <Text className="mt-1 text-sm text-text-tertiary">
+            {items.length > 0
+              ? "Your reviews and watch entries."
+              : "Every watch entry and review you make will land here."}
+          </Text>
+        </View>
 
+        {/* Filter pills + sort button */}
+        <View className="mt-4 flex-row items-center">
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 24, gap: 8 }}
+            className="flex-1"
+          >
+            {FILTERS.map((option) => (
+              <FilterPill
+                key={option.value}
+                label={option.label}
+                isActive={filter === option.value}
+                onPress={() => setFilter(option.value)}
+              />
+            ))}
+          </ScrollView>
+
+          {/* Sort button */}
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilterSheetVisible(true);
+              setSortSheetVisible(true);
             }}
-            className={`flex-row items-center gap-2 rounded-full border px-3.5 py-2 active:opacity-80 ${
-              hasActiveFilter
-                ? "border-brand-500/25 bg-brand-500/10"
-                : "border-dark-border bg-dark-card"
-            }`}
+            className="mr-6 flex-row items-center gap-1.5 active:opacity-80"
           >
-            <View
-              className={`h-1.5 w-1.5 rounded-full ${
-                hasActiveFilter ? "bg-brand-400" : "bg-text-tertiary"
-              }`}
-            />
-            <Text
-              className={`text-xs font-medium ${
-                hasActiveFilter ? "text-brand-300" : "text-text-secondary"
-              }`}
-            >
-              {activeFilterLabel}
-            </Text>
-            <Ionicons
-              name="chevron-down"
-              size={13}
-              color={hasActiveFilter ? "#7dd3fc" : "#9BA1B0"}
-            />
+            <Ionicons name={currentSort.icon} size={14} color="#9BA1B0" />
+            <Ionicons name="chevron-down" size={12} color="#9BA1B0" />
           </Pressable>
         </View>
       </View>
     ),
-    [activeFilterLabel, hasActiveFilter, headerSubtitle],
+    [currentSort.icon, filter, items.length],
   );
 
   if (activity === undefined) {
@@ -447,8 +445,8 @@ export default function LogScreen() {
             {header}
             <View className="px-6">
               <EmptyState
-                title="Nothing matches this view"
-                description="Try another filter."
+                title="Nothing matches this filter"
+                description="Try a different filter or change the sort."
               />
             </View>
           </View>
@@ -461,7 +459,7 @@ export default function LogScreen() {
               </View>
             )}
             keyExtractor={(item: ActivityItem) => item.id}
-            estimatedItemSize={176}
+            estimatedItemSize={140}
             ListHeaderComponent={header}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: insets.bottom + 88 }}
@@ -480,7 +478,7 @@ export default function LogScreen() {
                 ) : (
                   <View className="items-center py-4">
                     <Text className="text-xs uppercase tracking-[1.8px] text-text-tertiary">
-                      You’re all caught up
+                      You're all caught up
                     </Text>
                   </View>
                 )}
@@ -490,10 +488,10 @@ export default function LogScreen() {
         )}
 
         <ActionSheet
-          visible={filterSheetVisible}
-          onClose={() => setFilterSheetVisible(false)}
-          title="Filter log"
-          options={filterSheetOptions}
+          visible={sortSheetVisible}
+          onClose={() => setSortSheetVisible(false)}
+          title="Sort by"
+          options={sortSheetOptions}
         />
       </View>
     </Screen>

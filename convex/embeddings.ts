@@ -16,6 +16,7 @@ import {
 
 const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-2-preview";
 const EMBEDDING_VERSION = process.env.GEMINI_EMBEDDING_VERSION ?? "shows-v1";
+const RECOMMENDATION_ENGINE_VERSION = "recommendations-v8";
 const EMBEDDING_DIMENSIONS = 1536;
 const EMBEDDING_BATCH_SIZE = 20;
 const GEMINI_API_BASE = process.env.GEMINI_API_BASE ?? "https://generativelanguage.googleapis.com/v1beta";
@@ -55,6 +56,22 @@ type RecommendationRail = {
   description?: string;
   items: RecommendationResult[];
 };
+type WeightedShowSignal = {
+  showId: Id<"shows">;
+  weight: number;
+};
+type RecommendationSeed = {
+  show: ShowDoc;
+  embedding: ShowEmbeddingDoc;
+  weight: number;
+};
+type PlannedRailSeed = RecommendationSeed & {
+  isFavorite: boolean;
+};
+type RecommendationScoreBreakdown = {
+  seedScore: number;
+  themeScore: number;
+};
 type SmartListCuration = {
   boostGenreIds?: number[];
   requiredKeywordGroups?: string[][];
@@ -85,6 +102,107 @@ type PublicSearchResult = {
   exactTitleMatch?: boolean;
   prefixTitleMatch?: boolean;
 };
+
+const RECOMMENDATION_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "but",
+  "by",
+  "for",
+  "from",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "less",
+  "like",
+  "more",
+  "not",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "their",
+  "them",
+  "this",
+  "those",
+  "to",
+  "too",
+  "tv",
+  "very",
+  "with",
+]);
+const GENERIC_TASTE_THEME_KEYS = new Set([
+  "action",
+  "action adventure",
+  "adventure",
+  "animation",
+  "comedy",
+  "crime",
+  "documentary",
+  "drama",
+  "family",
+  "fantasy",
+  "history",
+  "horror",
+  "kids",
+  "mystery",
+  "news",
+  "reality",
+  "romance",
+  "sci fi fantasy",
+  "science fiction",
+  "soap",
+  "talk",
+  "thriller",
+  "war",
+  "western",
+]);
+const VOLATILE_PAIR_DRIFT_GENRES = new Set([
+  "Animation",
+  "Family",
+  "Fantasy",
+  "Horror",
+  "Kids",
+  "Reality",
+  "Soap",
+  "Talk",
+  "War & Politics",
+  "Western",
+]);
+const ANTHOLOGY_DRIFT_TOKENS = [
+  "anthology",
+  "anthologies",
+  "collection",
+  "collections",
+  "curiosities",
+  "story collection",
+  "stories",
+  "tales",
+];
+const TONE_DRIFT_TOKENS = [
+  "demon",
+  "demonic",
+  "ghost",
+  "haunted",
+  "horror",
+  "nightmare",
+  "nightmares",
+  "occult",
+  "terror",
+  "terrifying",
+  "vampire",
+  "vampires",
+  "witch",
+  "witches",
+];
 
 function getGeminiApiKey() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -210,6 +328,29 @@ function normalizeFreeformText(text: string) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function tokenizePreferenceText(text?: string) {
+  return normalizeFreeformText(text ?? "")
+    .split(" ")
+    .map((token) => normalizeTokenForMatch(token))
+    .filter((token) => token.length >= 3 && !RECOMMENDATION_STOPWORDS.has(token));
+}
+
+function tokenOverlapScore(sourceTokens: string[], candidateTokens: string[]) {
+  if (!sourceTokens.length || !candidateTokens.length) {
+    return 0;
+  }
+
+  const candidateSet = new Set(candidateTokens);
+  let matched = 0;
+  for (const token of sourceTokens) {
+    if (candidateSet.has(token)) {
+      matched += 1;
+    }
+  }
+
+  return matched / sourceTokens.length;
 }
 
 const SEARCH_GENRE_HINTS: Array<{ genreId: number; tokens: string[] }> = [
@@ -1074,8 +1215,8 @@ export const searchShows = action({
         if (seedShow) {
           const recommendations = await buildRecommendationCandidates({
             ctx,
-            positiveShowIds: [seedShow._id],
-            negativeShowIds: [],
+            positiveSignals: [{ showId: seedShow._id, weight: 1 }],
+            negativeSignals: [],
             excludedShowIds: new Set([seedShow._id]),
             theme: modifier ? `${seedShow.title}, but ${modifier}` : undefined,
             limit,
@@ -1342,6 +1483,7 @@ function buildTasteWeights(args: {
   favoriteShowIds?: Id<"shows">[];
 }) {
   const weights = new Map<Id<"shows">, number>();
+  const hasExplicitFavorites = (args.favoriteShowIds?.length ?? 0) > 0;
 
   const addWeight = (showId: Id<"shows">, weight: number) => {
     weights.set(showId, (weights.get(showId) ?? 0) + weight);
@@ -1350,16 +1492,16 @@ function buildTasteWeights(args: {
   for (const state of args.watchStates) {
     switch (state.status) {
       case "completed":
-        addWeight(state.showId, 1.15);
+        addWeight(state.showId, hasExplicitFavorites ? 0.6 : 1.15);
         break;
       case "watching":
-        addWeight(state.showId, 0.9);
+        addWeight(state.showId, hasExplicitFavorites ? 0.7 : 0.9);
         break;
       case "watchlist":
-        addWeight(state.showId, 0.4);
+        addWeight(state.showId, hasExplicitFavorites ? 0.15 : 0.4);
         break;
       case "dropped":
-        addWeight(state.showId, -1.25);
+        addWeight(state.showId, -1.5);
         break;
       default:
         break;
@@ -1371,7 +1513,7 @@ function buildTasteWeights(args: {
   }
 
   for (const showId of args.favoriteShowIds ?? []) {
-    addWeight(showId, 1.75);
+    addWeight(showId, 3.4);
   }
 
   return weights;
@@ -1385,7 +1527,7 @@ function buildTasteSignalFingerprint(args: {
   favoriteThemes?: string[];
 }) {
   return buildRecommendationSignalFingerprint({
-    embeddingVersion: EMBEDDING_VERSION,
+    embeddingVersion: `${EMBEDDING_VERSION}:${RECOMMENDATION_ENGINE_VERSION}`,
     themeKey: args.themeKey,
     watchSignals: [
       ...args.watchStates.map((state) =>
@@ -1415,6 +1557,262 @@ function combineThemes(themes: string[]) {
 
 function dedupeShowIds(showIds: Id<"shows">[]) {
   return Array.from(new Set(showIds));
+}
+
+function buildWeightedSignals(args: {
+  weights: Map<Id<"shows">, number>;
+  predicate: (weight: number) => boolean;
+  limit: number;
+}) {
+  return Array.from(args.weights.entries())
+    .filter(([, weight]) => args.predicate(weight))
+    .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
+    .slice(0, args.limit)
+    .map(([showId, weight]) => ({
+      showId,
+      weight: Math.abs(weight),
+    })) satisfies WeightedShowSignal[];
+}
+
+function buildSignalWeightMap(signals: WeightedShowSignal[]) {
+  const weightByShowId = new Map<Id<"shows">, number>();
+
+  for (const signal of signals) {
+    weightByShowId.set(
+      signal.showId,
+      Math.max(weightByShowId.get(signal.showId) ?? 0, Math.abs(signal.weight)),
+    );
+  }
+
+  return weightByShowId;
+}
+
+function isGenericTasteTheme(theme: string) {
+  return GENERIC_TASTE_THEME_KEYS.has(buildThemeKey(theme));
+}
+
+function normalizeShowTitleForDuplicateCheck(title: string) {
+  return title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeTmdbVoteAverage(voteAverage?: number | null) {
+  const raw = voteAverage ?? 0;
+  if (raw <= 0) {
+    return 0;
+  }
+  return Math.min(raw / (raw > 10 ? 100 : 10), 1);
+}
+
+function buildCorePositiveSignals(args: {
+  positiveSignals: WeightedShowSignal[];
+  favoriteShowIds?: Id<"shows">[];
+}) {
+  const favoriteShowIds = new Set(args.favoriteShowIds ?? []);
+  const rankedSignals = [...args.positiveSignals].sort((left, right) => right.weight - left.weight);
+
+  if (favoriteShowIds.size === 0) {
+    return rankedSignals.slice(0, 10);
+  }
+
+  const explicitFavorites = rankedSignals
+    .filter((signal) => favoriteShowIds.has(signal.showId))
+    .slice(0, 4);
+  const supportingSignals = rankedSignals
+    .filter((signal) => !favoriteShowIds.has(signal.showId))
+    .filter((signal) => signal.weight >= 0.9)
+    .slice(0, 4);
+
+  return dedupeShowIds([
+    ...explicitFavorites.map((signal) => signal.showId),
+    ...supportingSignals.map((signal) => signal.showId),
+  ]).map((showId) => rankedSignals.find((signal) => signal.showId === showId)!)
+    .slice(0, 8);
+}
+
+function buildRecommendationAnchors(args: {
+  positiveSignals: WeightedShowSignal[];
+  favoriteShowIds?: Id<"shows">[];
+}) {
+  const favoriteShowIds = new Set(args.favoriteShowIds ?? []);
+  const rankedSignals = [...args.positiveSignals].sort((left, right) => right.weight - left.weight);
+  const anchors = favoriteShowIds.size > 0
+    ? rankedSignals.filter((signal) => favoriteShowIds.has(signal.showId)).slice(0, 3)
+    : rankedSignals.slice(0, 4);
+
+  return dedupeShowIds(anchors.map((signal) => signal.showId))
+    .map((showId) => rankedSignals.find((signal) => signal.showId === showId)!)
+    .slice(0, 4);
+}
+
+async function planRecommendationRailSeeds(args: {
+  ctx: ActionCtx;
+  positiveSignals: WeightedShowSignal[];
+  favoriteShowIds?: Id<"shows">[];
+}) {
+  const favoriteShowIds = new Set(args.favoriteShowIds ?? []);
+  const candidateSignals = [...args.positiveSignals]
+    .sort((left, right) => right.weight - left.weight)
+    .slice(0, 6);
+  const candidateShowIds = candidateSignals.map((signal) => signal.showId);
+  const [shows, embeddings] = await Promise.all([
+    args.ctx.runQuery(internal.embeddings.getShowsByIds, {
+      showIds: candidateShowIds,
+    }) as Promise<ShowDoc[]>,
+    ensureShowEmbeddingsForIds(args.ctx, candidateShowIds),
+  ]);
+  const showById = new Map(shows.map((show) => [show._id, show]));
+  const embeddingByShowId = new Map(embeddings.map((embedding) => [embedding.showId, embedding]));
+  const plannedSeeds = candidateSignals
+    .map((signal) => {
+      const show = showById.get(signal.showId);
+      const embedding = embeddingByShowId.get(signal.showId);
+      if (!show || !embedding) {
+        return null;
+      }
+
+      return {
+        show,
+        embedding,
+        weight: signal.weight,
+        isFavorite: favoriteShowIds.has(signal.showId),
+      } satisfies PlannedRailSeed;
+    })
+    .filter((seed): seed is PlannedRailSeed => Boolean(seed));
+
+  const primarySeed = plannedSeeds[0];
+  if (!primarySeed) {
+    return {
+      primarySeed: null,
+      secondarySeed: null,
+      pairSeed: null,
+    };
+  }
+
+  const secondarySeed = plannedSeeds.find((seed) =>
+    seed.show._id !== primarySeed.show._id &&
+    (seed.isFavorite || plannedSeeds.length <= 2)
+  ) ?? plannedSeeds.find((seed) => seed.show._id !== primarySeed.show._id) ?? null;
+
+  const pairSeed = plannedSeeds
+    .filter((seed) => seed.show._id !== primarySeed.show._id)
+    .map((seed) => ({
+      score:
+        cosineSimilarity(
+          primarySeed.embedding.similarityEmbedding,
+          seed.embedding.similarityEmbedding,
+        ) * 0.72 +
+        overlapRatio(primarySeed.show.genreIds, seed.show.genreIds) * 0.28 +
+        Math.min(seed.weight / Math.max(primarySeed.weight, 1), 1) * 0.12 +
+        (seed.isFavorite ? 0.08 : 0),
+      seed,
+    }))
+    .sort((left, right) => right.score - left.score)
+    .find((candidate) => candidate.score >= 0.34)
+    ?.seed ?? null;
+
+  return {
+    primarySeed,
+    secondarySeed,
+    pairSeed,
+  };
+}
+
+function summarizeTheme(theme?: string) {
+  const tokens = tokenizePreferenceText(theme).slice(0, 3);
+  if (tokens.length > 0) {
+    return tokens.join(" ");
+  }
+  return "taste";
+}
+
+function buildRecommendationReason(args: {
+  theme?: string;
+  themeTokenOverlap: number;
+  topSeed?: RecommendationSeed;
+  sharedGenres: string[];
+  multipleSeeds: boolean;
+}) {
+  const sharedGenresText = args.sharedGenres.slice(0, 2).join(" + ");
+
+  if (args.theme?.trim() && args.themeTokenOverlap >= 0.34 && sharedGenresText) {
+    return `Matches your ${summarizeTheme(args.theme)} vibe with ${sharedGenresText}`;
+  }
+  if (args.topSeed && sharedGenresText) {
+    return `Shares ${sharedGenresText} DNA with ${args.topSeed.show.title}`;
+  }
+  if (args.theme?.trim() && args.themeTokenOverlap >= 0.22) {
+    return `Fits your ${summarizeTheme(args.theme)} vibe`;
+  }
+  if (args.topSeed) {
+    return args.multipleSeeds
+      ? `Most aligned with ${args.topSeed.show.title} from your favorites`
+      : `Closest in tone to ${args.topSeed.show.title}`;
+  }
+
+  return "Recommended for you";
+}
+
+function scoreShowQuality(show: ShowDoc) {
+  const voteAverage = normalizeTmdbVoteAverage(show.tmdbVoteAverage);
+  const voteCount = show.tmdbVoteCount ?? 0;
+  const popularity = show.tmdbPopularity ?? 0;
+  const voteConfidence = Math.max(0.18, Math.min(Math.log10(voteCount + 10) / 3, 1));
+  const popularityBoost = Math.min(Math.log10(popularity + 1) * 0.012, 0.045);
+  const thinEvidencePenalty = voteCount > 0 && voteCount < 40 ? 0.03 : 0;
+  const weakRatingPenalty = voteAverage > 0 && voteAverage < 0.68 ? 0.035 : 0;
+
+  return (
+    Math.max(0, voteAverage - 0.62) * 0.18 * voteConfidence +
+    popularityBoost +
+    (show.overview?.trim() ? 0.012 : -0.02) -
+    thinEvidencePenalty -
+    weakRatingPenalty
+  );
+}
+
+function scoreCoherentPairDriftPenalty(show: ShowDoc, coherentAnchorShows: ShowDoc[]) {
+  if (coherentAnchorShows.length < 2) {
+    return 0;
+  }
+
+  const candidateGenres = mapGenreIdsToNames(show.genreIds);
+  const anchorGenreUnion = new Set(
+    coherentAnchorShows.flatMap((anchorShow) => mapGenreIdsToNames(anchorShow.genreIds)),
+  );
+  let penalty = 0;
+
+  for (const genre of candidateGenres) {
+    if (VOLATILE_PAIR_DRIFT_GENRES.has(genre) && !anchorGenreUnion.has(genre)) {
+      penalty += 0.05;
+    }
+  }
+
+  const candidateText = buildShowCurationText(show);
+  const anchorText = coherentAnchorShows.map((anchorShow) => buildShowCurationText(anchorShow)).join(" ");
+  const candidateHasAnthologySignals = ANTHOLOGY_DRIFT_TOKENS.some((token) =>
+    candidateText.includes(token)
+  );
+  const anchorsHaveAnthologySignals = ANTHOLOGY_DRIFT_TOKENS.some((token) =>
+    anchorText.includes(token)
+  );
+
+  if (candidateHasAnthologySignals && !anchorsHaveAnthologySignals) {
+    penalty += 0.14;
+  }
+
+  const unsupportedToneTokens = TONE_DRIFT_TOKENS.filter((token) =>
+    candidateText.includes(token) && !anchorText.includes(token)
+  );
+  if (unsupportedToneTokens.length > 0) {
+    penalty += Math.min(0.08 + unsupportedToneTokens.length * 0.035, 0.2);
+  }
+
+  return penalty;
 }
 
 function toRecommendationResults(
@@ -1458,34 +1856,78 @@ async function ensureShowEmbeddingsForIds(ctx: ActionCtx, showIds: Id<"shows">[]
 
 async function buildRecommendationCandidates(args: {
   ctx: ActionCtx;
-  positiveShowIds: Id<"shows">[];
-  negativeShowIds: Id<"shows">[];
+  positiveSignals: WeightedShowSignal[];
+  negativeSignals: WeightedShowSignal[];
   excludedShowIds: Set<Id<"shows">>;
   theme?: string;
   limit: number;
 }): Promise<Array<{ show: ShowDoc; score: number; reason: string }>> {
+  const positiveShowIds = dedupeShowIds(args.positiveSignals.map((signal) => signal.showId));
+  const negativeShowIds = dedupeShowIds(args.negativeSignals.map((signal) => signal.showId));
+  const positiveWeightByShowId = buildSignalWeightMap(args.positiveSignals);
+  const negativeWeightByShowId = buildSignalWeightMap(args.negativeSignals);
   const [positiveEmbeddings, negativeEmbeddings] = await Promise.all([
-    ensureShowEmbeddingsForIds(args.ctx, args.positiveShowIds),
-    ensureShowEmbeddingsForIds(args.ctx, args.negativeShowIds),
+    ensureShowEmbeddingsForIds(args.ctx, positiveShowIds),
+    ensureShowEmbeddingsForIds(args.ctx, negativeShowIds),
   ]);
-  const positiveShows = await args.ctx.runQuery(internal.embeddings.getShowsByIds, {
-    showIds: args.positiveShowIds,
-  }) as ShowDoc[];
+  const [positiveShows, negativeShows] = await Promise.all([
+    args.ctx.runQuery(internal.embeddings.getShowsByIds, {
+      showIds: positiveShowIds,
+    }) as Promise<ShowDoc[]>,
+    args.ctx.runQuery(internal.embeddings.getShowsByIds, {
+      showIds: negativeShowIds,
+    }) as Promise<ShowDoc[]>,
+  ]);
+  const positiveEmbeddingByShowId = new Map(
+    positiveEmbeddings.map((embedding) => [embedding.showId, embedding]),
+  );
+  const negativeEmbeddingByShowId = new Map(
+    negativeEmbeddings.map((embedding) => [embedding.showId, embedding]),
+  );
+  const positiveSeeds = positiveShows
+    .map((show) => {
+      const embedding = positiveEmbeddingByShowId.get(show._id);
+      if (!embedding) {
+        return null;
+      }
+      return {
+        show,
+        embedding,
+        weight: positiveWeightByShowId.get(show._id) ?? 1,
+      } satisfies RecommendationSeed;
+    })
+    .filter((seed): seed is RecommendationSeed => Boolean(seed));
+  const negativeSeeds = negativeShows
+    .map((show) => {
+      const embedding = negativeEmbeddingByShowId.get(show._id);
+      if (!embedding) {
+        return null;
+      }
+      return {
+        show,
+        embedding,
+        weight: negativeWeightByShowId.get(show._id) ?? 1,
+      } satisfies RecommendationSeed;
+    })
+    .filter((seed): seed is RecommendationSeed => Boolean(seed));
+  const themeTokens = tokenizePreferenceText(args.theme);
+  const totalPositiveWeight = positiveSeeds.reduce((sum, seed) => sum + seed.weight, 0) || 1;
+  const totalNegativeWeight = negativeSeeds.reduce((sum, seed) => sum + seed.weight, 0) || 1;
 
   const positiveCentroid = weightedCentroid(
-    positiveEmbeddings.map((embedding) => ({
-      vector: embedding.similarityEmbedding,
-      weight: 1,
+    positiveSeeds.map((seed) => ({
+      vector: seed.embedding.similarityEmbedding,
+      weight: seed.weight,
     })),
   );
   const negativeCentroid = weightedCentroid(
-    negativeEmbeddings.map((embedding) => ({
-      vector: embedding.similarityEmbedding,
-      weight: 1,
+    negativeSeeds.map((seed) => ({
+      vector: seed.embedding.similarityEmbedding,
+      weight: seed.weight,
     })),
   );
 
-  const scored = new Map<Id<"shows">, { score: number; reason: string }>();
+  const scored = new Map<Id<"shows">, RecommendationScoreBreakdown>();
 
   if (positiveCentroid) {
     const similar = await args.ctx.vectorSearch("showEmbeddings", "by_similarity_embedding", {
@@ -1493,6 +1935,9 @@ async function buildRecommendationCandidates(args: {
       limit: Math.min(args.limit * 5, 80),
       filter: (q) => q.eq("embeddingVersion", EMBEDDING_VERSION),
     }) as VectorSearchResult[];
+    const similarityScoreByEmbeddingId = new Map(
+      similar.map((result) => [result._id, result._score]),
+    );
     const rows = await args.ctx.runQuery(internal.embeddings.getEmbeddingsByIds, {
       embeddingIds: similar.map((item) => item._id),
     }) as ShowEmbeddingDoc[];
@@ -1504,11 +1949,10 @@ async function buildRecommendationCandidates(args: {
       const penalty = negativeCentroid
         ? Math.max(0, cosineSimilarity(item.similarityEmbedding, negativeCentroid)) * 0.3
         : 0;
-      const baseScore =
-        (similar.find((result) => result._id === item._id)?._score ?? 0) - penalty;
+      const baseScore = (similarityScoreByEmbeddingId.get(item._id) ?? 0) - penalty;
       scored.set(item.showId, {
-        score: Math.max(existing?.score ?? 0, baseScore),
-        reason: existing?.reason ?? "Based on shows you liked",
+        seedScore: Math.max(existing?.seedScore ?? 0, baseScore),
+        themeScore: existing?.themeScore ?? 0,
       });
     }
   }
@@ -1523,6 +1967,9 @@ async function buildRecommendationCandidates(args: {
       limit: Math.min(args.limit * 4, 60),
       filter: (q) => q.eq("embeddingVersion", EMBEDDING_VERSION),
     }) as VectorSearchResult[];
+    const themeScoreByEmbeddingId = new Map(
+      themed.map((result) => [result._id, result._score]),
+    );
     const rows = await args.ctx.runQuery(internal.embeddings.getEmbeddingsByIds, {
       embeddingIds: themed.map((item) => item._id),
     }) as ShowEmbeddingDoc[];
@@ -1531,31 +1978,387 @@ async function buildRecommendationCandidates(args: {
         continue;
       }
       const existing = scored.get(item.showId);
-      const themeScore =
-        (themed.find((result) => result._id === item._id)?._score ?? 0) * 0.7;
+      const themeScore = (themeScoreByEmbeddingId.get(item._id) ?? 0) * 0.7;
       scored.set(item.showId, {
-        score: Math.max(existing?.score ?? 0, (existing?.score ?? 0) + themeScore),
-        reason: existing?.reason ?? "Matched to your theme",
+        seedScore: existing?.seedScore ?? 0,
+        themeScore: Math.max(existing?.themeScore ?? 0, themeScore),
       });
     }
   }
 
-  const candidateShows = await args.ctx.runQuery(internal.embeddings.getShowsByIds, {
-    showIds: Array.from(scored.keys()),
-  }) as ShowDoc[];
+  const candidateShowIds = Array.from(scored.keys());
+  const [candidateEmbeddings, candidateShows] = await Promise.all([
+    args.ctx.runQuery(internal.embeddings.getEmbeddingsByShowIds, {
+      showIds: candidateShowIds,
+    }) as Promise<ShowEmbeddingDoc[]>,
+    args.ctx.runQuery(internal.embeddings.getShowsByIds, {
+      showIds: candidateShowIds,
+    }) as Promise<ShowDoc[]>,
+  ]);
+  const candidateEmbeddingByShowId = new Map(
+    candidateEmbeddings.map((embedding) => [embedding.showId, embedding]),
+  );
 
   return candidateShows
-    .map((show) => ({
-      show,
-      score:
-        (scored.get(show._id)?.score ?? 0) +
+    .map((show) => {
+      const breakdown = scored.get(show._id);
+      const candidateEmbedding = candidateEmbeddingByShowId.get(show._id);
+      if (!breakdown || !candidateEmbedding) {
+        return null;
+      }
+
+      const seedMatches = positiveSeeds
+        .map((seed) => ({
+          seed,
+          similarity: cosineSimilarity(
+            candidateEmbedding.similarityEmbedding,
+            seed.embedding.similarityEmbedding,
+          ),
+          genreOverlap: overlapRatio(show.genreIds, seed.show.genreIds),
+        }))
+        .sort(
+          (left, right) =>
+            (right.similarity * 0.72 + right.genreOverlap * 0.28) -
+            (left.similarity * 0.72 + left.genreOverlap * 0.28),
+        );
+      const topSeedMatch = seedMatches[0];
+      const maxSeedSimilarity = topSeedMatch?.similarity ?? 0;
+      const maxGenreOverlap = topSeedMatch?.genreOverlap ?? 0;
+      const weightedGenreOverlap = seedMatches.reduce(
+        (sum, match) => sum + match.genreOverlap * match.seed.weight,
+        0,
+      ) / totalPositiveWeight;
+      const candidateTokens = tokenizePreferenceText(buildShowCurationText(show));
+      const themeTokenOverlap = tokenOverlapScore(themeTokens, candidateTokens);
+
+      const negativeSimilarityPenalty = negativeSeeds.reduce((sum, seed) => (
+        sum +
         Math.max(
           0,
-          ...positiveShows.map((seedShow) => overlapRatio(show.genreIds, seedShow.genreIds) * 0.14),
-        ) +
-        Math.min((show.tmdbVoteAverage ?? 0) / 100, 0.07),
-      reason: scored.get(show._id)?.reason ?? "Recommended for you",
-    }))
+          cosineSimilarity(
+            candidateEmbedding.similarityEmbedding,
+            seed.embedding.similarityEmbedding,
+          ),
+        ) * seed.weight
+      ), 0) / totalNegativeWeight;
+      const negativeGenrePenalty = negativeSeeds.reduce((sum, seed) => (
+        sum + overlapRatio(show.genreIds, seed.show.genreIds) * seed.weight
+      ), 0) / totalNegativeWeight;
+      const sharedGenres = topSeedMatch
+        ? mapGenreIdsToNames(show.genreIds).filter((genre) =>
+          mapGenreIdsToNames(topSeedMatch.seed.show.genreIds).includes(genre)
+        )
+        : [];
+
+      const seedScore =
+        breakdown.seedScore * 0.72 +
+        maxSeedSimilarity * 0.2 +
+        maxGenreOverlap * 0.16 +
+        weightedGenreOverlap * 0.08;
+      const themeScore = breakdown.themeScore * 0.55 + themeTokenOverlap * 0.16;
+      const negativePenalty = negativeSimilarityPenalty * 0.28 + negativeGenrePenalty * 0.14;
+      const score = seedScore + themeScore + scoreShowQuality(show) - negativePenalty;
+
+      if (
+        positiveSeeds.length > 0 &&
+        breakdown.seedScore < 0.12 &&
+        maxSeedSimilarity < 0.12 &&
+        maxGenreOverlap < 0.12 &&
+        themeTokenOverlap < 0.2
+      ) {
+        return null;
+      }
+      if (
+        positiveSeeds.length === 0 &&
+        themeTokens.length > 0 &&
+        breakdown.themeScore < 0.12 &&
+        themeTokenOverlap < 0.2
+      ) {
+        return null;
+      }
+
+      return {
+        show,
+        score,
+        reason: buildRecommendationReason({
+          theme: args.theme,
+          themeTokenOverlap,
+          topSeed: topSeedMatch?.seed,
+          sharedGenres,
+          multipleSeeds: positiveSeeds.length > 1,
+        }),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, args.limit);
+}
+
+async function buildAnchorBlendedRecommendationCandidates(args: {
+  ctx: ActionCtx;
+  positiveSignals: WeightedShowSignal[];
+  negativeSignals: WeightedShowSignal[];
+  excludedShowIds: Set<Id<"shows">>;
+  favoriteShowIds?: Id<"shows">[];
+  theme?: string;
+  limit: number;
+}) {
+  const anchors = buildRecommendationAnchors({
+    positiveSignals: args.positiveSignals,
+    favoriteShowIds: args.favoriteShowIds,
+  });
+
+  if (anchors.length <= 1) {
+    return await buildRecommendationCandidates(args);
+  }
+
+  const favoriteShowIds = new Set(args.favoriteShowIds ?? []);
+  const favoriteAnchors = anchors.filter((anchor) => favoriteShowIds.has(anchor.showId));
+  const favoriteAnchorIds = new Set(favoriteAnchors.map((anchor) => anchor.showId));
+  const [anchorShows, anchorEmbeddings] = await Promise.all([
+    args.ctx.runQuery(internal.embeddings.getShowsByIds, {
+      showIds: anchors.map((anchor) => anchor.showId),
+    }) as Promise<ShowDoc[]>,
+    ensureShowEmbeddingsForIds(args.ctx, anchors.map((anchor) => anchor.showId)),
+  ]);
+  const anchorShowById = new Map(anchorShows.map((show) => [show._id, show]));
+  const anchorEmbeddingByShowId = new Map(
+    anchorEmbeddings.map((embedding) => [embedding.showId, embedding]),
+  );
+  const favoriteAnchorShows = favoriteAnchors
+    .map((anchor) => anchorShowById.get(anchor.showId))
+    .filter((show): show is ShowDoc => Boolean(show));
+  const favoriteAnchorTitleKeys = new Set(
+    favoriteAnchorShows.map((show) => normalizeShowTitleForDuplicateCheck(show.title)),
+  );
+  const coherentFavoritePair = favoriteAnchors.length >= 2
+    ? favoriteAnchors
+      .flatMap((leftAnchor, leftIndex) =>
+        favoriteAnchors.slice(leftIndex + 1).map((rightAnchor) => {
+          const leftShow = anchorShowById.get(leftAnchor.showId);
+          const rightShow = anchorShowById.get(rightAnchor.showId);
+          const leftEmbedding = anchorEmbeddingByShowId.get(leftAnchor.showId);
+          const rightEmbedding = anchorEmbeddingByShowId.get(rightAnchor.showId);
+          if (!leftShow || !rightShow || !leftEmbedding || !rightEmbedding) {
+            return null;
+          }
+
+          return {
+            anchors: [leftAnchor, rightAnchor],
+            score:
+              cosineSimilarity(
+                leftEmbedding.similarityEmbedding,
+                rightEmbedding.similarityEmbedding,
+              ) * 0.72 +
+              overlapRatio(leftShow.genreIds, rightShow.genreIds) * 0.22 +
+              Math.min(Math.min(leftAnchor.weight, rightAnchor.weight) / Math.max(
+                leftAnchor.weight,
+                rightAnchor.weight,
+                1,
+              ), 1) * 0.12,
+          };
+        })
+      )
+      .filter((pair): pair is { anchors: WeightedShowSignal[]; score: number } => Boolean(pair))
+      .sort((left, right) => right.score - left.score)[0]?.anchors ?? favoriteAnchors.slice(0, 2)
+    : favoriteAnchors;
+  const coherentFavoriteAnchorIds = new Set(coherentFavoritePair.map((anchor) => anchor.showId));
+  const coherentFavoriteShows = coherentFavoritePair
+    .map((anchor) => anchorShowById.get(anchor.showId))
+    .filter((show): show is ShowDoc => Boolean(show));
+  const overlapSeedAnchors = coherentFavoritePair.length >= 2
+    ? coherentFavoritePair
+    : favoriteAnchors.length >= 2
+    ? favoriteAnchors.slice(0, 2)
+    : anchors.slice(0, Math.min(anchors.length, 2));
+  const perAnchorLists = await Promise.all(
+    anchors.map((anchor) =>
+      buildRecommendationCandidates({
+        ctx: args.ctx,
+        positiveSignals: [anchor],
+        negativeSignals: args.negativeSignals,
+        excludedShowIds: args.excludedShowIds,
+        theme: args.theme,
+        limit: Math.min(args.limit * 2, 14),
+      })
+    ),
+  );
+  const overlapList = await buildRecommendationCandidates({
+    ctx: args.ctx,
+    positiveSignals: overlapSeedAnchors,
+    negativeSignals: args.negativeSignals,
+    excludedShowIds: args.excludedShowIds,
+    theme: args.theme,
+    limit: Math.min(args.limit * 2, 18),
+  });
+
+  const merged = new Map<Id<"shows">, {
+    show: ShowDoc;
+    score: number;
+    reason: string;
+    matchCount: number;
+    favoriteAnchorHits: Set<Id<"shows">>;
+    matchedAnchorIds: Set<Id<"shows">>;
+    overlapHit: boolean;
+  }>();
+  const applyCandidate = (
+    anchorId: Id<"shows"> | null,
+    anchorIsFavorite: boolean,
+    item: { show: ShowDoc; score: number; reason: string },
+    bonus: number,
+    overlapHit = false,
+  ) => {
+    const duplicateTitleKey = normalizeShowTitleForDuplicateCheck(item.show.title);
+    if (
+      favoriteAnchorTitleKeys.has(duplicateTitleKey) &&
+      !favoriteAnchorIds.has(item.show._id)
+    ) {
+      return;
+    }
+
+    const existing = merged.get(item.show._id);
+    if (!existing) {
+      merged.set(item.show._id, {
+        show: item.show,
+        score: item.score + bonus,
+        reason: item.reason,
+        matchCount: 1,
+        favoriteAnchorHits: anchorIsFavorite && anchorId ? new Set([anchorId]) : new Set(),
+        matchedAnchorIds: anchorId ? new Set([anchorId]) : new Set(),
+        overlapHit,
+      });
+      return;
+    }
+
+    const nextScore = Math.max(existing.score, item.score + bonus);
+    if (anchorIsFavorite && anchorId) {
+      existing.favoriteAnchorHits.add(anchorId);
+    }
+    if (anchorId) {
+      existing.matchedAnchorIds.add(anchorId);
+    }
+    merged.set(item.show._id, {
+      show: item.show,
+      score: nextScore,
+      reason: nextScore > existing.score ? item.reason : existing.reason,
+      matchCount: existing.matchCount + 1,
+      favoriteAnchorHits: existing.favoriteAnchorHits,
+      matchedAnchorIds: existing.matchedAnchorIds,
+      overlapHit: existing.overlapHit || overlapHit,
+    });
+  };
+
+  perAnchorLists.forEach((list, anchorIndex) => {
+    const anchor = anchors[anchorIndex];
+    const anchorBonus = favoriteShowIds.has(anchor.showId) ? 0.06 : 0.03;
+    list.forEach((item, itemIndex) => {
+      applyCandidate(
+        anchor.showId,
+        favoriteShowIds.has(anchor.showId),
+        item,
+        anchorBonus + Math.max(0, 0.08 - itemIndex * 0.01),
+      );
+    });
+  });
+  overlapList.forEach((item, itemIndex) => {
+    applyCandidate(
+      null,
+      false,
+      item,
+      0.04 + Math.max(0, 0.08 - itemIndex * 0.008),
+      true,
+    );
+  });
+
+  const mergedEmbeddingByShowId = coherentFavoritePair.length >= 2 && merged.size > 0
+    ? new Map(
+      (
+        await ensureShowEmbeddingsForIds(args.ctx, Array.from(merged.keys()))
+      ).map((embedding) => [embedding.showId, embedding])
+    )
+    : new Map<Id<"shows">, ShowEmbeddingDoc>();
+
+  return Array.from(merged.values())
+    .filter((item) => {
+      if (favoriteAnchors.length < 2) {
+        return true;
+      }
+
+      if (item.overlapHit) {
+        return true;
+      }
+
+      return item.favoriteAnchorHits.size >= 2;
+    })
+    .map((item) => {
+      let pairBalanceBonus = 0;
+      let pairBalancePenalty = 0;
+      const coherentPairDriftPenalty = scoreCoherentPairDriftPenalty(
+        item.show,
+        coherentFavoriteShows,
+      );
+
+      if (coherentFavoritePair.length >= 2) {
+        const candidateEmbedding = mergedEmbeddingByShowId.get(item.show._id);
+        if (candidateEmbedding) {
+          const pairSupports = coherentFavoritePair.map((anchor) => {
+            const anchorEmbedding = anchorEmbeddingByShowId.get(anchor.showId);
+            const anchorShow = anchorShowById.get(anchor.showId);
+            if (!anchorEmbedding || !anchorShow) {
+              return 0;
+            }
+
+            return (
+              cosineSimilarity(
+                candidateEmbedding.similarityEmbedding,
+                anchorEmbedding.similarityEmbedding,
+              ) * 0.78 +
+              overlapRatio(item.show.genreIds, anchorShow.genreIds) * 0.22
+            );
+          });
+          const minPairSupport = Math.min(...pairSupports);
+          const maxPairSupport = Math.max(...pairSupports);
+          pairBalanceBonus = minPairSupport * 0.12;
+          pairBalancePenalty =
+            Math.max(0, 0.52 - minPairSupport) * 0.22 +
+            Math.max(0, maxPairSupport - minPairSupport) * 0.16 +
+            (
+              item.overlapHit && item.favoriteAnchorHits.size === 0
+                ? 0.06
+                : 0
+            );
+        } else if (item.overlapHit) {
+          pairBalancePenalty = 0.08;
+        }
+      }
+
+      return {
+        show: item.show,
+        score:
+          item.score +
+          pairBalanceBonus -
+          pairBalancePenalty +
+          -coherentPairDriftPenalty +
+        Math.min((item.matchCount - 1) * 0.035, 0.08) +
+        item.favoriteAnchorHits.size * 0.05 +
+        (item.overlapHit ? 0.09 : 0) -
+        (
+          coherentFavoriteAnchorIds.size >= 2 &&
+          item.favoriteAnchorHits.size === 1 &&
+          !coherentFavoriteAnchorIds.has(Array.from(item.favoriteAnchorHits)[0]!)
+            ? 0.16
+            : 0
+        ) -
+        (
+          favoriteAnchors.length >= 2 &&
+          !item.overlapHit &&
+          item.favoriteAnchorHits.size <= 1
+            ? 0.14
+            : 0
+        ),
+        reason: item.reason,
+      };
+    })
     .sort((left, right) => right.score - left.score)
     .slice(0, args.limit);
 }
@@ -1565,22 +2368,63 @@ async function getUserTasteState(args: {
   userId: Id<"users">;
   theme?: string;
 }) {
-  const [signals, preferences] = await Promise.all([
+  const [signals, preferences, users] = await Promise.all([
     args.ctx.runQuery(internal.embeddings.getUserTasteSignals, {
       userId: args.userId,
     }),
     args.ctx.runQuery(internal.embeddings.getUserTastePreferences, {
       userId: args.userId,
     }),
+    args.ctx.runQuery(internal.embeddings.getUsersByIds, {
+      userIds: [args.userId],
+    }),
   ]) as [
     { watchStates: Array<Doc<"watchStates">>; reviews: Array<Doc<"reviews">> },
     UserTastePreferenceDoc | null,
+    UserDoc[],
   ];
+  const user = users[0] ?? null;
 
-  const favoriteShowIds = dedupeShowIds(preferences?.favoriteShowIds ?? []);
-  const favoriteThemes = Array.from(
-    new Set((preferences?.favoriteThemes ?? []).map((theme) => theme.trim()).filter(Boolean)),
+  const favoriteShowIds = dedupeShowIds([
+    ...(preferences?.favoriteShowIds ?? []),
+    ...(user?.favoriteShowIds ?? []),
+  ]);
+  const explicitFavoriteThemes = Array.from(
+    new Set(
+      (preferences?.favoriteThemes ?? [])
+        .map((theme) => theme.trim())
+        .filter(Boolean),
+    ),
   );
+  const fallbackFavoriteThemes = Array.from(
+    new Set(
+      (user?.favoriteGenres ?? [])
+        .map((theme) => theme.trim())
+        .filter(Boolean),
+    ),
+  );
+  const weights = buildTasteWeights({
+    watchStates: signals.watchStates,
+    reviews: signals.reviews,
+    favoriteShowIds,
+  });
+  const positiveSignals = buildWeightedSignals({
+    weights,
+    predicate: (weight) => weight > 0.25,
+    limit: 25,
+  });
+  const corePositiveSignals = buildCorePositiveSignals({
+    positiveSignals,
+    favoriteShowIds,
+  });
+  const normalizedExplicitFavoriteThemes = explicitFavoriteThemes.filter((theme) =>
+    corePositiveSignals.length === 0 || !isGenericTasteTheme(theme)
+  );
+  const favoriteThemes = normalizedExplicitFavoriteThemes.length > 0
+    ? normalizedExplicitFavoriteThemes
+    : corePositiveSignals.length === 0
+      ? fallbackFavoriteThemes
+      : [];
   const effectiveTheme = combineThemes([
     ...favoriteThemes,
     ...(args.theme?.trim() ? [args.theme.trim()] : []),
@@ -1593,24 +2437,14 @@ async function getUserTasteState(args: {
     favoriteShowIds,
     favoriteThemes,
   });
-  const weights = buildTasteWeights({
-    watchStates: signals.watchStates,
-    reviews: signals.reviews,
-    favoriteShowIds,
+  const negativeSignals = buildWeightedSignals({
+    weights,
+    predicate: (weight) => weight < -0.25,
+    limit: 10,
   });
-  const positiveShowIds = dedupeShowIds(
-    Array.from(weights.entries())
-      .filter(([, weight]) => weight > 0.25)
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 25)
-      .map(([showId]) => showId),
-  );
-  const negativeShowIds = dedupeShowIds(
-    Array.from(weights.entries())
-      .filter(([, weight]) => weight < -0.25)
-      .slice(0, 10)
-      .map(([showId]) => showId),
-  );
+  const positiveShowIds = positiveSignals.map((signal) => signal.showId);
+  const corePositiveShowIds = corePositiveSignals.map((signal) => signal.showId);
+  const negativeShowIds = negativeSignals.map((signal) => signal.showId);
   const excludedShowIds = new Set<Id<"shows">>([
     ...signals.watchStates.map((state) => state.showId),
     ...signals.reviews.map((review) => review.showId),
@@ -1619,12 +2453,19 @@ async function getUserTasteState(args: {
   return {
     signals,
     preferences,
+    user,
     favoriteShowIds,
     favoriteThemes,
     effectiveTheme,
     themeKey,
     signalFingerprint,
+    explicitFavoriteThemes: normalizedExplicitFavoriteThemes,
+    fallbackFavoriteThemes,
+    positiveSignals,
+    corePositiveSignals,
+    negativeSignals,
     positiveShowIds,
+    corePositiveShowIds,
     negativeShowIds,
     excludedShowIds,
   };
@@ -1642,14 +2483,15 @@ async function ensureUserTasteProfileInternal(ctx: ActionCtx, userId: Id<"users"
     return existing;
   }
 
-  if (tasteState.positiveShowIds.length === 0 && tasteState.favoriteThemes.length === 0) {
+  if (tasteState.corePositiveShowIds.length === 0 && tasteState.favoriteThemes.length === 0) {
     return null;
   }
 
-  const positiveEmbeddings = await ensureShowEmbeddingsForIds(ctx, tasteState.positiveShowIds);
+  const positiveEmbeddings = await ensureShowEmbeddingsForIds(ctx, tasteState.corePositiveShowIds);
+  const positiveWeightByShowId = buildSignalWeightMap(tasteState.corePositiveSignals);
   const similarityVectors = positiveEmbeddings.map((embedding) => ({
     vector: embedding.similarityEmbedding,
-    weight: 1,
+    weight: positiveWeightByShowId.get(embedding.showId) ?? 1,
   }));
 
   if (tasteState.favoriteThemes.length > 0) {
@@ -1672,7 +2514,7 @@ async function ensureUserTasteProfileInternal(ctx: ActionCtx, userId: Id<"users"
     signalFingerprint: tasteState.signalFingerprint,
     favoriteShowIds: tasteState.favoriteShowIds,
     favoriteThemes: tasteState.favoriteThemes,
-    positiveShowIds: tasteState.positiveShowIds,
+    positiveShowIds: tasteState.corePositiveShowIds,
     negativeShowIds: tasteState.negativeShowIds,
     similarityEmbedding,
   });
@@ -1692,7 +2534,7 @@ async function getCachedPersonalizedRecommendations(args: {
     theme: args.theme,
   });
 
-  if (tasteState.positiveShowIds.length === 0 && !tasteState.effectiveTheme) {
+  if (tasteState.corePositiveShowIds.length === 0 && !tasteState.effectiveTheme) {
     return [];
   }
 
@@ -1709,11 +2551,12 @@ async function getCachedPersonalizedRecommendations(args: {
     return cache.recommendations.slice(0, args.limit);
   }
 
-  const recommendations = await buildRecommendationCandidates({
+  const recommendations = await buildAnchorBlendedRecommendationCandidates({
     ctx: args.ctx,
-    positiveShowIds: tasteState.positiveShowIds,
-    negativeShowIds: tasteState.negativeShowIds,
+    positiveSignals: tasteState.corePositiveSignals,
+    negativeSignals: tasteState.negativeSignals,
     excludedShowIds: tasteState.excludedShowIds,
+    favoriteShowIds: tasteState.favoriteShowIds,
     theme: tasteState.effectiveTheme,
     limit: USER_TASTE_CACHE_LIMIT,
   });
@@ -1724,7 +2567,7 @@ async function getCachedPersonalizedRecommendations(args: {
     themeKey: tasteState.themeKey,
     signalFingerprint: tasteState.signalFingerprint,
     recommendations: results,
-    positiveShowIds: tasteState.positiveShowIds,
+    positiveShowIds: tasteState.corePositiveShowIds,
     negativeShowIds: tasteState.negativeShowIds,
     expiresAt: Date.now() + USER_TASTE_CACHE_TTL_MS,
   });
@@ -1737,7 +2580,8 @@ async function buildRecommendationRail(args: {
   key: string;
   title: string;
   description?: string;
-  positiveShowIds: Id<"shows">[];
+  positiveSignals: WeightedShowSignal[];
+  negativeSignals?: WeightedShowSignal[];
   excludedShowIds?: Set<Id<"shows">>;
   theme?: string;
   limit?: number;
@@ -1745,8 +2589,12 @@ async function buildRecommendationRail(args: {
   const items = toRecommendationResults(
     await buildRecommendationCandidates({
       ctx: args.ctx,
-      positiveShowIds: dedupeShowIds(args.positiveShowIds),
-      negativeShowIds: [],
+      positiveSignals: buildWeightedSignals({
+        weights: buildSignalWeightMap(args.positiveSignals),
+        predicate: (weight) => weight > 0,
+        limit: 12,
+      }),
+      negativeSignals: args.negativeSignals ?? [],
       excludedShowIds: args.excludedShowIds ?? new Set<Id<"shows">>(),
       theme: args.theme,
       limit: Math.min(args.limit ?? 10, 12),
@@ -1955,10 +2803,29 @@ export const getViewerTastePreferences = query({
       return { favoriteShowIds: [], favoriteThemes: [] };
     }
 
-    const preferences = await ctx.runQuery(internal.embeddings.getUserTastePreferences, { userId });
+    const [preferences, users] = await Promise.all([
+      ctx.runQuery(internal.embeddings.getUserTastePreferences, { userId }),
+      ctx.runQuery(internal.embeddings.getUsersByIds, { userIds: [userId] }),
+    ]);
+    const user = users[0] ?? null;
+
     return {
-      favoriteShowIds: preferences?.favoriteShowIds ?? [],
-      favoriteThemes: preferences?.favoriteThemes ?? [],
+      favoriteShowIds: dedupeShowIds([
+        ...(preferences?.favoriteShowIds ?? []),
+        ...(user?.favoriteShowIds ?? []),
+      ]),
+      favoriteThemes: Array.from(
+        new Set(
+          [
+            ...(preferences?.favoriteThemes ?? []),
+            ...((preferences?.favoriteThemes?.length ?? 0) > 0
+              ? []
+              : (user?.favoriteGenres ?? [])),
+          ]
+            .map((theme) => theme.trim())
+            .filter(Boolean),
+        ),
+      ),
     };
   },
 });
@@ -1987,6 +2854,9 @@ export const saveViewerTastePreferences = action({
       userId,
       favoriteShowIds,
       favoriteThemes,
+    });
+    await ctx.runMutation(api.users.updateProfile, {
+      favoriteShowIds,
     });
     await ctx.runMutation(internal.embeddings.clearUserTasteArtifacts, { userId });
     await ensureShowEmbeddingsForIds(ctx, favoriteShowIds);
@@ -2082,52 +2952,106 @@ export const getHomeRecommendationRails = action({
     }
 
     const tasteState = await getUserTasteState({ ctx, userId });
-    const seedShows = await ctx.runQuery(internal.embeddings.getShowsByIds, {
-      showIds: tasteState.positiveShowIds.slice(0, 3),
-    }) as ShowDoc[];
+    const railSeeds = await planRecommendationRailSeeds({
+      ctx,
+      positiveSignals: tasteState.corePositiveSignals,
+      favoriteShowIds: tasteState.favoriteShowIds,
+    });
     const rails: RecommendationRail[] = [];
     const limitPerRail = Math.min(args.limitPerRail ?? 10, 12);
+    const usedShowIds = new Set<Id<"shows">>(tasteState.excludedShowIds);
 
-    if (seedShows[0]) {
+    if (railSeeds.primarySeed) {
       const rail = await buildRecommendationRail({
         ctx,
-        key: `because_${seedShows[0]._id}`,
-        title: `Because you liked ${seedShows[0].title}`,
+        key: `because_${railSeeds.primarySeed.show._id}`,
+        title: `Because you liked ${railSeeds.primarySeed.show.title}`,
         description: "Shows with a similar feel and style.",
-        positiveShowIds: [seedShows[0]._id],
-        excludedShowIds: new Set([seedShows[0]._id]),
+        positiveSignals: [{
+          showId: railSeeds.primarySeed.show._id,
+          weight: railSeeds.primarySeed.weight,
+        }],
+        negativeSignals: tasteState.negativeSignals,
+        excludedShowIds: new Set([
+          ...tasteState.excludedShowIds,
+          railSeeds.primarySeed.show._id,
+        ]),
         limit: limitPerRail,
       });
-      if (rail) rails.push(rail);
+      if (rail) {
+        rails.push(rail);
+        rail.items.forEach((item) => {
+          usedShowIds.add(item.showId);
+        });
+      }
     }
 
-    if (seedShows[0] && seedShows[1]) {
-      const pairIds = [seedShows[0]._id, seedShows[1]._id];
+    if (
+      railSeeds.secondarySeed &&
+      railSeeds.secondarySeed.show._id !== railSeeds.primarySeed?.show._id
+    ) {
       const rail = await buildRecommendationRail({
         ctx,
-        key: `because_pair_${seedShows[0]._id}_${seedShows[1]._id}`,
-        title: `Because you liked ${seedShows[0].title} and ${seedShows[1].title}`,
-        description: "A blend of both worlds.",
-        positiveShowIds: pairIds,
-        excludedShowIds: new Set(pairIds),
+        key: `because_${railSeeds.secondarySeed.show._id}`,
+        title: `Because you liked ${railSeeds.secondarySeed.show.title}`,
+        description: "Another lane that fits your taste, not just the same picks again.",
+        positiveSignals: [{
+          showId: railSeeds.secondarySeed.show._id,
+          weight: railSeeds.secondarySeed.weight,
+        }],
+        negativeSignals: tasteState.negativeSignals,
+        excludedShowIds: new Set([
+          ...usedShowIds,
+          railSeeds.secondarySeed.show._id,
+        ]),
         limit: limitPerRail,
       });
-      if (rail) rails.push(rail);
+      if (rail) {
+        rails.push(rail);
+        rail.items.forEach((item) => {
+          usedShowIds.add(item.showId);
+        });
+      }
     }
 
-    if (tasteState.favoriteThemes[0]) {
+    if (
+      railSeeds.primarySeed &&
+      railSeeds.pairSeed &&
+      railSeeds.pairSeed.show._id !== railSeeds.primarySeed.show._id &&
+      railSeeds.pairSeed.show._id !== railSeeds.secondarySeed?.show._id
+    ) {
+      const rail = await buildRecommendationRail({
+        ctx,
+        key: `because_pair_${railSeeds.primarySeed.show._id}_${railSeeds.pairSeed.show._id}`,
+        title: `Because you liked ${railSeeds.primarySeed.show.title} and ${railSeeds.pairSeed.show.title}`,
+        description: "A sharper blend built from the closest overlaps in your taste.",
+        positiveSignals: [
+          { showId: railSeeds.primarySeed.show._id, weight: railSeeds.primarySeed.weight },
+          { showId: railSeeds.pairSeed.show._id, weight: railSeeds.pairSeed.weight },
+        ],
+        negativeSignals: tasteState.negativeSignals,
+        excludedShowIds: new Set(usedShowIds),
+        limit: limitPerRail,
+      });
+      if (rail) {
+        rails.push(rail);
+      }
+    } else if (tasteState.favoriteThemes[0]) {
       const theme = tasteState.favoriteThemes[0];
       const rail = await buildRecommendationRail({
         ctx,
         key: `theme_${buildThemeKey(theme)}`,
         title: `More ${humanizeTheme(theme)}`,
         description: "Based on the vibes you gravitate toward.",
-        positiveShowIds: tasteState.positiveShowIds.slice(0, 2),
-        excludedShowIds: tasteState.excludedShowIds,
+        positiveSignals: tasteState.corePositiveSignals.slice(0, 2),
+        negativeSignals: tasteState.negativeSignals,
+        excludedShowIds: new Set(usedShowIds),
         theme,
         limit: limitPerRail,
       });
-      if (rail) rails.push(rail);
+      if (rail) {
+        rails.push(rail);
+      }
     }
 
     return rails;
@@ -2154,7 +3078,7 @@ export const getShowRecommendationRails = action({
       key: `show_${args.showId}`,
       title: `Because you liked ${show.title}`,
       description: "Shows with a similar feel and style.",
-      positiveShowIds: [args.showId],
+      positiveSignals: [{ showId: args.showId, weight: 1 }],
       excludedShowIds: new Set([args.showId]),
       limit: limitPerRail,
     });
@@ -2162,7 +3086,17 @@ export const getShowRecommendationRails = action({
 
     if (viewerId) {
       const tasteState = await getUserTasteState({ ctx, userId: viewerId });
-      const secondarySeed = tasteState.positiveShowIds.find((showId) => showId !== args.showId);
+      const railSeeds = await planRecommendationRailSeeds({
+        ctx,
+        positiveSignals: [
+          { showId: args.showId, weight: 1.25 },
+          ...tasteState.corePositiveSignals.filter((signal) => signal.showId !== args.showId),
+        ],
+        favoriteShowIds: tasteState.favoriteShowIds,
+      });
+      const secondarySeed = railSeeds.pairSeed?.show._id === args.showId
+        ? null
+        : railSeeds.pairSeed?.show._id ?? railSeeds.secondarySeed?.show._id ?? null;
       if (secondarySeed) {
         const [secondaryShow] = await ctx.runQuery(internal.embeddings.getShowsByIds, {
           showIds: [secondarySeed],
@@ -2173,7 +3107,11 @@ export const getShowRecommendationRails = action({
             key: `show_pair_${args.showId}_${secondarySeed}`,
             title: `Because you liked ${show.title} and ${secondaryShow.title}`,
             description: "A blend of both worlds.",
-            positiveShowIds: [args.showId, secondarySeed],
+            positiveSignals: [
+              { showId: args.showId, weight: 1 },
+              { showId: secondarySeed, weight: 1 },
+            ],
+            negativeSignals: tasteState.negativeSignals,
             excludedShowIds: new Set([args.showId, secondarySeed]),
             limit: limitPerRail,
           });
@@ -2188,7 +3126,8 @@ export const getShowRecommendationRails = action({
           key: `show_theme_${buildThemeKey(theme)}`,
           title: `More ${humanizeTheme(theme)}`,
           description: `Similar to ${show.title}, leaning into that vibe.`,
-          positiveShowIds: [args.showId],
+          positiveSignals: [{ showId: args.showId, weight: 1 }],
+          negativeSignals: tasteState.negativeSignals,
           excludedShowIds: new Set([args.showId]),
           theme,
           limit: limitPerRail,
@@ -2208,6 +3147,7 @@ export const getSmartLists = action({
   handler: async (ctx, args) => {
     const limitPerList = Math.min(args.limitPerList ?? SMART_LIST_LIMIT, 12);
     const rails: RecommendationRail[] = [];
+    const usedShowIds = new Set<Id<"shows">>();
 
     for (const config of SMART_LIST_CONFIGS) {
       const seedIds = (await Promise.all(
@@ -2217,9 +3157,9 @@ export const getSmartLists = action({
       const recommendations = rerankCuratedRecommendations(
         await buildRecommendationCandidates({
           ctx,
-          positiveShowIds: seedIds,
-          negativeShowIds: [],
-          excludedShowIds: new Set(seedIds),
+          positiveSignals: seedIds.map((showId) => ({ showId, weight: 1 })),
+          negativeSignals: [],
+          excludedShowIds: new Set([...usedShowIds, ...seedIds]),
           theme: config.theme,
           limit: Math.max(limitPerList * 3, 18),
         }),
@@ -2227,6 +3167,9 @@ export const getSmartLists = action({
       );
       const items = toRecommendationResults(recommendations.slice(0, limitPerList));
       if (items.length > 0) {
+        items.forEach((item) => {
+          usedShowIds.add(item.showId);
+        });
         rails.push({
           key: config.key,
           title: config.title,
@@ -2415,46 +3358,81 @@ export const getProfileTasteExperience = action({
       };
     }
 
-    const seedShows = await ctx.runQuery(internal.embeddings.getShowsByIds, {
-      showIds: targetProfile.positiveShowIds.slice(0, 2),
-    }) as ShowDoc[];
+    const targetTasteState = await getUserTasteState({ ctx, userId: args.userId });
+    const railSeeds = await planRecommendationRailSeeds({
+      ctx,
+      positiveSignals: targetTasteState.corePositiveSignals,
+      favoriteShowIds: targetTasteState.favoriteShowIds,
+    });
     const rails: RecommendationRail[] = [];
 
-    if (seedShows[0]) {
+    if (railSeeds.primarySeed) {
       const rail = await buildRecommendationRail({
         ctx,
-        key: `profile_${args.userId}_${seedShows[0]._id}`,
-        title: `Because they liked ${seedShows[0].title}`,
+        key: `profile_${args.userId}_${railSeeds.primarySeed.show._id}`,
+        title: `Because they liked ${railSeeds.primarySeed.show.title}`,
         description: "Shows with a similar feel and style.",
-        positiveShowIds: [seedShows[0]._id],
-        excludedShowIds: new Set([seedShows[0]._id]),
+        positiveSignals: [{
+          showId: railSeeds.primarySeed.show._id,
+          weight: railSeeds.primarySeed.weight,
+        }],
+        excludedShowIds: new Set([railSeeds.primarySeed.show._id]),
         limit: 10,
       });
       if (rail) rails.push(rail);
     }
 
-    if (seedShows[0] && seedShows[1]) {
-      const pairIds = [seedShows[0]._id, seedShows[1]._id];
+    if (
+      railSeeds.secondarySeed &&
+      railSeeds.secondarySeed.show._id !== railSeeds.primarySeed?.show._id
+    ) {
+      const rail = await buildRecommendationRail({
+        ctx,
+        key: `profile_${args.userId}_${railSeeds.secondarySeed.show._id}`,
+        title: `Because they liked ${railSeeds.secondarySeed.show.title}`,
+        description: "Another distinct lane inside their taste.",
+        positiveSignals: [{
+          showId: railSeeds.secondarySeed.show._id,
+          weight: railSeeds.secondarySeed.weight,
+        }],
+        excludedShowIds: new Set([railSeeds.secondarySeed.show._id]),
+        limit: 10,
+      });
+      if (rail) rails.push(rail);
+    }
+
+    if (
+      railSeeds.primarySeed &&
+      railSeeds.pairSeed &&
+      railSeeds.pairSeed.show._id !== railSeeds.primarySeed.show._id &&
+      railSeeds.pairSeed.show._id !== railSeeds.secondarySeed?.show._id
+    ) {
       const rail = await buildRecommendationRail({
         ctx,
         key: `profile_pair_${args.userId}`,
-        title: `Because they liked ${seedShows[0].title} and ${seedShows[1].title}`,
-        description: "A blend of both worlds.",
-        positiveShowIds: pairIds,
-        excludedShowIds: new Set(pairIds),
+        title: `Because they liked ${railSeeds.primarySeed.show.title} and ${railSeeds.pairSeed.show.title}`,
+        description: "The strongest overlap between their top taste anchors.",
+        positiveSignals: [
+          { showId: railSeeds.primarySeed.show._id, weight: railSeeds.primarySeed.weight },
+          { showId: railSeeds.pairSeed.show._id, weight: railSeeds.pairSeed.weight },
+        ],
+        excludedShowIds: new Set([
+          railSeeds.primarySeed.show._id,
+          railSeeds.pairSeed.show._id,
+        ]),
         limit: 10,
       });
       if (rail) rails.push(rail);
-    }
-
-    if (targetProfile.favoriteThemes[0]) {
+    } else if (targetProfile.favoriteThemes[0]) {
       const theme = targetProfile.favoriteThemes[0];
       const rail = await buildRecommendationRail({
         ctx,
         key: `profile_theme_${args.userId}`,
         title: `More ${humanizeTheme(theme)}`,
         description: "Based on the vibes they gravitate toward.",
-        positiveShowIds: targetProfile.positiveShowIds.slice(0, 2),
+        positiveSignals: targetProfile.positiveShowIds
+          .slice(0, 2)
+          .map((showId: Id<"shows">) => ({ showId, weight: 1 })),
         excludedShowIds: new Set(targetProfile.positiveShowIds.slice(0, 2)),
         theme,
         limit: 10,
@@ -2535,8 +3513,8 @@ export const previewRecommendationsFromShows = internalAction({
 
     const recommendations = await buildRecommendationCandidates({
       ctx,
-      positiveShowIds: uniqueShowIds,
-      negativeShowIds: [],
+      positiveSignals: uniqueShowIds.map((showId) => ({ showId, weight: 1 })),
+      negativeSignals: [],
       excludedShowIds: new Set(args.excludeShowIds ?? uniqueShowIds),
       theme: args.theme,
       limit,

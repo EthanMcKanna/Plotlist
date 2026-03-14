@@ -56,6 +56,9 @@ export default function ShowScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const showId = (typeof params.id === "string" ? params.id : "") as Id<"shows">;
+  const openSeason = typeof params.openSeason === "string" ? Number(params.openSeason) : undefined;
+  const openEpisode = typeof params.openEpisode === "string" ? Number(params.openEpisode) : undefined;
+  const [deepLinkConsumed, setDeepLinkConsumed] = useState(false);
 
   const { isAuthenticated } = useConvexAuth();
   const show = useQuery(api.shows.get, { showId });
@@ -497,6 +500,40 @@ export default function ShowScreen() {
       return () => clearTimeout(id);
     }
   }, [episodeSheetVisible, selectedEpisode]);
+
+  // Auto-open episode detail sheet when navigated with openSeason/openEpisode params
+  useEffect(() => {
+    if (
+      deepLinkConsumed ||
+      openSeason === undefined ||
+      openEpisode === undefined ||
+      !Number.isFinite(openSeason) ||
+      !Number.isFinite(openEpisode)
+    ) {
+      return;
+    }
+
+    const seasonDetails = seasonDetailsByNumber[openSeason];
+    if (!seasonDetails?.episodes) return;
+
+    const episode = seasonDetails.episodes.find(
+      (ep: any) => ep.episodeNumber === openEpisode,
+    );
+    if (!episode) return;
+
+    const seasonMeta = seasonsWithEpisodes.find(
+      (s: any) => s.season_number === openSeason,
+    );
+    const seasonName = seasonMeta?.name ?? `Season ${openSeason}`;
+
+    setDeepLinkConsumed(true);
+    setSelectedEpisode({
+      episode,
+      seasonName,
+      seasonNumber: openSeason,
+    });
+    setEpisodeSheetVisible(true);
+  }, [deepLinkConsumed, openSeason, openEpisode, seasonDetailsByNumber, seasonsWithEpisodes]);
 
   const visibleSeasonNumbers = useMemo<number[]>(
     () =>
@@ -1693,316 +1730,333 @@ export default function ShowScreen() {
           const myEpData = myEpisodeRatingMap.get(sheetEpKey);
           const myEpRating = myEpData?.rating ?? 0;
           const myEpReviewText = myEpData?.reviewText;
+          const epCode = `S${String(selectedEpisode.seasonNumber).padStart(2, "0")} E${String(selectedEpisode.episode.episodeNumber).padStart(2, "0")}`;
+          const hasTmdbRating = selectedEpisode.episode.voteCount > 0 && selectedEpisode.episode.voteAverage > 0;
 
           return (
-          <View className="flex-1 bg-dark-bg" style={{ backgroundColor: "#0D0F14" }}>
-            <View className="flex-row items-center justify-between border-b border-dark-border px-6 py-4">
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setEpisodeSheetVisible(false);
-                  setEpisodeReviewExpanded(false);
-                  setEpisodeReviewText("");
-                }}
-              >
-                <Text className="text-base text-text-tertiary">Close</Text>
-              </Pressable>
-              <Text className="text-base font-semibold text-text-primary">
-                Episode Details
-              </Text>
-              <View style={{ width: 48 }} />
-            </View>
-
+          <View className="flex-1" style={{ backgroundColor: "#0D0F14" }}>
             <ScrollView
               className="flex-1"
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
               keyboardShouldPersistTaps="handled"
             >
-              {selectedEpisode.episode.stillPath ? (
-                <Image
-                  source={{ uri: selectedEpisode.episode.stillPath }}
-                  style={{
-                    width: SCREEN_WIDTH,
-                    height: 200,
-                    backgroundColor: "#1C2028",
-                  }}
-                  contentFit="cover"
-                  transition={200}
-                />
-              ) : null}
+              {/* Hero image with gradient overlay and metadata */}
+              <View className="relative" style={{ aspectRatio: 16 / 9 }}>
+                {selectedEpisode.episode.stillPath ? (
+                  <Image
+                    source={{ uri: selectedEpisode.episode.stillPath }}
+                    style={{ width: "100%", height: "100%", backgroundColor: "#1C2028" }}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                ) : (
+                  <View className="h-full w-full items-center justify-center" style={{ backgroundColor: "#1C2028" }}>
+                    <Ionicons name="tv-outline" size={40} color="#3b3f4a" />
+                  </View>
+                )}
 
-              <View className="px-6 pt-6">
-                <Text className="text-xl font-bold text-text-primary">
+                <LinearGradient
+                  colors={["rgba(13, 15, 20, 0.4)", "transparent", "rgba(13, 15, 20, 0.85)", "#0D0F14"]}
+                  locations={[0, 0.25, 0.75, 1]}
+                  style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
+                />
+
+                {/* Close button */}
+                <Pressable
+                  className="absolute top-4 right-4 items-center justify-center rounded-full active:opacity-60"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    backgroundColor: "rgba(0,0,0,0.5)",
+                  }}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setEpisodeSheetVisible(false);
+                    setEpisodeReviewExpanded(false);
+                    setEpisodeReviewText("");
+                  }}
+                >
+                  <Ionicons name="close" size={18} color="white" />
+                </Pressable>
+
+                {/* Episode code badge */}
+                <View className="absolute bottom-4 left-5 right-5">
+                  <View className="flex-row items-center gap-2">
+                    <Text
+                      className="text-xs font-bold text-white/70"
+                      style={{ letterSpacing: 1.2 }}
+                    >
+                      {epCode}
+                    </Text>
+                    {selectedEpisode.episode.runtime ? (
+                      <>
+                        <View className="h-1 w-1 rounded-full bg-white/30" />
+                        <Text className="text-xs text-white/50">
+                          {selectedEpisode.episode.runtime} min
+                        </Text>
+                      </>
+                    ) : null}
+                    {selectedEpisode.episode.airDate ? (
+                      <>
+                        <View className="h-1 w-1 rounded-full bg-white/30" />
+                        <Text className="text-xs text-white/50">
+                          {formatDate(new Date(selectedEpisode.episode.airDate).getTime())}
+                        </Text>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+
+              <View className="px-5">
+                {/* Title */}
+                <Text className="text-2xl font-bold tracking-tight text-text-primary">
                   {selectedEpisode.episode.name}
                 </Text>
-                <View className="mt-2 flex-row flex-wrap items-center gap-2">
-                  <Text className="text-sm text-text-tertiary">
-                    {selectedEpisode.seasonName} • E
-                    {String(selectedEpisode.episode.episodeNumber).padStart(2, "0")}
-                  </Text>
-                  {selectedEpisode.episode.airDate ? (
-                    <Text className="text-sm text-text-tertiary">
-                      {formatDate(new Date(selectedEpisode.episode.airDate).getTime())}
-                    </Text>
-                  ) : null}
-                  {selectedEpisode.episode.runtime ? (
-                    <Text className="text-sm text-text-tertiary">
-                      {selectedEpisode.episode.runtime} min
-                    </Text>
-                  ) : null}
-                </View>
 
-                {(selectedEpisode.episode.voteCount > 0 &&
-                  selectedEpisode.episode.voteAverage > 0) && (
-                  <View className="mt-4 flex-row items-center gap-2 rounded-xl border border-accent/20 bg-accent/10 px-4 py-2 self-start">
-                    <Ionicons name="star" size={16} color="#FBBF24" />
-                    <Text className="text-base font-semibold text-text-primary">
-                      {selectedEpisode.episode.voteAverage.toFixed(1)}
-                    </Text>
-                    <Text className="text-sm text-text-tertiary">
-                      ({selectedEpisode.episode.voteCount.toLocaleString()} ratings)
-                    </Text>
-                  </View>
-                )}
-
-                {/* Mark as Watched */}
+                {/* Action row: watched + rating inline */}
                 {isAuthenticated && (
-                  <Pressable
-                    className="mt-4 flex-row items-center gap-3 rounded-xl border px-4 py-3 active:opacity-80"
-                    disabled={!sheetIsAvailable}
-                    style={{
-                      borderColor: sheetIsWatched
-                        ? "#0ea5e9"
-                        : !sheetIsAvailable
-                          ? "rgba(42, 46, 56, 0.45)"
-                          : "rgba(42, 46, 56, 0.8)",
-                      backgroundColor: sheetIsWatched
-                        ? "rgba(14, 165, 233, 0.1)"
-                        : "transparent",
-                      opacity: sheetIsAvailable ? 1 : 0.6,
-                    }}
-                    onPress={() => {
-                      if (!sheetIsAvailable) {
-                        return;
-                      }
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      toggleEpisode({
-                        showId,
-                        seasonNumber: selectedEpisode.seasonNumber,
-                        episodeNumber: selectedEpisode.episode.episodeNumber,
-                        episodeTitle: selectedEpisode.episode.name,
-                      });
-                    }}
-                  >
-                    <Ionicons
-                      name={sheetIsWatched ? "checkmark-circle" : "checkmark-circle-outline"}
-                      size={22}
-                      color={
-                        sheetIsWatched
-                          ? "#0ea5e9"
-                          : sheetIsAvailable
-                            ? "#5A6070"
-                            : "#404654"
-                      }
-                    />
-                    <Text
-                      className="text-sm font-semibold"
+                  <View className="mt-5 flex-row items-center gap-3">
+                    {/* Watched toggle */}
+                    <Pressable
+                      className="flex-row items-center gap-2 rounded-full px-4 py-2.5 active:opacity-80"
+                      disabled={!sheetIsAvailable}
                       style={{
-                        color: sheetIsWatched
-                          ? "#0ea5e9"
-                          : sheetIsAvailable
-                            ? "#A0A8B8"
-                            : "#6B7280",
+                        backgroundColor: sheetIsWatched
+                          ? "rgba(14, 165, 233, 0.15)"
+                          : "rgba(90, 96, 112, 0.12)",
+                        borderWidth: 1,
+                        borderColor: sheetIsWatched
+                          ? "rgba(14, 165, 233, 0.3)"
+                          : "transparent",
+                        opacity: sheetIsAvailable ? 1 : 0.5,
+                      }}
+                      onPress={() => {
+                        if (!sheetIsAvailable) return;
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        toggleEpisode({
+                          showId,
+                          seasonNumber: selectedEpisode.seasonNumber,
+                          episodeNumber: selectedEpisode.episode.episodeNumber,
+                          episodeTitle: selectedEpisode.episode.name,
+                        });
                       }}
                     >
-                      {sheetIsWatched
-                        ? "Watched"
-                        : sheetIsAvailable
-                          ? "Mark as Watched"
-                          : selectedEpisode.episode.airDate
-                            ? `Airs ${formatDate(new Date(selectedEpisode.episode.airDate).getTime())}`
-                            : "Not available yet"}
-                    </Text>
-                  </Pressable>
-                )}
-
-                {/* ─── Your Rating ─── */}
-                {isAuthenticated && sheetIsAvailable && (
-                  <View className="mt-6">
-                    <View className="rounded-2xl border border-dark-border bg-dark-card p-4">
-                      <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                        Your Rating
+                      <Ionicons
+                        name={sheetIsWatched ? "checkmark-circle" : "checkmark-circle-outline"}
+                        size={18}
+                        color={sheetIsWatched ? "#38bdf8" : "#6B7280"}
+                      />
+                      <Text
+                        className="text-sm font-semibold"
+                        style={{ color: sheetIsWatched ? "#7dd3fc" : "#9BA1B0" }}
+                      >
+                        {sheetIsWatched
+                          ? "Watched"
+                          : sheetIsAvailable
+                            ? "Mark Watched"
+                            : selectedEpisode.episode.airDate
+                              ? `Airs ${formatDate(new Date(selectedEpisode.episode.airDate).getTime())}`
+                              : "Not yet available"}
                       </Text>
-                      <View className="flex-row items-center justify-between">
-                        <StarRating
-                          value={myEpRating}
-                          onChange={(val) => {
-                            if (val === 0 && myEpRating > 0) {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              removeEpisodeRating({
-                                showId,
-                                seasonNumber: selectedEpisode.seasonNumber,
-                                episodeNumber: selectedEpisode.episode.episodeNumber,
-                              });
-                            } else if (val > 0) {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                              rateEpisode({
-                                showId,
-                                seasonNumber: selectedEpisode.seasonNumber,
-                                episodeNumber: selectedEpisode.episode.episodeNumber,
-                                episodeTitle: selectedEpisode.episode.name,
-                                rating: val,
-                              });
-                            }
-                          }}
-                          size={32}
-                        />
-                        {myEpRating > 0 && (
-                          <Text className="text-sm text-text-tertiary">
-                            {myEpRating} / 5
-                          </Text>
-                        )}
-                      </View>
+                    </Pressable>
 
-                      {/* Review text */}
-                      {myEpRating > 0 && (
-                        <View className="mt-3">
-                          {myEpReviewText && !episodeReviewExpanded ? (
-                            <Pressable
-                              onPress={() => {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                setEpisodeReviewText(myEpReviewText);
-                                setEpisodeReviewExpanded(true);
-                              }}
-                              className="rounded-xl border border-dark-border bg-dark-bg p-3"
-                            >
-                              <View className="flex-row items-center gap-1.5 mb-1.5">
-                                <Ionicons name="chatbubble" size={12} color="#9BA1B0" />
-                                <Text className="text-xs font-medium text-text-tertiary">
-                                  Your review
-                                </Text>
-                              </View>
-                              <Text className="text-sm text-text-secondary" numberOfLines={4}>
-                                {myEpReviewText}
-                              </Text>
-                            </Pressable>
-                          ) : !episodeReviewExpanded ? (
-                            <Pressable
-                              onPress={() => {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                setEpisodeReviewExpanded(true);
-                              }}
-                              className="flex-row items-center gap-1.5"
-                            >
-                              <Ionicons name="chatbubble-outline" size={14} color="#9BA1B0" />
-                              <Text className="text-sm text-text-secondary">
-                                Write a review...
-                              </Text>
-                            </Pressable>
-                          ) : (
-                            <View>
-                              <TextInput
-                                value={episodeReviewText}
-                                onChangeText={setEpisodeReviewText}
-                                placeholder="What did you think of this episode?"
-                                placeholderTextColor="#5A6070"
-                                multiline
-                                autoFocus
-                                className="min-h-[80px] rounded-xl border border-dark-border bg-dark-bg px-3 py-2.5 text-sm text-text-primary"
-                                style={{ textAlignVertical: "top" }}
-                                maxLength={5000}
-                              />
-                              <View className="mt-2 flex-row items-center justify-end gap-3">
-                                <Pressable
-                                  onPress={() => {
-                                    setEpisodeReviewExpanded(false);
-                                    setEpisodeReviewText("");
-                                  }}
-                                >
-                                  <Text className="text-sm text-text-tertiary">Cancel</Text>
-                                </Pressable>
-                                <Pressable
-                                  onPress={() => {
-                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                    rateEpisode({
-                                      showId,
-                                      seasonNumber: selectedEpisode.seasonNumber,
-                                      episodeNumber: selectedEpisode.episode.episodeNumber,
-                                      episodeTitle: selectedEpisode.episode.name,
-                                      rating: myEpRating,
-                                      reviewText: episodeReviewText || undefined,
-                                    });
-                                    setEpisodeReviewExpanded(false);
-                                    setEpisodeReviewText("");
-                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                  }}
-                                  disabled={!episodeReviewText.trim()}
-                                >
-                                  <Text
-                                    className={`text-sm font-semibold ${
-                                      episodeReviewText.trim()
-                                        ? "text-brand-500"
-                                        : "text-text-tertiary"
-                                    }`}
-                                  >
-                                    Save
-                                  </Text>
-                                </Pressable>
-                              </View>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                )}
-
-                {/* ─── Community Episode Reviews ─── */}
-                {(episodeStats || (episodeCommunityReviews && episodeCommunityReviews.length > 0)) && (
-                  <View className="mt-6">
-                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                      Community Reviews
-                    </Text>
-                    {episodeStats && (
-                      <View className="mt-3 flex-row items-center rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
-                        <View className="mr-3 rounded-full bg-amber-500/12 px-2.5 py-1">
-                          <Text className="text-sm font-semibold text-amber-300">
-                            ★ {episodeStats.averageRating.toFixed(1)}
-                          </Text>
-                        </View>
-                        <Text className="text-xs text-text-tertiary">
-                          from {episodeStats.reviewCount} rating{episodeStats.reviewCount === 1 ? "" : "s"}
+                    {/* TMDB rating pill */}
+                    {hasTmdbRating && (
+                      <View className="flex-row items-center gap-1.5 rounded-full px-3 py-2.5" style={{ backgroundColor: "rgba(251, 191, 36, 0.08)" }}>
+                        <Ionicons name="star" size={13} color="#fbbf24" />
+                        <Text className="text-sm font-semibold" style={{ color: "#fcd34d" }}>
+                          {selectedEpisode.episode.voteAverage.toFixed(1)}
                         </Text>
                       </View>
                     )}
+                  </View>
+                )}
+
+                {/* Overview */}
+                {selectedEpisode.episode.overview ? (
+                  <Text className="mt-5 text-[15px] leading-6 text-text-secondary">
+                    {selectedEpisode.episode.overview}
+                  </Text>
+                ) : null}
+
+                {/* ─── Your Rating ─── */}
+                {isAuthenticated && sheetIsAvailable && (
+                  <View className="mt-6 rounded-2xl p-4" style={{ backgroundColor: "rgba(90, 96, 112, 0.08)" }}>
+                    <Text className="mb-3 text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Your Rating
+                    </Text>
+                    <View className="flex-row items-center justify-between">
+                      <StarRating
+                        value={myEpRating}
+                        onChange={(val) => {
+                          if (val === 0 && myEpRating > 0) {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            removeEpisodeRating({
+                              showId,
+                              seasonNumber: selectedEpisode.seasonNumber,
+                              episodeNumber: selectedEpisode.episode.episodeNumber,
+                            });
+                          } else if (val > 0) {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            rateEpisode({
+                              showId,
+                              seasonNumber: selectedEpisode.seasonNumber,
+                              episodeNumber: selectedEpisode.episode.episodeNumber,
+                              episodeTitle: selectedEpisode.episode.name,
+                              rating: val,
+                            });
+                          }
+                        }}
+                        size={32}
+                      />
+                      {myEpRating > 0 && (
+                        <Text className="text-sm font-medium text-text-tertiary">
+                          {myEpRating}/5
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Review text */}
+                    {myEpRating > 0 && (
+                      <View className="mt-3">
+                        {myEpReviewText && !episodeReviewExpanded ? (
+                          <Pressable
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              setEpisodeReviewText(myEpReviewText);
+                              setEpisodeReviewExpanded(true);
+                            }}
+                            className="rounded-xl p-3 active:opacity-80"
+                            style={{ backgroundColor: "rgba(90, 96, 112, 0.1)" }}
+                          >
+                            <Text className="text-sm text-text-secondary" numberOfLines={4}>
+                              {myEpReviewText}
+                            </Text>
+                          </Pressable>
+                        ) : !episodeReviewExpanded ? (
+                          <Pressable
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              setEpisodeReviewExpanded(true);
+                            }}
+                            className="flex-row items-center gap-1.5 pt-1"
+                          >
+                            <Ionicons name="chatbubble-outline" size={13} color="#9BA1B0" />
+                            <Text className="text-sm text-text-tertiary">
+                              Add a review...
+                            </Text>
+                          </Pressable>
+                        ) : (
+                          <View>
+                            <TextInput
+                              value={episodeReviewText}
+                              onChangeText={setEpisodeReviewText}
+                              placeholder="What did you think?"
+                              placeholderTextColor="#5A6070"
+                              multiline
+                              autoFocus
+                              className="min-h-[80px] rounded-xl px-3 py-2.5 text-sm text-text-primary"
+                              style={{ textAlignVertical: "top", backgroundColor: "rgba(90, 96, 112, 0.1)" }}
+                              maxLength={5000}
+                            />
+                            <View className="mt-2 flex-row items-center justify-end gap-3">
+                              <Pressable
+                                onPress={() => {
+                                  setEpisodeReviewExpanded(false);
+                                  setEpisodeReviewText("");
+                                }}
+                              >
+                                <Text className="text-sm text-text-tertiary">Cancel</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => {
+                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                  rateEpisode({
+                                    showId,
+                                    seasonNumber: selectedEpisode.seasonNumber,
+                                    episodeNumber: selectedEpisode.episode.episodeNumber,
+                                    episodeTitle: selectedEpisode.episode.name,
+                                    rating: myEpRating,
+                                    reviewText: episodeReviewText || undefined,
+                                  });
+                                  setEpisodeReviewExpanded(false);
+                                  setEpisodeReviewText("");
+                                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                }}
+                                disabled={!episodeReviewText.trim()}
+                              >
+                                <Text
+                                  className={`text-sm font-semibold ${
+                                    episodeReviewText.trim()
+                                      ? "text-brand-500"
+                                      : "text-text-tertiary"
+                                  }`}
+                                >
+                                  Save
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* ─── Community Reviews ─── */}
+                {(episodeStats || (episodeCommunityReviews && episodeCommunityReviews.length > 0)) && (
+                  <View className="mt-6">
+                    <View className="flex-row items-center gap-2.5">
+                      <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                        Community
+                      </Text>
+                      {episodeStats && (
+                        <View className="flex-row items-center gap-1 rounded-full px-2 py-0.5" style={{ backgroundColor: "rgba(251, 191, 36, 0.08)" }}>
+                          <Ionicons name="star" size={10} color="#fbbf24" />
+                          <Text className="text-[11px] font-semibold" style={{ color: "#fcd34d" }}>
+                            {episodeStats.averageRating.toFixed(1)}
+                          </Text>
+                          <Text className="text-[11px] text-text-tertiary">
+                            ({episodeStats.reviewCount})
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                     {episodeCommunityReviews && episodeCommunityReviews.length > 0 && (
                       <View className="mt-3 gap-3">
                         {episodeCommunityReviews.map((item: any) => (
                           <View
                             key={item.review._id}
-                            className="rounded-2xl border border-dark-border bg-dark-card p-3"
+                            className="rounded-2xl p-3.5"
+                            style={{ backgroundColor: "rgba(90, 96, 112, 0.08)" }}
                           >
                             <View className="flex-row items-center gap-2.5">
                               <Avatar
                                 uri={item.authorAvatarUrl}
                                 label={item.author?.displayName ?? item.author?.username ?? "?"}
-                                size={28}
+                                size={26}
                               />
-                              <View className="flex-1">
-                                <Text className="text-sm font-semibold text-text-primary">
-                                  {item.author?.displayName ?? item.author?.username ?? "User"}
-                                </Text>
-                              </View>
-                              <View className="rounded-full bg-amber-500/12 px-2 py-0.5">
-                                <Text className="text-xs font-semibold text-amber-300">
-                                  ★ {item.review.rating}
-                                </Text>
+                              <Text className="flex-1 text-[13px] font-semibold text-text-primary">
+                                {item.author?.displayName ?? item.author?.username ?? "User"}
+                              </Text>
+                              <View className="flex-row items-center gap-1">
+                                {Array.from({ length: 5 }, (_, i) => (
+                                  <Ionicons
+                                    key={i}
+                                    name={i < Math.round(item.review.rating) ? "star" : "star-outline"}
+                                    size={11}
+                                    color={i < Math.round(item.review.rating) ? "#fbbf24" : "#3b3f4a"}
+                                  />
+                                ))}
                               </View>
                             </View>
-                            <Text className="mt-2 text-sm text-text-secondary" numberOfLines={4}>
-                              {item.review.reviewText}
-                            </Text>
+                            {item.review.reviewText ? (
+                              <Text className="mt-2 text-sm leading-5 text-text-secondary" numberOfLines={4}>
+                                {item.review.reviewText}
+                              </Text>
+                            ) : null}
                           </View>
                         ))}
                       </View>
@@ -2010,57 +2064,54 @@ export default function ShowScreen() {
                   </View>
                 )}
 
-                {selectedEpisode.episode.overview ? (
+                {/* ─── Crew & Guest Stars ─── */}
+                {(selectedEpisode.episode.crew?.length > 0 || selectedEpisode.episode.guestStars?.length > 0) && (
                   <View className="mt-6">
-                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                      Overview
-                    </Text>
-                    <Text className="mt-2 text-sm text-text-secondary leading-6">
-                      {selectedEpisode.episode.overview}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {selectedEpisode.episode.crew?.length > 0 ? (
-                  <View className="mt-6">
-                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                      Crew
-                    </Text>
-                    <View className="mt-2 flex-row flex-wrap gap-2">
-                      {selectedEpisode.episode.crew.map((person: any) => (
-                        <View
-                          key={`${selectedEpisode.episode.id}-${person.id}-${person.job}`}
-                          className="rounded-full border border-dark-border bg-dark-card px-3 py-1.5"
-                        >
-                          <Text className="text-xs text-text-secondary">
-                            {person.name} · {person.job}
-                          </Text>
+                    {selectedEpisode.episode.crew?.length > 0 && (
+                      <View>
+                        <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                          Crew
+                        </Text>
+                        <View className="mt-2.5 flex-row flex-wrap gap-2">
+                          {selectedEpisode.episode.crew.map((person: any) => (
+                            <View
+                              key={`${selectedEpisode.episode.id}-${person.id}-${person.job}`}
+                              className="rounded-full px-3 py-1.5"
+                              style={{ backgroundColor: "rgba(90, 96, 112, 0.1)" }}
+                            >
+                              <Text className="text-xs text-text-secondary">
+                                <Text className="font-medium text-text-primary">{person.name}</Text>
+                                {" · "}{person.job}
+                              </Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
-                    </View>
-                  </View>
-                ) : null}
+                      </View>
+                    )}
 
-                {selectedEpisode.episode.guestStars?.length > 0 ? (
-                  <View className="mt-6">
-                    <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                      Guest Stars
-                    </Text>
-                    <View className="mt-2 flex-row flex-wrap gap-2">
-                      {selectedEpisode.episode.guestStars.map((person: any) => (
-                        <View
-                          key={`${selectedEpisode.episode.id}-guest-${person.id}`}
-                          className="rounded-full border border-brand-500/15 bg-brand-500/10 px-3 py-1.5"
-                        >
-                          <Text className="text-xs text-text-secondary">
-                            {person.name}
-                            {person.character ? ` as ${person.character}` : ""}
-                          </Text>
+                    {selectedEpisode.episode.guestStars?.length > 0 && (
+                      <View className={selectedEpisode.episode.crew?.length > 0 ? "mt-5" : ""}>
+                        <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                          Guest Stars
+                        </Text>
+                        <View className="mt-2.5 flex-row flex-wrap gap-2">
+                          {selectedEpisode.episode.guestStars.map((person: any) => (
+                            <View
+                              key={`${selectedEpisode.episode.id}-guest-${person.id}`}
+                              className="rounded-full px-3 py-1.5"
+                              style={{ backgroundColor: "rgba(14, 165, 233, 0.06)" }}
+                            >
+                              <Text className="text-xs text-text-secondary">
+                                <Text className="font-medium text-text-primary">{person.name}</Text>
+                                {person.character ? ` as ${person.character}` : ""}
+                              </Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
-                    </View>
+                      </View>
+                    )}
                   </View>
-                ) : null}
+                )}
               </View>
             </ScrollView>
           </View>

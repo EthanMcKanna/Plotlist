@@ -70,6 +70,7 @@ export type ReleaseCalendarShowSource = {
   _id: string;
   title: string;
   posterUrl?: string | null;
+  backdropUrl?: string | null;
   providers: ReleaseCalendarProvider[];
   events: ReleaseEventRecord[];
   isStale: boolean;
@@ -80,6 +81,7 @@ export type ReleaseCalendarItem = ReleaseEventRecord & {
     _id: string;
     title: string;
     posterUrl?: string | null;
+    backdropUrl?: string | null;
   };
   providers: ReleaseCalendarProvider[];
 };
@@ -273,6 +275,7 @@ export function buildReleaseCalendarData(args: {
             _id: show._id,
             title: show.title,
             posterUrl: show.posterUrl ?? null,
+            backdropUrl: show.backdropUrl ?? null,
           },
           providers: show.providers,
         })),

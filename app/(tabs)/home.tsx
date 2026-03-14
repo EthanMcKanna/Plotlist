@@ -62,6 +62,63 @@ function getCarouselShow(item: CarouselItem) {
   return show;
 }
 
+function getRecommendationItemKey(item: {
+  showId?: string;
+  _id?: string;
+  externalId?: string;
+  title?: string;
+}) {
+  return item.showId ?? item._id ?? item.externalId ?? item.title ?? null;
+}
+
+function dedupeRecommendationItems<T extends {
+  showId?: string;
+  _id?: string;
+  externalId?: string;
+  title?: string;
+}>(items: T[]) {
+  const localSeenKeys = new Set<string>();
+
+  return items.filter((item) => {
+    const key = getRecommendationItemKey(item);
+    if (!key) {
+      return true;
+    }
+    if (localSeenKeys.has(key)) {
+      return false;
+    }
+    localSeenKeys.add(key);
+    return true;
+  });
+}
+
+function selectRecommendationRailItems<T extends {
+  showId?: string;
+  _id?: string;
+  externalId?: string;
+  title?: string;
+}>(
+  items: T[],
+  seenKeys: Set<string>,
+  minimumFreshItems: number,
+) {
+  const uniqueItems = dedupeRecommendationItems(items);
+  const freshItems = uniqueItems.filter((item) => {
+    const key = getRecommendationItemKey(item);
+    return !key || !seenKeys.has(key);
+  });
+  const selectedItems = freshItems.length >= minimumFreshItems ? freshItems : uniqueItems;
+
+  selectedItems.forEach((item) => {
+    const key = getRecommendationItemKey(item);
+    if (key) {
+      seenKeys.add(key);
+    }
+  });
+
+  return selectedItems;
+}
+
 type SectionData =
   | { type: "header" }
   | { type: "up-next" }
@@ -319,6 +376,7 @@ export default function HomeScreen() {
 
   const sections: SectionData[] = useMemo(() => {
     const result: SectionData[] = [{ type: "header" }];
+    const seenRecommendationKeys = new Set<string>();
 
     if (
       hasProfile &&
@@ -341,17 +399,27 @@ export default function HomeScreen() {
       result.push({ type: "trending", items: trending });
     }
 
-    if (forYouShows.length > 0) {
-      result.push({ type: "for-you", items: forYouShows });
+    const uniqueForYouShows = selectRecommendationRailItems(
+      forYouShows,
+      seenRecommendationKeys,
+      1,
+    );
+    if (uniqueForYouShows.length > 0) {
+      result.push({ type: "for-you", items: uniqueForYouShows });
     }
 
     tasteRails.forEach((rail) => {
-      if (rail.items?.length > 0) {
+      const uniqueItems = selectRecommendationRailItems(
+        rail.items ?? [],
+        seenRecommendationKeys,
+        5,
+      );
+      if (uniqueItems.length > 0) {
         result.push({
           type: "taste-rail",
           title: rail.title,
           description: rail.description,
-          items: rail.items,
+          items: uniqueItems,
         });
       }
     });
@@ -365,12 +433,17 @@ export default function HomeScreen() {
     }
 
     smartLists.forEach((rail) => {
-      if (rail.items?.length > 0) {
+      const uniqueItems = selectRecommendationRailItems(
+        rail.items ?? [],
+        seenRecommendationKeys,
+        5,
+      );
+      if (uniqueItems.length > 0) {
         result.push({
           type: "taste-rail",
           title: rail.title,
           description: rail.description,
-          items: rail.items,
+          items: uniqueItems,
         });
       }
     });

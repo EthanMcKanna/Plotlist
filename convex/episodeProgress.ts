@@ -650,12 +650,39 @@ export const getUpNext = query({
           }
         }
 
+        // Look up the episode still image and name for the next episode
+        let nextEpisodeStillUrl: string | null = null;
+        let nextEpisodeName: string | null = null;
+        if (show.externalSource === "tmdb" && nextSeasonNumber > 0) {
+          const nextSeasonCache = await ctx.db
+            .query("tmdbDetailsCache")
+            .withIndex("by_external", (q) =>
+              q
+                .eq("externalSource", "tmdb-season")
+                .eq("externalId", `${show.externalId}:season:${nextSeasonNumber}`),
+            )
+            .unique();
+          const nextCachedEpisodes = Array.isArray((nextSeasonCache?.payload as any)?.episodes)
+            ? (nextSeasonCache?.payload as any).episodes
+            : [];
+          const nextEp = nextCachedEpisodes.find(
+            (ep: any) => ep.episodeNumber === nextEpisodeNumber,
+          );
+          if (nextEp?.stillPath) {
+            nextEpisodeStillUrl = nextEp.stillPath;
+          }
+          if (nextEp?.name) {
+            nextEpisodeName = nextEp.name;
+          }
+        }
+
         return {
           showId: state.showId,
           show: {
             _id: show._id,
             title: show.title,
             posterUrl: show.posterUrl,
+            backdropUrl: show.backdropUrl ?? null,
             externalId: show.externalId,
             externalSource: show.externalSource,
           },
@@ -665,6 +692,8 @@ export const getUpNext = query({
           nextSeasonNumber,
           nextEpisodeNumber,
           nextAirDate,
+          nextEpisodeStillUrl,
+          nextEpisodeName,
           isUpcoming,
           lastWatchedAt,
           stateUpdatedAt: state.updatedAt,

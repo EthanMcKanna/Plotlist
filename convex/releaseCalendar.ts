@@ -112,6 +112,7 @@ async function loadTrackedReleaseShows(
         _id: show._id,
         title: show.title,
         posterUrl: show.posterUrl ?? null,
+        backdropUrl: show.backdropUrl ?? null,
         providers,
         events: events.map<ReleaseEventRecord>((event) => ({
           showId: String(event.showId),

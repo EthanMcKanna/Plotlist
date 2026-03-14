@@ -21,6 +21,14 @@ jest.mock("convex/react", () => ({
   useQuery: (...args: [unknown, unknown?]) => mockUseQuery(...args),
 }));
 
+jest.mock("expo-image", () => ({
+  Image: "Image",
+}));
+
+jest.mock("expo-linear-gradient", () => ({
+  LinearGradient: "LinearGradient",
+}));
+
 import { ReleaseCalendarPreview } from "../../components/ReleaseCalendarPreview";
 
 describe("ReleaseCalendarPreview", () => {
@@ -33,6 +41,7 @@ describe("ReleaseCalendarPreview", () => {
           items: [
             {
               airDate: "2026-03-13",
+              airDateTs: 1773590400000,
               seasonNumber: 1,
               episodeNumber: 1,
               episodeTitle: "Pilot",
@@ -41,6 +50,7 @@ describe("ReleaseCalendarPreview", () => {
                 _id: "show-1",
                 title: "Alpha",
                 posterUrl: null,
+                backdropUrl: null,
               },
             },
           ],
