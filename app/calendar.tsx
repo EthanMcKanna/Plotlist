@@ -281,14 +281,14 @@ export default function CalendarScreen() {
   );
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !data || data.staleShowIds.length === 0) {
       return;
     }
 
     void refreshForMe({}).catch(() => {
       // Render cached data even if refresh fails.
     });
-  }, [isAuthenticated, refreshForMe]);
+  }, [data, isAuthenticated, refreshForMe]);
 
   if (!isAuthenticated) {
     return (

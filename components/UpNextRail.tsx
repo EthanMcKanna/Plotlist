@@ -29,7 +29,14 @@ type UpNextItem = {
 const CARD_WIDTH = 240;
 
 export function UpNextRail() {
-  const upNextItems = useQuery(api.episodeProgress.getUpNext) as
+  return <UpNextRailContent enabled={true} />;
+}
+
+export function UpNextRailContent({ enabled }: { enabled: boolean }) {
+  const upNextItems = useQuery(
+    api.episodeProgress.getUpNext,
+    enabled ? {} : "skip",
+  ) as
     | UpNextItem[]
     | undefined;
   const toggleEpisode = useMutation(api.episodeProgress.toggleEpisode);

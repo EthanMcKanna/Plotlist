@@ -15,6 +15,7 @@ import {
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -281,16 +282,17 @@ const LogActivityCard = memo(function LogActivityCard({
 
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
+  const isScreenFocused = useIsFocused();
   const { isAuthenticated } = useConvexAuth();
-  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
+  const me = useQuery(api.users.me, isAuthenticated && isScreenFocused ? {} : "skip");
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("recent");
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
-  const [limit, setLimit] = useState(60);
+  const [limit, setLimit] = useState(40);
 
   const activity = useQuery(
     api.watchLogs.listActivityForUser,
-    me?._id ? { userId: me._id, limit } : "skip",
+    me?._id && isScreenFocused ? { userId: me._id, limit } : "skip",
   );
 
   const deleteLog = useMutation(api.watchLogs.deleteLog);

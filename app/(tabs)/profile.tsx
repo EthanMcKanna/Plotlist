@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { useQuery } from "convex/react";
+import { useConvex, useQuery } from "convex/react";
+import { useIsFocused } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -27,10 +29,12 @@ function StatButton({
   onPress?: () => void;
 }) {
   const content = (
-    <>
-      <Text className="text-lg font-bold text-text-primary">{value}</Text>
-      <Text className="text-xs text-text-tertiary">{label}</Text>
-    </>
+    <View className="items-center">
+      <Text className="text-lg font-semibold text-text-primary">{value}</Text>
+      <Text className="mt-0.5 text-xs uppercase tracking-wide text-text-tertiary">
+        {label}
+      </Text>
+    </View>
   );
 
   if (onPress) {
@@ -50,19 +54,76 @@ function StatButton({
   return <View className="flex-1 items-center py-2">{content}</View>;
 }
 
-function StatDivider() {
-  return <View className="w-px self-stretch bg-dark-border" />;
+function ActivityPill({
+  color,
+  label,
+  value,
+  onPress,
+}: {
+  color: string;
+  label: string;
+  value: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress();
+      }}
+      className="flex-row items-center gap-2 active:opacity-70"
+    >
+      <View
+        className="h-2 w-2 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <Text className="text-sm text-text-secondary">{label}</Text>
+      <Text className="text-sm font-semibold text-text-primary">{value}</Text>
+    </Pressable>
+  );
 }
 
 export default function ProfileTab() {
+  const convex = useConvex();
+  const isScreenFocused = useIsFocused();
   const router = useRouter();
-  const me = useQuery(api.users.me);
+  const [episodeStats, setEpisodeStats] = useState<{
+    totalEpisodes: number;
+    showsWithProgress: number;
+    totalMinutes: number;
+  } | null>(null);
+  const me = useQuery(api.users.me, isScreenFocused ? {} : "skip");
   const avatarUrl = useQuery(
     api.storage.getUrl,
-    me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
+    isScreenFocused && me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
   );
-  const counts = useQuery(api.watchStates.getCounts, me ? {} : "skip");
-  const episodeStats = useQuery(api.episodeProgress.getStats, me ? {} : "skip");
+  const counts = useQuery(api.watchStates.getCounts, isScreenFocused && me ? {} : "skip");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isScreenFocused || !me) {
+      setEpisodeStats(null);
+      return;
+    }
+
+    void convex
+      .query(api.episodeProgress.getStats, {})
+      .then((stats) => {
+        if (!cancelled) {
+          setEpisodeStats(stats);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEpisodeStats(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [convex, isScreenFocused, me]);
 
   const followers = me?.countsFollowers ?? 0;
   const following = me?.countsFollowing ?? 0;
@@ -94,20 +155,25 @@ export default function ProfileTab() {
     },
   ];
 
-  const accountItems: MenuItemDef[] = [
-    {
-      icon: "settings-outline",
-      iconBg: "bg-dark-elevated",
-      iconColor: "#9BA1B0",
-      label: "Settings",
-      route: "/settings",
-    },
-  ];
+  // ── Watch stats formatting ──
+  let timeLabel: string | null = null;
+  if (episodeStats && episodeStats.totalEpisodes > 0) {
+    const hrs = Math.floor(episodeStats.totalMinutes / 60);
+    const mins = episodeStats.totalMinutes % 60;
+    const days = Math.floor(hrs / 24);
+    const remHrs = hrs % 24;
+    timeLabel =
+      days > 0
+        ? `${days}d ${remHrs}h`
+        : hrs > 0
+          ? `${hrs}h ${mins}m`
+          : `${mins}m`;
+  }
 
   return (
     <Screen scroll hasTabBar>
-      <View className="px-6 pt-6 pb-24">
-        {/* ── Profile hero ── */}
+      <View className="px-6 pt-8 pb-24">
+        {/* ── Profile header ── */}
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -119,12 +185,13 @@ export default function ProfileTab() {
           <Avatar
             uri={avatarUrl}
             label={me?.displayName ?? me?.name}
-            size={88}
+            size={96}
+            glow
           />
-          <Text className="mt-3 text-xl font-bold text-text-primary">
+          <Text className="mt-4 text-2xl font-bold text-text-primary">
             {me?.displayName ?? me?.name ?? "Loading..."}
           </Text>
-          <Text className="mt-0.5 text-sm text-text-tertiary">
+          <Text className="mt-1 text-sm text-text-tertiary">
             @{me?.username ?? "user"}
           </Text>
         </Pressable>
@@ -138,212 +205,131 @@ export default function ProfileTab() {
           </Text>
         ) : null}
 
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/profile/${me?._id ?? ""}`);
-          }}
-          disabled={!me}
-          className="mt-3 self-center"
-        >
-          <Text className="text-sm font-medium text-brand-400">
-            View public profile
-          </Text>
-        </Pressable>
-
-        {/* ── Stats bar ── */}
-        <View className="mt-6 flex-row items-center rounded-2xl border border-dark-border bg-dark-card">
+        {/* ── Stats row ── */}
+        <View className="mt-8 flex-row items-center">
           <StatButton
             label="Followers"
             value={followers}
             onPress={() => router.push(`/followers/${me?._id ?? ""}`)}
           />
-          <StatDivider />
           <StatButton
             label="Following"
             value={following}
             onPress={() => router.push(`/following/${me?._id ?? ""}`)}
           />
-          <StatDivider />
           <StatButton
             label="Shows"
             value={counts?.total ?? 0}
           />
-          <StatDivider />
           <StatButton
             label="Reviews"
             value={reviews}
           />
         </View>
 
-        {/* ── Activity cards ── */}
-        <View className="mt-6 flex-row gap-3">
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "watching" } });
-            }}
-            className="flex-1 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-green-500/15">
-                <Ionicons name="eye" size={18} color="#22C55E" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {counts?.watching ?? 0}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Watching</Text>
-          </Pressable>
+        {/* ── Activity & Watch Stats ── */}
+        <View className="mt-10 rounded-2xl bg-dark-card/60 px-5 py-4">
+          <View className="flex-row items-center justify-between">
+            <ActivityPill
+              color="#22C55E"
+              label="Watching"
+              value={counts?.watching ?? 0}
+              onPress={() =>
+                router.push({ pathname: "/me/watchlist", params: { filter: "watching" } })
+              }
+            />
+            <ActivityPill
+              color="#0ea5e9"
+              label="Completed"
+              value={counts?.completed ?? 0}
+              onPress={() =>
+                router.push({ pathname: "/me/watchlist", params: { filter: "completed" } })
+              }
+            />
+            <ActivityPill
+              color="#F59E0B"
+              label="Dropped"
+              value={counts?.dropped ?? 0}
+              onPress={() =>
+                router.push({ pathname: "/me/watchlist", params: { filter: "dropped" } })
+              }
+            />
+          </View>
 
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "completed" } });
-            }}
-            className="flex-1 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-brand-500/15">
-                <Ionicons name="checkmark-circle" size={18} color="#0ea5e9" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {counts?.completed ?? 0}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Completed</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "dropped" } });
-            }}
-            className="flex-1 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-amber-500/15">
-                <Ionicons name="close-circle" size={18} color="#F59E0B" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {counts?.dropped ?? 0}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Dropped</Text>
-          </Pressable>
-        </View>
-
-        {/* ── Watch stats ── */}
-        {episodeStats && episodeStats.totalEpisodes > 0 && (() => {
-          const hrs = Math.floor(episodeStats.totalMinutes / 60);
-          const mins = episodeStats.totalMinutes % 60;
-          const days = Math.floor(hrs / 24);
-          const remHrs = hrs % 24;
-          const timeLabel =
-            days > 0
-              ? `${days}d ${remHrs}h`
-              : hrs > 0
-                ? `${hrs}h ${mins}m`
-                : `${mins}m`;
-          return (
-            <View className="mt-6 rounded-2xl border border-dark-border bg-dark-card p-4">
-              <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                Watch Stats
-              </Text>
-              <View className="flex-row">
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-brand-400">
+          {episodeStats && episodeStats.totalEpisodes > 0 && (
+            <>
+              <View className="my-3 h-px bg-dark-border/40" />
+              <View className="flex-row items-center justify-between px-1">
+                <View className="items-center">
+                  <Text className="text-base font-semibold text-brand-400">
                     {episodeStats.totalEpisodes.toLocaleString()}
                   </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Episodes
-                  </Text>
+                  <Text className="text-xs text-text-tertiary">Episodes</Text>
                 </View>
-                <View className="w-px self-stretch bg-dark-border" />
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-purple-400">
+                <View className="items-center">
+                  <Text className="text-base font-semibold text-purple-400">
                     {timeLabel}
                   </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Time Watched
-                  </Text>
+                  <Text className="text-xs text-text-tertiary">Watched</Text>
                 </View>
-                <View className="w-px self-stretch bg-dark-border" />
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-green-400">
+                <View className="items-center">
+                  <Text className="text-base font-semibold text-green-400">
                     {episodeStats.showsWithProgress}
                   </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Shows Tracked
-                  </Text>
+                  <Text className="text-xs text-text-tertiary">Tracked</Text>
                 </View>
               </View>
-            </View>
-          );
-        })()}
-
-        {/* ── Library ── */}
-        <View className="mt-8">
-          <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
-            Library
-          </Text>
-          <View className="rounded-2xl border border-dark-border bg-dark-card">
-            {libraryItems.map((item, index) => (
-              <Pressable
-                key={item.route}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(item.route as any);
-                }}
-                className={`flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover ${
-                  index !== libraryItems.length - 1
-                    ? "border-b border-dark-border"
-                    : ""
-                }`}
-              >
-                <View
-                  className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}
-                >
-                  <Ionicons name={item.icon} size={18} color={item.iconColor} />
-                </View>
-                <Text className="flex-1 text-base font-medium text-text-primary">
-                  {item.label}
-                </Text>
-                {item.count !== undefined && item.count > 0 ? (
-                  <Text className="mr-1 text-sm tabular-nums text-text-tertiary">
-                    {item.count}
-                  </Text>
-                ) : null}
-                <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-              </Pressable>
-            ))}
-          </View>
+            </>
+          )}
         </View>
 
-        {/* ── Account ── */}
-        <View className="mt-6">
-          <View className="rounded-2xl border border-dark-border bg-dark-card">
-            {accountItems.map((item) => (
-              <Pressable
-                key={item.route}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(item.route as any);
-                }}
-                className="flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover"
+        {/* ── Library ── */}
+        <View className="mt-12 gap-1">
+          {libraryItems.map((item) => (
+            <Pressable
+              key={item.route}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push(item.route as any);
+              }}
+              className="flex-row items-center gap-3 rounded-2xl px-4 py-4 active:bg-dark-card"
+            >
+              <View
+                className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}
               >
-                <View
-                  className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}
-                >
-                  <Ionicons name={item.icon} size={18} color={item.iconColor} />
-                </View>
-                <Text className="flex-1 text-base font-medium text-text-primary">
-                  {item.label}
+                <Ionicons name={item.icon} size={18} color={item.iconColor} />
+              </View>
+              <Text className="flex-1 text-base font-medium text-text-primary">
+                {item.label}
+              </Text>
+              {item.count !== undefined && item.count > 0 ? (
+                <Text className="mr-1 text-sm tabular-nums text-text-tertiary">
+                  {item.count}
                 </Text>
-                <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-              </Pressable>
-            ))}
-          </View>
+              ) : null}
+              <Ionicons name="chevron-forward" size={16} color="#5A6070" />
+            </Pressable>
+          ))}
+        </View>
+
+        {/* ── Settings ── */}
+        <View className="mt-6">
+          <View className="mx-4 h-px bg-dark-border/50" />
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/settings" as any);
+            }}
+            className="mt-4 flex-row items-center gap-3 rounded-2xl px-4 py-4 active:bg-dark-card"
+          >
+            <View className="h-9 w-9 items-center justify-center rounded-xl bg-dark-elevated">
+              <Ionicons name="settings-outline" size={18} color="#9BA1B0" />
+            </View>
+            <Text className="flex-1 text-base font-medium text-text-primary">
+              Settings
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color="#5A6070" />
+          </Pressable>
         </View>
       </View>
     </Screen>
