@@ -47,6 +47,7 @@ import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
+import { FriendsActivityRail } from "../../components/FriendsActivityRail";
 import {
   INITIAL_VISIBLE_SEASONS,
   getInitialVisibleSeasonCount,
@@ -92,6 +93,11 @@ export default function ShowScreen() {
     isAuthenticated && me?._id ? { userId: me._id } : "skip",
     { initialNumItems: 20 }
   );
+  const friendsActivity = useQuery(
+    api.friendsActivity.getForShow,
+    isAuthenticated ? { showId } : "skip"
+  );
+  const [showFriendsRating, setShowFriendsRating] = useState(false);
 
   const setStatus = useMutation(api.watchStates.setStatus).withOptimisticUpdate(
     (localStore, args) => {
@@ -984,7 +990,18 @@ export default function ShowScreen() {
 
           {/* Rating & Content Rating */}
           <View className="mt-4 flex-row items-center gap-4">
-            {ratingDisplay && (
+            {showFriendsRating && friendsActivity?.averageRating != null ? (
+              <View className="flex-row items-center gap-2">
+                <Ionicons name="star" size={16} color="#FBBF24" />
+                <Text className="text-lg font-bold text-text-primary">
+                  {friendsActivity.averageRating.toFixed(1)}
+                </Text>
+                <Text className="text-sm text-text-tertiary">/5</Text>
+                <Text className="text-xs text-text-tertiary">
+                  ({friendsActivity.ratingCount})
+                </Text>
+              </View>
+            ) : ratingDisplay ? (
               <View className="flex-row items-center gap-2">
                 <Ionicons name="star" size={16} color="#FBBF24" />
                 <Text className="text-lg font-bold text-text-primary">
@@ -997,7 +1014,7 @@ export default function ShowScreen() {
                   </Text>
                 ) : null}
               </View>
-            )}
+            ) : null}
             {extendedDetails?.contentRating && (
               <View className="rounded-md border border-text-tertiary px-2 py-0.5">
                 <Text
@@ -1008,9 +1025,40 @@ export default function ShowScreen() {
                 </Text>
               </View>
             )}
+            {friendsActivity && friendsActivity.ratingCount > 0 && (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowFriendsRating((prev) => !prev);
+                }}
+                className={`flex-row items-center gap-1.5 rounded-full border px-2.5 py-1 ${
+                  showFriendsRating
+                    ? "border-sky-500/30 bg-sky-500/10"
+                    : "border-dark-border bg-dark-card"
+                }`}
+              >
+                <Ionicons
+                  name="people"
+                  size={12}
+                  color={showFriendsRating ? "#0ea5e9" : "#5A6070"}
+                />
+                <Text
+                  className={`text-xs font-medium ${
+                    showFriendsRating ? "text-sky-400" : "text-text-tertiary"
+                  }`}
+                >
+                  Friends
+                </Text>
+              </Pressable>
+            )}
           </View>
 
         </View>
+
+        {/* ─── Friends Activity ─── */}
+        {friendsActivity && friendsActivity.friends.length > 0 && (
+          <FriendsActivityRail friends={friendsActivity.friends} />
+        )}
 
         {/* ─── Status + Actions ─── */}
         <View className="mt-6 px-6">
