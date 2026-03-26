@@ -25,7 +25,6 @@ import { EmptyState } from "../../components/EmptyState";
 import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
 import { SearchResultRow } from "../../components/SearchResultRow";
-import { SegmentedControl } from "../../components/SegmentedControl";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../convex/_generated/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
@@ -52,29 +51,17 @@ const SEMANTIC_PROMPTS = [
 
 function SectionLine({
   label,
-  count,
   icon,
 }: {
   label: string;
-  count?: number;
   icon?: keyof typeof Ionicons.glyphMap;
 }) {
   return (
-    <View className="flex-row items-center gap-3 mb-4">
-      <View className="flex-row items-center gap-2">
-        {icon && <Ionicons name={icon} size={14} color="#5A6070" />}
-        <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-          {label}
-        </Text>
-      </View>
-      {count !== undefined && count > 0 && (
-        <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-          <Text className="text-xs font-medium text-text-tertiary">
-            {count}
-          </Text>
-        </View>
-      )}
-      <View className="flex-1 h-px bg-dark-border" />
+    <View className="flex-row items-center gap-2 mb-4">
+      {icon && <Ionicons name={icon} size={14} color="#5A6070" />}
+      <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
+        {label}
+      </Text>
     </View>
   );
 }
@@ -199,6 +186,14 @@ export default function SearchScreen() {
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
   const syncContacts = useAction(api.contacts.syncSnapshot);
   const sendInvite = useMutation(api.contacts.sendInvite);
+
+  const friendsPopular =
+    useQuery(
+      api.trending.popularWithFriends,
+      isScreenFocused && hasProfile && mode === "shows" && showDiscover
+        ? { limit: 12 }
+        : "skip",
+    ) ?? [];
 
   const [discoverSections, setDiscoverSections] = useState<
     Record<string, { label: string; icon?: keyof typeof Ionicons.glyphMap; logoUrl?: string; items: any[] }>
@@ -499,44 +494,82 @@ export default function SearchScreen() {
           </View>
         </View>
 
-        {/* ── Mode Toggle ────────────────────────────────────── */}
-        <View className="px-5 mt-4">
-          <SegmentedControl
-            options={modeOptions}
-            value={mode}
-            onChange={(v) => {
-              setMode(v as SearchMode);
-              setQuery("");
-            }}
-          />
-        </View>
-
-        {mode === "shows" ? (
-          <View className="mt-4 px-5">
-            <SectionLine label="Try Searching" icon="sparkles" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, paddingRight: 16 }}
-            >
-              {SEMANTIC_PROMPTS.map((prompt) => (
-                <Pressable
-                  key={prompt}
-                  onPress={() => setQuery(prompt)}
-                  className="rounded-full border border-dark-border bg-dark-card px-3 py-2"
+        {/* ── Mode Toggle (compact pills) ─────────────────── */}
+        <View className="px-5 mt-3 flex-row gap-2">
+          {modeOptions.map((option) => {
+            const isActive = option.value === mode;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setMode(option.value as SearchMode);
+                  setQuery("");
+                }}
+                className={`rounded-full px-3.5 py-1.5 ${
+                  isActive
+                    ? "bg-dark-card border border-dark-border"
+                    : "border border-transparent"
+                }`}
+              >
+                <Text
+                  className={`text-xs font-semibold ${
+                    isActive ? "text-text-primary" : "text-text-tertiary"
+                  }`}
                 >
-                  <Text className="text-xs font-semibold text-text-secondary">
-                    {prompt}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         {/* ── Shows: Discover (before 3-char search) ───────────── */}
         {showDiscover && (
-          <View className="mt-8 gap-10">
+          <View className="mt-6 gap-8">
+            {/* ── Popular with Friends ─────────────────────── */}
+            {friendsPopular.length > 0 && (
+              <View>
+                <View className="px-5">
+                  <SectionLine label="Popular with Friends" icon="people" />
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{
+                    paddingHorizontal: 20,
+                    gap: 14,
+                  }}
+                >
+                  {friendsPopular.map((entry: any, index: number) => (
+                    <Animated.View
+                      key={entry.show?._id ?? index}
+                      entering={FadeInRight.delay(index * 40).springify()}
+                    >
+                      <Pressable
+                        onPress={() => {
+                          if (entry.show?._id) router.push(`/show/${entry.show._id}`);
+                        }}
+                        className="w-36 active:opacity-80"
+                      >
+                        <Poster uri={entry.show?.posterUrl} size="lg" />
+                        <Text
+                          className="mt-2 text-sm font-semibold text-text-primary"
+                          numberOfLines={2}
+                        >
+                          {entry.show?.title ?? "Unknown"}
+                        </Text>
+                        <Text className="text-xs text-text-tertiary">
+                          {entry.friendCount} {entry.friendCount === 1 ? "friend" : "friends"} watching
+                        </Text>
+                      </Pressable>
+                    </Animated.View>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* ── TMDB Discover Sections ───────────────────── */}
             {isLoadingDiscover ? (
               <View className="items-center justify-center py-16">
                 <ActivityIndicator size="small" color="#0ea5e9" />
@@ -577,7 +610,6 @@ export default function SearchScreen() {
                           <SectionLine
                             label={section.label}
                             icon={section.icon}
-                            count={section.items.length}
                           />
                         )}
                       </View>
@@ -598,9 +630,9 @@ export default function SearchScreen() {
                           >
                             <Pressable
                               onPress={() => handleAddFromCatalog(item)}
-                              className="w-28 active:opacity-80"
+                              className="w-36 active:opacity-80"
                             >
-                              <Poster uri={item.posterUrl} size="md" />
+                              <Poster uri={item.posterUrl} size="lg" />
                               <Text
                                 className="mt-2 text-sm font-semibold text-text-primary"
                                 numberOfLines={2}
@@ -619,28 +651,43 @@ export default function SearchScreen() {
                     </View>
                   );
                 })
-            ) : (
+            ) : friendsPopular.length === 0 ? (
               <View className="px-5">
                 <EmptyState
                   title="Discover something new"
                   description="Start typing to search your library or the full catalog."
                 />
               </View>
-            )}
+            ) : null}
+
+            {/* ── Try Searching (inspiration prompts) ──────── */}
+            <View className="px-5">
+              <SectionLine label="Try Searching" icon="sparkles" />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10, paddingRight: 16 }}
+              >
+                {SEMANTIC_PROMPTS.map((prompt) => (
+                  <Pressable
+                    key={prompt}
+                    onPress={() => setQuery(prompt)}
+                    className="rounded-full border border-dark-border bg-dark-card px-3 py-2"
+                  >
+                    <Text className="text-xs font-semibold text-text-secondary">
+                      {prompt}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         )}
 
         {/* ── Shows: Search results ───────────────────────────── */}
         {mode === "shows" && searchReady && hasSearchResults && (
           <View className="mt-6 px-5">
-            <SectionLine
-              label="Best Matches"
-              count={
-                catalogResults.length > 0
-                  ? catalogResults.length
-                  : undefined
-              }
-            />
+            <SectionLine label="Best Matches" />
 
               {!isAuthenticated ? (
                 <EmptyState
@@ -672,12 +719,7 @@ export default function SearchScreen() {
         {mode === "people" && trimmedQuery.length >= 2 && (
           <View className="mt-6 px-5 gap-8">
             <View>
-              <SectionLine
-                label="People"
-                count={
-                  peopleResults.length > 0 ? peopleResults.length : undefined
-                }
-              />
+              <SectionLine label="People" />
 
               {peopleResults.length > 0 ? (
                 <Animated.View entering={FadeInDown.duration(300)}>
@@ -704,7 +746,6 @@ export default function SearchScreen() {
                 <SectionLine
                   label="Invite from Contacts"
                   icon="paper-plane-outline"
-                  count={searchContactCandidates.length}
                 />
                 <View className="gap-3">
                   {searchContactCandidates.map((candidate: any) => (
