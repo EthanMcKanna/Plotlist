@@ -5,29 +5,15 @@ const crons = cronJobs();
 
 crons.interval(
   "cleanup expired tmdb cache",
-  { hours: 6 },
+  { hours: 24 },
   internal.maintenance.cleanupTmdbCache,
   {},
 );
 
 crons.cron(
   "hot show catalog refresh",
-  "10 */6 * * *",
+  "10 4 * * *",
   internal.maintenance.scheduleHotShowCatalogRefresh,
-  {},
-);
-
-crons.cron(
-  "hot embedding refresh",
-  "45 */6 * * *",
-  internal.maintenance.scheduleEmbeddingRefresh,
-  {},
-);
-
-crons.cron(
-  "hot episode cache refresh",
-  "20 */12 * * *",
-  internal.maintenance.scheduleHotEpisodeCacheRefresh,
   {},
 );
 
@@ -40,22 +26,15 @@ crons.cron(
 
 crons.cron(
   "full embedding refresh",
-  "30 10 * * 0",
+  "30 10 * * 1",
   internal.maintenance.scheduleEmbeddingRefresh,
   {},
 );
 
 crons.cron(
   "full episode cache refresh",
-  "0 12 * * 0",
+  "0 12 * * 2",
   internal.maintenance.scheduleFullEpisodeCacheRefresh,
-  {},
-);
-
-crons.cron(
-  "tracked release refresh",
-  "40 */6 * * *",
-  internal.releaseCalendar.scheduleStaleTrackedShowRefresh,
   {},
 );
 

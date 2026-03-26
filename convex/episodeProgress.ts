@@ -13,6 +13,8 @@ const STATUS_COUNT_KEYS: Record<WatchStatus, string> = {
   completed: "countsCompleted",
   dropped: "countsDropped",
 };
+const UP_NEXT_STATE_SCAN_LIMIT = 24;
+const UP_NEXT_RESULT_LIMIT = 8;
 
 function isAiredOnOrBefore(airDate: unknown, now: number) {
   if (typeof airDate !== "string" || airDate.length === 0) {
@@ -475,7 +477,7 @@ export const getUpNext = query({
       .query("watchStates")
       .withIndex("by_user_updatedAt", (q) => q.eq("userId", user._id))
       .order("desc")
-      .collect();
+      .take(UP_NEXT_STATE_SCAN_LIMIT);
 
     const candidateStates = watchingStates.filter(
       (s) => s.status === "watching" || s.status === "completed",
@@ -483,7 +485,7 @@ export const getUpNext = query({
     if (candidateStates.length === 0) return [];
 
     const results = await Promise.all(
-      candidateStates.slice(0, 20).map(async (state) => {
+      candidateStates.slice(0, UP_NEXT_RESULT_LIMIT).map(async (state) => {
         const show = await ctx.db.get(state.showId);
         if (!show) return null;
 

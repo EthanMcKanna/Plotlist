@@ -13,6 +13,7 @@ import {
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useIsFocused } from "@react-navigation/native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
@@ -82,8 +83,9 @@ function SectionLine({
 
 export default function SearchScreen() {
   const router = useRouter();
+  const isScreenFocused = useIsFocused();
   const { isAuthenticated } = useConvexAuth();
-  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
+  const me = useQuery(api.users.me, isAuthenticated && isScreenFocused ? {} : "skip");
   const hasProfile = Boolean(me?._id);
   const params = useLocalSearchParams();
   const inputRef = useRef<TextInput>(null);
@@ -101,7 +103,7 @@ export default function SearchScreen() {
   const [devicePhoneLookup, setDevicePhoneLookup] = useState<
     Record<string, string>
   >({});
-  const [isFocused, setIsFocused] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
   const searchReady = trimmedQuery.length >= 3 && debouncedQuery.length >= 3;
   const hasSearchResults = catalogResults.length > 0 || !isSearchingCatalog;
@@ -129,7 +131,10 @@ export default function SearchScreen() {
   const peopleResults =
     useQuery(
       api.users.search,
-      hasProfile && mode === "people" && trimmedQuery.length >= 2
+      isScreenFocused &&
+      hasProfile &&
+      mode === "people" &&
+      trimmedQuery.length >= 2
         ? { text: trimmedQuery, limit: 12 }
         : "skip",
     ) ?? [];
@@ -137,13 +142,14 @@ export default function SearchScreen() {
   const contactStatus =
     useQuery(
       api.contacts.getStatus,
-      hasProfile && mode === "people" ? {} : "skip",
+      isScreenFocused && hasProfile && mode === "people" ? {} : "skip",
     ) ?? null;
 
   const contactMatches =
     useQuery(
       api.contacts.getMatches,
-      hasProfile &&
+      isScreenFocused &&
+        hasProfile &&
         mode === "people" &&
         trimmedQuery.length < 2 &&
         contactStatus?.hasSynced
@@ -154,7 +160,8 @@ export default function SearchScreen() {
   const inviteCandidates =
     useQuery(
       api.contacts.getInviteCandidates,
-      hasProfile &&
+      isScreenFocused &&
+        hasProfile &&
         mode === "people" &&
         trimmedQuery.length < 2 &&
         contactStatus?.hasSynced
@@ -165,7 +172,8 @@ export default function SearchScreen() {
   const searchContactCandidates =
     useQuery(
       api.contacts.searchInviteCandidates,
-      hasProfile &&
+      isScreenFocused &&
+        hasProfile &&
         mode === "people" &&
         trimmedQuery.length >= 2 &&
         contactStatus?.hasSynced
@@ -176,7 +184,10 @@ export default function SearchScreen() {
   const suggestedPeople =
     useQuery(
       api.users.suggested,
-      hasProfile && mode === "people" && trimmedQuery.length < 2
+      isScreenFocused &&
+      hasProfile &&
+      mode === "people" &&
+      trimmedQuery.length < 2
         ? { limit: 6 }
         : "skip",
     ) ?? [];
@@ -199,7 +210,7 @@ export default function SearchScreen() {
   useEffect(() => {
     let active = true;
 
-    if (mode !== "shows" || !isAuthenticated || debouncedQuery.length < 3) {
+    if (!isScreenFocused || mode !== "shows" || !isAuthenticated || debouncedQuery.length < 3) {
       setCatalogResults([]);
       setIsSearchingCatalog(false);
       return;
@@ -220,7 +231,7 @@ export default function SearchScreen() {
     return () => {
       active = false;
     };
-  }, [mode, searchCatalog, debouncedQuery, isAuthenticated]);
+  }, [debouncedQuery, isAuthenticated, isScreenFocused, mode, searchCatalog]);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(trimmedQuery), 400);
@@ -230,8 +241,15 @@ export default function SearchScreen() {
   /* ── Fetch TMDB discover sections when idle ─────────────────── */
 
   useEffect(() => {
+    if (!isScreenFocused) {
+      return;
+    }
+
     if (!showDiscover) {
       setDiscoverSections({});
+      return;
+    }
+    if (Object.keys(discoverSections).length > 0) {
       return;
     }
     let cancelled = false;
@@ -250,12 +268,8 @@ export default function SearchScreen() {
       { key: "netflix", category: "netflix", label: "Netflix", logoUrl: TMDB_LOGO("/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg") },
       { key: "apple_tv", category: "apple_tv", label: "Apple TV", logoUrl: TMDB_LOGO("/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg") },
       { key: "max", category: "max", label: "HBO Max", logoUrl: TMDB_LOGO("/jbe4gVSfRlbPTdESXhEKpornsfu.jpg") },
-      { key: "disney_plus", category: "disney_plus", label: "Disney+", logoUrl: TMDB_LOGO("/97yvRBw1GzX7fXprcF80er19ot.jpg") },
-      { key: "hulu", category: "hulu", label: "Hulu", logoUrl: TMDB_LOGO("/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg") },
-      { key: "prime_video", category: "prime_video", label: "Prime Video", logoUrl: TMDB_LOGO("/pvske1MyAoymrs5bguRfVqYiM9a.jpg") },
       { key: "genre_drama", category: "genre_drama", label: "Drama", icon: "film" },
       { key: "genre_comedy", category: "genre_comedy", label: "Comedy", icon: "happy" },
-      { key: "genre_sci_fi", category: "genre_sci_fi", label: "Sci-Fi & Fantasy", icon: "rocket" },
     ];
     Promise.all(
       sections.map((s) => getTmdbList({ category: s.category, limit: 12 })),
@@ -285,7 +299,7 @@ export default function SearchScreen() {
     return () => {
       cancelled = true;
     };
-  }, [showDiscover, getTmdbList]);
+  }, [discoverSections, getTmdbList, isScreenFocused, showDiscover]);
 
   /* ── Handlers ──────────────────────────────────────────────── */
 
@@ -450,7 +464,7 @@ export default function SearchScreen() {
             className="flex-row items-center rounded-2xl bg-dark-card px-4"
             style={{
               borderWidth: 1,
-              borderColor: isFocused
+              borderColor: isInputFocused
                 ? "rgba(14, 165, 233, 0.35)"
                 : "rgba(42, 46, 56, 1)",
             }}
@@ -458,14 +472,14 @@ export default function SearchScreen() {
             <Ionicons
               name="search-outline"
               size={20}
-              color={isFocused ? "#38bdf8" : "#5A6070"}
+              color={isInputFocused ? "#38bdf8" : "#5A6070"}
             />
             <TextInput
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
               placeholder={
                 mode === "shows"
                   ? "Try: slow-burn sci-fi or shows like Severance…"

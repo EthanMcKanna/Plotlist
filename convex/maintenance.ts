@@ -3,14 +3,14 @@ import { internalAction, internalMutation, mutation, type ActionCtx } from "./_g
 import { v } from "convex/values";
 import { requireAdmin } from "./utils";
 
-const HOT_SHOW_TARGET_COUNT = 3_000;
-const FULL_SHOW_TARGET_COUNT = 10_000;
-const HOT_EPISODE_TARGET_COUNT = 1_500;
-const FULL_EPISODE_TARGET_COUNT = 10_000;
-const HOT_SHOW_FRESHNESS_MS = 6 * 60 * 60 * 1000;
-const FULL_SHOW_FRESHNESS_MS = 6 * 24 * 60 * 60 * 1000;
-const HOT_EPISODE_FRESHNESS_MS = 12 * 60 * 60 * 1000;
-const FULL_EPISODE_FRESHNESS_MS = 6 * 24 * 60 * 60 * 1000;
+const HOT_SHOW_TARGET_COUNT = 500;
+const FULL_SHOW_TARGET_COUNT = 2_000;
+const HOT_EPISODE_TARGET_COUNT = 250;
+const FULL_EPISODE_TARGET_COUNT = 1_000;
+const HOT_SHOW_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+const FULL_SHOW_FRESHNESS_MS = 14 * 24 * 60 * 60 * 1000;
+const HOT_EPISODE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+const FULL_EPISODE_FRESHNESS_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function maybeStartTopTvImport(ctx: ActionCtx, args: {
   targetCount: number;
@@ -212,7 +212,7 @@ export const scheduleHotShowCatalogRefresh = internalAction({
   handler: async (ctx) => {
     return await maybeStartTopTvImport(ctx, {
       targetCount: HOT_SHOW_TARGET_COUNT,
-      pagesPerBatch: 10,
+      pagesPerBatch: 3,
       minFreshMs: HOT_SHOW_FRESHNESS_MS,
     });
   },
@@ -223,7 +223,7 @@ export const scheduleFullShowCatalogRefresh = internalAction({
   handler: async (ctx) => {
     return await maybeStartTopTvImport(ctx, {
       targetCount: FULL_SHOW_TARGET_COUNT,
-      pagesPerBatch: 10,
+      pagesPerBatch: 5,
       minFreshMs: FULL_SHOW_FRESHNESS_MS,
     });
   },
@@ -234,7 +234,7 @@ export const scheduleHotEpisodeCacheRefresh = internalAction({
   handler: async (ctx) => {
     return await maybeStartEpisodeCacheBackfill(ctx, {
       targetShowCount: HOT_EPISODE_TARGET_COUNT,
-      batchSize: 8,
+      batchSize: 4,
       minFreshMs: HOT_EPISODE_FRESHNESS_MS,
     });
   },
@@ -245,7 +245,7 @@ export const scheduleFullEpisodeCacheRefresh = internalAction({
   handler: async (ctx) => {
     return await maybeStartEpisodeCacheBackfill(ctx, {
       targetShowCount: FULL_EPISODE_TARGET_COUNT,
-      batchSize: 6,
+      batchSize: 4,
       minFreshMs: FULL_EPISODE_FRESHNESS_MS,
     });
   },
@@ -257,13 +257,13 @@ export const scheduleHotCatalogMaintenance = internalAction({
     const [shows, embeddings, episodes] = await Promise.all([
       maybeStartTopTvImport(ctx, {
         targetCount: HOT_SHOW_TARGET_COUNT,
-        pagesPerBatch: 10,
+        pagesPerBatch: 3,
         minFreshMs: HOT_SHOW_FRESHNESS_MS,
       }),
       maybeStartEmbeddingBackfill(ctx),
       maybeStartEpisodeCacheBackfill(ctx, {
         targetShowCount: HOT_EPISODE_TARGET_COUNT,
-        batchSize: 8,
+        batchSize: 4,
         minFreshMs: HOT_EPISODE_FRESHNESS_MS,
       }),
     ]);
@@ -278,13 +278,13 @@ export const scheduleFullCatalogMaintenance = internalAction({
     const [shows, embeddings, episodes] = await Promise.all([
       maybeStartTopTvImport(ctx, {
         targetCount: FULL_SHOW_TARGET_COUNT,
-        pagesPerBatch: 10,
+        pagesPerBatch: 5,
         minFreshMs: FULL_SHOW_FRESHNESS_MS,
       }),
       maybeStartEmbeddingBackfill(ctx),
       maybeStartEpisodeCacheBackfill(ctx, {
         targetShowCount: FULL_EPISODE_TARGET_COUNT,
-        batchSize: 6,
+        batchSize: 4,
         minFreshMs: FULL_EPISODE_FRESHNESS_MS,
       }),
     ]);
