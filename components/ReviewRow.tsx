@@ -21,7 +21,7 @@ export function ReviewRow({
   showTitle?: string;
   posterUrl?: string | null;
   rating: number;
-  reviewText: string;
+  reviewText?: string | null;
   authorName?: string | null;
   authorUsername?: string | null;
   authorAvatarUrl?: string | null;
@@ -31,7 +31,44 @@ export function ReviewRow({
   const router = useRouter();
   const titleLabel = authorName ?? showTitle ?? "Review";
   const subtitleLabel = authorName && showTitle ? showTitle : authorUsername ? `@${authorUsername}` : null;
+  const hasText = Boolean(reviewText);
 
+  // Rating-only: compact single-line row
+  if (!hasText) {
+    return (
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          router.push(`/review/${id}`);
+        }}
+        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-3 py-2.5 active:bg-dark-hover"
+      >
+        {authorName ? (
+          <Avatar uri={authorAvatarUrl} label={authorName} size={32} />
+        ) : (
+          <Poster uri={posterUrl ?? undefined} size="sm" />
+        )}
+        <View className="flex-1">
+          <Text className="text-sm font-semibold text-text-primary" numberOfLines={1}>
+            {titleLabel}
+          </Text>
+          {subtitleLabel ? (
+            <Text className="text-xs text-text-tertiary">{subtitleLabel}</Text>
+          ) : null}
+        </View>
+        <View className="rounded-full bg-amber-500/12 px-2.5 py-1">
+          <Text className="text-xs font-semibold text-amber-300">★ {rating}/5</Text>
+        </View>
+        {createdAt ? (
+          <Text className="text-xs text-text-tertiary">
+            {formatRelativeTime(createdAt)}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  }
+
+  // Full review card
   return (
     <Pressable
       onPress={() => {

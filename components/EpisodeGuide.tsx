@@ -126,13 +126,32 @@ function EpisodeGuideComponent({
           return (
             <View key={season.id}>
               <View className="mb-2 flex-row items-center gap-3 px-6">
-                <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
+                <Text
+                  className="text-xs font-bold uppercase tracking-widest"
+                  style={{ color: allWatched ? "#0ea5e9" : "#5A6070" }}
+                >
                   {season.name}
                 </Text>
                 {episodes.length > 0 && isAuthenticated ? (
-                  <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-                    <Text className="text-xs font-medium text-text-tertiary">
-                      {hasAvailableEpisodes ? `${watchedInSeason}/${totalEpisodeCount}` : "Upcoming"}
+                  <View
+                    className="rounded-full px-2 py-0.5"
+                    style={{
+                      backgroundColor: allWatched
+                        ? "rgba(14, 165, 233, 0.15)"
+                        : "#1E2028",
+                    }}
+                  >
+                    <Text
+                      className="text-xs font-medium"
+                      style={{
+                        color: allWatched ? "#38bdf8" : "#5A6070",
+                      }}
+                    >
+                      {allWatched
+                        ? "Complete"
+                        : hasAvailableEpisodes
+                          ? `${watchedInSeason}/${totalEpisodeCount}`
+                          : "Upcoming"}
                     </Text>
                   </View>
                 ) : (
@@ -147,7 +166,14 @@ function EpisodeGuideComponent({
                     {new Date(season.air_date).getFullYear()}
                   </Text>
                 ) : null}
-                <View className="h-px flex-1 bg-dark-border" />
+                <View
+                  className="h-px flex-1"
+                  style={{
+                    backgroundColor: allWatched
+                      ? "rgba(14, 165, 233, 0.2)"
+                      : "rgba(42, 46, 56, 0.8)",
+                  }}
+                />
                 {episodes.length > 0 && isAuthenticated ? (
                   <Pressable
                     className="active:opacity-60"
@@ -186,11 +212,21 @@ function EpisodeGuideComponent({
                 ) : null}
               </View>
 
-              {episodes.length > 0 && isAuthenticated && watchedInSeason > 0 && totalEpisodeCount > 0 ? (
-                <View className="mx-6 mb-3 h-1 overflow-hidden rounded-full bg-dark-elevated">
+              {episodes.length > 0 && isAuthenticated && totalEpisodeCount > 0 && (watchedInSeason > 0 || allWatched) ? (
+                <View
+                  className="mx-6 mb-3 h-1 overflow-hidden rounded-full"
+                  style={{
+                    backgroundColor: allWatched
+                      ? "rgba(14, 165, 233, 0.15)"
+                      : "#1E2028",
+                  }}
+                >
                   <View
-                    className="h-full rounded-full bg-sky-500"
-                    style={{ width: `${(watchedInSeason / totalEpisodeCount) * 100}%` }}
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${(watchedInSeason / totalEpisodeCount) * 100}%`,
+                      backgroundColor: allWatched ? "#0ea5e9" : "#0ea5e9",
+                    }}
                   />
                 </View>
               ) : null}
@@ -253,7 +289,9 @@ function EpisodeGuideComponent({
                           style={{
                             width: 144,
                             height: 180,
-                            borderColor: isWatched ? "#0ea5e9" : "rgba(42, 46, 56, 0.8)",
+                            borderColor: isWatched
+                              ? "rgba(14, 165, 233, 0.35)"
+                              : "rgba(42, 46, 56, 0.8)",
                           }}
                         >
                           <View>
@@ -264,7 +302,7 @@ function EpisodeGuideComponent({
                                   width: 144,
                                   height: 81,
                                   borderRadius: 0,
-                                  opacity: isWatched ? 0.5 : isAvailable ? 1 : 0.7,
+                                  opacity: isWatched ? 0.55 : isAvailable ? 1 : 0.7,
                                 }}
                                 contentFit="cover"
                                 transition={200}
@@ -282,10 +320,10 @@ function EpisodeGuideComponent({
                                 className="absolute right-1 top-1 rounded-full active:opacity-60"
                                 style={{
                                   backgroundColor: isWatched
-                                    ? "#0ea5e9"
+                                    ? "rgba(14, 165, 233, 0.9)"
                                     : "rgba(0,0,0,0.6)",
-                                  width: 26,
-                                  height: 26,
+                                  width: 22,
+                                  height: 22,
                                   alignItems: "center",
                                   justifyContent: "center",
                                 }}
@@ -297,7 +335,7 @@ function EpisodeGuideComponent({
                               >
                                 <Ionicons
                                   name={isWatched ? "checkmark" : "eye-outline"}
-                                  size={14}
+                                  size={12}
                                   color="white"
                                 />
                               </Pressable>
@@ -305,9 +343,9 @@ function EpisodeGuideComponent({
                           </View>
                           <View className="w-full flex-1 p-2">
                             <Text
-                              className="text-sm font-semibold text-text-primary"
+                              className="text-sm font-semibold"
                               numberOfLines={2}
-                              style={{ opacity: isWatched ? 0.6 : 1 }}
+                              style={{ color: isWatched ? "#94a3b8" : "#E8ECF4" }}
                             >
                               {episode.name}
                             </Text>
@@ -319,6 +357,10 @@ function EpisodeGuideComponent({
                                     {myRatingData.rating}
                                   </Text>
                                 </>
+                              ) : isWatched ? (
+                                <Text className="text-xs" style={{ color: "#64748b" }}>
+                                  {tmdbRating ? `${tmdbRating} avg` : "Not rated"}
+                                </Text>
                               ) : tmdbRating ? (
                                 <>
                                   <Ionicons name="star" size={11} color="#FBBF24" />
@@ -331,8 +373,9 @@ function EpisodeGuideComponent({
                               )}
                             </View>
                             <Text
-                              className="mt-1 text-xs text-text-tertiary"
+                              className="mt-1 text-xs"
                               numberOfLines={2}
+                              style={{ color: isWatched ? "#475569" : "#5A6070" }}
                             >
                               {episode.overview || "No synopsis available."}
                             </Text>

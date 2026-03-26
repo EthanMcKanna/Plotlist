@@ -10,6 +10,40 @@ import {
   getProfileVisibilitySettings,
 } from "./profileVisibility";
 
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+
+async function createWatchStateFeedItems(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  showId: Id<"shows">,
+  status: "watching" | "completed",
+  stateId: Id<"watchStates">,
+  now: number,
+) {
+  const feedType = status === "watching" ? "started" as const : "completed" as const;
+  const followers = await ctx.db
+    .query("follows")
+    .withIndex("by_followee_createdAt", (q) => q.eq("followeeId", userId))
+    .collect();
+  const followerIds = followers.slice(0, 500).map((f) => f.followerId);
+  const feedOwners = [userId, ...followerIds];
+
+  await Promise.all(
+    feedOwners.map((ownerId) =>
+      ctx.db.insert("feedItems", {
+        ownerId,
+        actorId: userId,
+        type: feedType,
+        targetId: stateId as string,
+        showId,
+        timestamp: now,
+        createdAt: now,
+      }),
+    ),
+  );
+}
+
 const Status = v.union(
   v.literal("watchlist"),
   v.literal("watching"),
@@ -125,6 +159,12 @@ export const setStatus = mutation({
       )
       .unique();
 
+    const isNewTransition =
+      !existing || existing.status !== args.status;
+    const shouldCreateFeedItem =
+      isNewTransition &&
+      (args.status === "watching" || args.status === "completed");
+
     if (existing) {
       if (existing.status !== args.status) {
         const updates: Record<string, number> = {};
@@ -141,6 +181,11 @@ export const setStatus = mutation({
       await ctx.scheduler.runAfter(0, internal.embeddings.clearUserTasteArtifacts, {
         userId: user._id,
       });
+
+      if (shouldCreateFeedItem && (args.status === "watching" || args.status === "completed")) {
+        await createWatchStateFeedItems(ctx, user._id, args.showId, args.status, existing._id, now);
+      }
+
       return existing._id;
     }
 
@@ -159,6 +204,10 @@ export const setStatus = mutation({
     await ctx.scheduler.runAfter(0, internal.embeddings.clearUserTasteArtifacts, {
       userId: user._id,
     });
+
+    if (shouldCreateFeedItem && (args.status === "watching" || args.status === "completed")) {
+      await createWatchStateFeedItems(ctx, user._id, args.showId, args.status, insertedId, now);
+    }
 
     return insertedId;
   },

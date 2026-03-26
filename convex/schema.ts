@@ -224,7 +224,7 @@ export default defineSchema({
   feedItems: defineTable({
     ownerId: v.id("users"),
     actorId: v.id("users"),
-    type: v.union(v.literal("review"), v.literal("log")),
+    type: v.union(v.literal("review"), v.literal("log"), v.literal("started"), v.literal("completed")),
     targetId: v.string(),
     showId: v.id("shows"),
     timestamp: v.number(),

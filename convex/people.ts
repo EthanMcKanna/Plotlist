@@ -100,11 +100,13 @@ export async function buildPersonPreviews(
   ctx: any,
   viewerId: Id<"users">,
   candidates: Doc<"users">[],
+  options?: { excludeViewer?: boolean },
 ) {
+  const excludeViewer = options?.excludeViewer ?? true;
   const uniqueCandidates = candidates.filter(
     (candidate, index, items) =>
       items.findIndex((item) => item._id === candidate._id) === index &&
-      candidate._id !== viewerId,
+      (!excludeViewer || candidate._id !== viewerId),
   );
   const context = await loadViewerContext(ctx, viewerId);
   return await Promise.all(

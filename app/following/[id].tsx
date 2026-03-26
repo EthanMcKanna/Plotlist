@@ -9,11 +9,14 @@ import { EmptyState } from "../../components/EmptyState";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { useConvexAuth } from "convex/react";
 
 export default function FollowingScreen() {
   const params = useLocalSearchParams();
   const userId = typeof params.id === "string" ? params.id : "";
   const userIdValue = userId as Id<"users">;
+  const { isAuthenticated } = useConvexAuth();
+  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
 
   const profile = useQuery(api.users.profile, { userId: userIdValue });
   const {
@@ -29,20 +32,25 @@ export default function FollowingScreen() {
   const listContentStyle = useMemo(() => ({ paddingVertical: 16 }), []);
 
   const renderItem = useCallback(
-    ({ item }: { item: any }) => (
-      <UserRow
-        userId={item.user._id}
-        displayName={item.user.displayName ?? item.user.name}
-        username={item.user.username}
-        avatarUrl={item.avatarUrl}
-        isFollowing={item.isFollowing}
-        followsYou={item.followsYou}
-        isMutualFollow={item.isMutualFollow}
-        mutualCount={item.mutualCount}
-        inContacts={item.inContacts}
-      />
-    ),
-    [],
+    ({ item }: { item: any }) => {
+      const isSelf = me?._id === item.user._id;
+      return (
+        <UserRow
+          userId={item.user._id}
+          displayName={item.user.displayName ?? item.user.name}
+          username={item.user.username}
+          avatarUrl={item.avatarUrl}
+          isFollowing={item.isFollowing}
+          followsYou={item.followsYou}
+          isMutualFollow={item.isMutualFollow}
+          mutualCount={item.mutualCount}
+          inContacts={item.inContacts}
+          showFollowButton={!isSelf}
+          subtitle={isSelf ? "You" : undefined}
+        />
+      );
+    },
+    [me?._id],
   );
 
   const profileName = profile?.user.displayName ?? profile?.user.name;
@@ -64,6 +72,7 @@ export default function FollowingScreen() {
               renderItem={renderItem}
               keyExtractor={(item: any) => item.user._id}
               estimatedItemSize={92}
+              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               contentContainerStyle={listContentStyle}
               onEndReached={() => {
                 if (status === "CanLoadMore") {
