@@ -37,22 +37,31 @@ async function hydrateFeed(ctx: any, items: any[]) {
   );
 
   const hydrated = await Promise.all(
-    items
-      .filter((item) => item.type === "review")
-      .map(async (item) => {
-        const actor = actorMap.get(item.actorId) ?? null;
-        const show = showMap.get(item.showId) ?? null;
+    items.map(async (item) => {
+      const actor = actorMap.get(item.actorId) ?? null;
+      const show = showMap.get(item.showId) ?? null;
+      if (!show) return null;
+
+      const base = {
+        timestamp: item.timestamp,
+        user: toPublicUser(actor),
+        avatarUrl: actor ? avatarMap.get(actor._id) ?? null : null,
+        show,
+      };
+
+      if (item.type === "review") {
         const review = await ctx.db.get(item.targetId as Id<"reviews">);
         if (!review) return null;
-        return {
-          type: "review" as const,
-          timestamp: item.timestamp,
-          review,
-          user: toPublicUser(actor),
-          avatarUrl: actor ? avatarMap.get(actor._id) ?? null : null,
-          show,
-        };
-      })
+        return { type: "review" as const, ...base, review };
+      }
+
+      if (item.type === "started" || item.type === "completed") {
+        return { type: item.type as "started" | "completed", ...base };
+      }
+
+      // Skip "log" type — too granular for the feed
+      return null;
+    })
   );
 
   return hydrated.filter(Boolean);

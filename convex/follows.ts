@@ -125,7 +125,15 @@ export const listFollowersDetailed = query({
       ctx,
       viewer._id,
       users.flatMap((user) => (user ? [user] : [])),
+      { excludeViewer: false },
     );
+
+    // Sort viewer to top
+    previews.sort((a, b) => {
+      if (a.user._id === viewer._id) return -1;
+      if (b.user._id === viewer._id) return 1;
+      return 0;
+    });
 
     return { ...page, page: previews };
   },
@@ -147,7 +155,15 @@ export const listFollowingDetailed = query({
       ctx,
       viewer._id,
       users.flatMap((user) => (user ? [user] : [])),
+      { excludeViewer: false },
     );
+
+    // Sort viewer to top
+    previews.sort((a, b) => {
+      if (a.user._id === viewer._id) return -1;
+      if (b.user._id === viewer._id) return 1;
+      return 0;
+    });
 
     return { ...page, page: previews };
   },

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, ScrollView, StatusBar, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { FlashList } from "@shopify/flash-list";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,9 +15,8 @@ import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { PrimaryButton } from "../../components/PrimaryButton";
+
 import { Avatar } from "../../components/Avatar";
-import { TasteMatchSummary } from "../../components/TasteMatchSummary";
 
 const GENRE_COLORS: Record<string, { bg: string; text: string }> = {
   "Action & Adventure": { bg: "bg-red-500/15", text: "text-red-400" },
@@ -147,7 +146,7 @@ export default function ProfileScreen() {
   const profile = useQuery(api.users.profile, {
     userId: userIdValue,
   });
-  const getProfileTasteExperience = useAction(api.embeddings.getProfileTasteExperience);
+
 
   const isFollowing = useQuery(
     api.follows.isFollowing,
@@ -235,7 +234,7 @@ export default function ProfileScreen() {
 
     const parts: string[] = [];
     if (relationship.inContacts) parts.push("In your contacts");
-    if (relationship.isMutualFollow) parts.push("Mutual follow");
+    if (relationship.isMutualFollow) parts.push("Friends");
     else if (relationship.followsYou) parts.push("Follows you");
     if (relationship.mutualCount > 0) {
       parts.push(`${relationship.mutualCount} mutual${relationship.mutualCount === 1 ? "" : "s"}`);
@@ -244,7 +243,6 @@ export default function ProfileScreen() {
   }, [profile?.relationship]);
 
   const isOwnProfile = me && me._id === userIdValue;
-  const [tasteExperience, setTasteExperience] = useState<any | null>(null);
   const memberSince = formatMemberSince(profile?.memberSince ?? null);
   const watchActivityCards = useMemo(
     () =>
@@ -282,30 +280,6 @@ export default function ProfileScreen() {
   );
 
   const insets = useSafeAreaInsets();
-
-  useEffect(() => {
-    if (!isAuthenticated || !me?._id || me._id === userIdValue) {
-      setTasteExperience(null);
-      return;
-    }
-
-    let cancelled = false;
-    getProfileTasteExperience({ userId: userIdValue })
-      .then((result) => {
-        if (!cancelled) {
-          setTasteExperience(result);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTasteExperience(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [getProfileTasteExperience, isAuthenticated, me?._id, userIdValue]);
 
   return (
     <View className="flex-1 bg-dark-bg">
@@ -400,23 +374,27 @@ export default function ProfileScreen() {
           {/* ── Follow / Edit Button ── */}
           {me && !isOwnProfile ? (
             <View className="mt-4">
-              <PrimaryButton
-                label={isFollowing ? "Unfollow" : "Follow"}
-                onPress={() =>
-                  isFollowing
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void (isFollowing
                     ? unfollow({ userIdToUnfollow: userIdValue })
-                    : follow({ userIdToFollow: userIdValue })
-                }
-              />
-            </View>
-          ) : null}
-
-          {!isOwnProfile && tasteExperience?.tasteMatch ? (
-            <View className="mt-4">
-              <TasteMatchSummary
-                percent={tasteExperience.tasteMatch.percent}
-                sharedFavoriteShows={tasteExperience.tasteMatch.sharedFavoriteShows ?? []}
-              />
+                    : follow({ userIdToFollow: userIdValue }));
+                }}
+                className={`items-center justify-center rounded-xl py-2.5 ${
+                  isFollowing
+                    ? "border border-dark-border bg-dark-card active:bg-dark-hover"
+                    : "bg-brand-500 active:bg-brand-600"
+                }`}
+              >
+                <Text
+                  className={`text-sm font-semibold ${
+                    isFollowing ? "text-text-primary" : "text-white"
+                  }`}
+                >
+                  {isFollowing ? "Following" : "Follow"}
+                </Text>
+              </Pressable>
             </View>
           ) : null}
 

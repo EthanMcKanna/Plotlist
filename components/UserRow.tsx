@@ -52,12 +52,12 @@ function buildRelationshipSubtitle({
     parts.push("In your contacts");
   }
   if (isMutualFollow) {
-    parts.push("Mutual follow");
+    parts.push("Friends");
   } else if (followsYou) {
     parts.push("Follows you");
   }
   if ((mutualCount ?? 0) > 0) {
-    parts.push(`${mutualCount} mutual${mutualCount === 1 ? "" : "s"}`);
+    parts.push(`${mutualCount} mutual friend${mutualCount === 1 ? "" : "s"}`);
   }
 
   return parts.join(" · ") || null;

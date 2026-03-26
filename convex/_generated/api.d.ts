@@ -699,6 +699,12 @@ export declare const api: {
   };
   trending: {
     mostReviewed: FunctionReference<"query", "public", { limit?: number }, any>;
+    popularWithFriends: FunctionReference<
+      "query",
+      "public",
+      { limit?: number },
+      any
+    >;
     shows: FunctionReference<
       "query",
       "public",
@@ -1428,6 +1434,10 @@ export declare const internal: {
       { authorIds: Array<Id<"users">>; limit?: number; showId: Id<"shows"> },
       any
     >;
+  };
+  seed: {
+    fixRatings: FunctionReference<"mutation", "internal", {}, any>;
+    seedUsers: FunctionReference<"mutation", "internal", {}, any>;
   };
   shows: {
     getByExternalInternal: FunctionReference<

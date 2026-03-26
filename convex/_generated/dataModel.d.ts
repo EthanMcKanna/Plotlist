@@ -278,7 +278,7 @@ export type DataModel = {
       showId: Id<"shows">;
       targetId: string;
       timestamp: number;
-      type: "review" | "log";
+      type: "review" | "log" | "started" | "completed";
       _id: Id<"feedItems">;
       _creationTime: number;
     };
