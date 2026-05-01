@@ -1,4 +1,5 @@
 import { apiRequest } from "../api/client";
+import { getStoredSession } from "../api/session";
 import { getFunctionName } from "./api";
 
 type RpcKind = "query" | "mutation" | "action";
@@ -9,11 +10,13 @@ async function callRpc<T>(
   args: Record<string, unknown> | undefined,
 ) {
   const name = getFunctionName(fn as any);
+  const session = await getStoredSession();
   const response = await apiRequest<{ result: T }>(`/api/rpc/${kind}`, {
     method: "POST",
     body: JSON.stringify({
       name,
       args: args ?? {},
+      accessToken: session?.accessToken,
     }),
   });
 

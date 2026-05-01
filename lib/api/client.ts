@@ -95,9 +95,6 @@ export async function apiRequest<TResponse>(
   });
 
   if (!response.ok) {
-    if (authenticate && response.status === 401) {
-      await clearStoredSession();
-    }
     await parseError(response);
   }
 
