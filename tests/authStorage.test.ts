@@ -69,20 +69,20 @@ describe("authStorage", () => {
 
     const { authStorage, clearAuthTokens } = require("../lib/authStorage") as typeof import("../lib/authStorage");
 
-    await authStorage.setItem("__convexAuthJWT_plotlist", "jwt");
-    await authStorage.setItem("__convexAuthRefreshToken_plotlist", "refresh");
+    await authStorage.setItem("__plotlistApiAccessToken", "jwt");
+    await authStorage.setItem("__plotlistApiRefreshToken", "refresh");
 
     await expect(
-      authStorage.getItem("__convexAuthJWT_plotlist")
+      authStorage.getItem("__plotlistApiAccessToken")
     ).resolves.toBe("jwt");
 
     await clearAuthTokens();
 
     await expect(
-      authStorage.getItem("__convexAuthJWT_plotlist")
+      authStorage.getItem("__plotlistApiAccessToken")
     ).resolves.toBeNull();
     await expect(
-      authStorage.getItem("__convexAuthRefreshToken_plotlist")
+      authStorage.getItem("__plotlistApiRefreshToken")
     ).resolves.toBeNull();
     expect(warnSpy).toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith("[Storage] Cleared all auth tokens");

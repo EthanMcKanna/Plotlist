@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Dimensions, Pressable, Text, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
-import { useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
+import { FlashList } from "../../components/FlashList";
+import { useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 
@@ -10,7 +10,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { Poster } from "../../components/Poster";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { SegmentedControl } from "../../components/SegmentedControl";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const H_PADDING = 24;
@@ -42,7 +42,7 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function WatchlistScreen() {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const params = useLocalSearchParams<{ filter?: string }>();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(parseFilter(params.filter));
   const [sortBy, setSortBy] = useState<SortOption>("date");

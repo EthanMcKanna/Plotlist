@@ -1,5 +1,10 @@
 import { Platform } from "react-native";
-import type { TokenStorage } from "@convex-dev/auth/react";
+
+type TokenStorage = {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+};
 
 const service = "plotlist";
 const nativeFallbackStorage = new Map<string, string>();
@@ -114,9 +119,10 @@ export const authStorage: TokenStorage =
 // Helper to clear all auth tokens (call this to force re-login)
 export async function clearAuthTokens() {
   const keys = [
-    "__convexAuthJWT_plotlist",
-    "__convexAuthRefreshToken_plotlist",
-    "__convexAuthOAuthVerifier_plotlist",
+    "__plotlistApiAccessToken",
+    "__plotlistApiRefreshToken",
+    "__plotlistApiAccessTokenExpiresAt",
+    "__plotlistApiRefreshTokenExpiresAt",
   ];
   for (const key of keys) {
     try {

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { FlashList } from "@shopify/flash-list";
-import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { FlashList } from "../../components/FlashList";
+import { useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 
 import { Screen } from "../../components/Screen";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { formatDate } from "../../lib/format";
 
 export default function ReportsAdminScreen() {

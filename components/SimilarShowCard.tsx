@@ -2,8 +2,8 @@ import { Alert, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useAction } from "../lib/plotlist/react";
+import { api } from "../lib/plotlist/api";
 import { Poster } from "./Poster";
 
 type SimilarShowCardProps = {

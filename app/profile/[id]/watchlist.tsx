@@ -1,16 +1,16 @@
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Dimensions, Pressable, Text, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../../components/FlashList";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { usePaginatedQuery, useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "../../../lib/plotlist/react";
 
 import { EmptyState } from "../../../components/EmptyState";
 import { Poster } from "../../../components/Poster";
 import { Screen } from "../../../components/Screen";
 import { SegmentedControl } from "../../../components/SegmentedControl";
-import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
+import { api } from "../../../lib/plotlist/api";
+import type { Id } from "../../../lib/plotlist/types";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const H_PADDING = 24;

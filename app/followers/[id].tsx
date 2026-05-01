@@ -1,22 +1,19 @@
 import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams } from "expo-router";
-import { usePaginatedQuery, useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 
 import { Screen } from "../../components/Screen";
 import { EmptyState } from "../../components/EmptyState";
 import { UserRow } from "../../components/UserRow";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { useConvexAuth } from "convex/react";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 
 export default function FollowersScreen() {
   const params = useLocalSearchParams();
   const userId = typeof params.id === "string" ? params.id : "";
   const userIdValue = userId as Id<"users">;
-  const { isAuthenticated } = useConvexAuth();
-  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
 
   const profile = useQuery(api.users.profile, { userId: userIdValue });
   const {
@@ -32,25 +29,20 @@ export default function FollowersScreen() {
   const listContentStyle = useMemo(() => ({ paddingVertical: 16 }), []);
 
   const renderItem = useCallback(
-    ({ item }: { item: any }) => {
-      const isSelf = me?._id === item.user._id;
-      return (
-        <UserRow
-          userId={item.user._id}
-          displayName={item.user.displayName ?? item.user.name}
-          username={item.user.username}
-          avatarUrl={item.avatarUrl}
-          isFollowing={item.isFollowing}
-          followsYou={item.followsYou}
-          isMutualFollow={item.isMutualFollow}
-          mutualCount={item.mutualCount}
-          inContacts={item.inContacts}
-          showFollowButton={!isSelf}
-          subtitle={isSelf ? "You" : undefined}
-        />
-      );
-    },
-    [me?._id],
+    ({ item }: { item: any }) => (
+      <UserRow
+        userId={item.user._id}
+        displayName={item.user.displayName ?? item.user.name}
+        username={item.user.username}
+        avatarUrl={item.avatarUrl}
+        isFollowing={item.isFollowing}
+        followsYou={item.followsYou}
+        isMutualFollow={item.isMutualFollow}
+        mutualCount={item.mutualCount}
+        inContacts={item.inContacts}
+      />
+    ),
+    [],
   );
 
   const profileName = profile?.user.displayName ?? profile?.user.name;
@@ -72,7 +64,6 @@ export default function FollowersScreen() {
               renderItem={renderItem}
               keyExtractor={(item: any) => item.user._id}
               estimatedItemSize={92}
-              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               contentContainerStyle={listContentStyle}
               onEndReached={() => {
                 if (status === "CanLoadMore") {

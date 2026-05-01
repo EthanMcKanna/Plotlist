@@ -3,7 +3,7 @@ import { Alert, Dimensions, Pressable, ScrollView, Text, View } from "react-nati
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "../../lib/plotlist/react";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -17,8 +17,8 @@ import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { Poster } from "../../components/Poster";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 import { ReportModal } from "../../components/ReportModal";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");

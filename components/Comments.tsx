@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
-import { useConvexAuth, useMutation, usePaginatedQuery } from "convex/react";
+import { FlashList } from "./FlashList";
+import { useAuth, useMutation, usePaginatedQuery } from "../lib/plotlist/react";
 
-import { api } from "../convex/_generated/api";
+import { api } from "../lib/plotlist/api";
 import { formatDate } from "../lib/format";
 
 export function Comments({
@@ -13,7 +13,7 @@ export function Comments({
   targetType: "review" | "log" | "list";
   targetId: string;
 }) {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const { results: comments, status, loadMore } = usePaginatedQuery(
     api.comments.listForTarget,
     { targetType, targetId },

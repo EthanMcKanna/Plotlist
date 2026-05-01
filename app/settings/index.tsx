@@ -5,8 +5,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useConvex, useMutation, useQuery } from "convex/react";
-import { useAuthActions } from "@convex-dev/auth/react";
 import { useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 
@@ -15,10 +13,13 @@ import { ContactsSyncCard } from "../../components/ContactsSyncCard";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { clearAuthTokens } from "../../lib/authStorage";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { useAuthActions } from "../../lib/plotlist/auth";
+import { callQuery } from "../../lib/plotlist/rpc";
+import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
 
 function formatPhone(raw?: string | null): string {
@@ -158,7 +159,6 @@ async function downloadExportOnWeb(filename: string, payload: string) {
 export default function SettingsScreen() {
   const { signOut } = useAuthActions();
   const router = useRouter();
-  const convex = useConvex();
   const me = useQuery(api.users.me);
   const hasProfile = Boolean(me?._id);
   const updateProfile = useMutation(api.users.updateProfile);
@@ -262,7 +262,7 @@ export default function SettingsScreen() {
 
   const handleExport = async () => {
     try {
-      const data = await convex.query(api.users.exportData, {});
+      const data = await callQuery(api.users.exportData, {});
       const payload = JSON.stringify(data, null, 2);
       const filename = `plotlist-export-${new Date().toISOString().slice(0, 10)}.json`;
 

@@ -1,17 +1,9 @@
 import { Component, type ReactNode } from "react";
-import { ConvexError } from "convex/values";
 import { router } from "expo-router";
 import { LoadingScreen } from "./LoadingScreen";
 import { clearAuthTokens } from "../lib/authStorage";
 
 function isAuthError(error: unknown): boolean {
-  if (error instanceof ConvexError) {
-    const data = error.data;
-    return (
-      data === "Not authenticated" ||
-      (typeof data === "string" && data.toLowerCase().includes("authenticated"))
-    );
-  }
   if (error instanceof Error) {
     return error.message.toLowerCase().includes("not authenticated");
   }

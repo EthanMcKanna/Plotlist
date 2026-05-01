@@ -2,12 +2,12 @@ import { useEffect, useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAction, useConvexAuth, useQuery } from "convex/react";
+import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
-import { api } from "../convex/_generated/api";
+import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import { getLocalDateString } from "../lib/releaseCalendar";
 import { SectionHeader } from "./SectionHeader";
@@ -19,7 +19,7 @@ function flattenGroups(groups?: Array<{ items?: any[] }>) {
 const CARD_WIDTH = 240;
 
 export function ReleaseCalendarPreview() {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
   const today = useMemo(() => getLocalDateString(), []);
   const preview = useQuery(

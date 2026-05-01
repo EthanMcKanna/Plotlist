@@ -1,7 +1,7 @@
 import { Alert, Pressable, Text } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
+import { api } from "../lib/plotlist/api";
 
 export function LikeButton({
   targetType,
@@ -10,7 +10,7 @@ export function LikeButton({
   targetType: "review" | "log" | "list";
   targetId: string;
 }) {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const toggle = useMutation(api.likes.toggle).withOptimisticUpdate(
     (localStore, args) => {
       const likedQueryArgs = { targetType: args.targetType, targetId: args.targetId };

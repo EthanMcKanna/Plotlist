@@ -10,10 +10,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useIsFocused } from "@react-navigation/native";
+import { useAction, useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
@@ -27,7 +26,7 @@ import { Screen } from "../../components/Screen";
 import { SearchResultRow } from "../../components/SearchResultRow";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { UserRow } from "../../components/UserRow";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { setContactsSyncDismissed } from "../../lib/preferences";
@@ -83,9 +82,8 @@ function SectionLine({
 
 export default function SearchScreen() {
   const router = useRouter();
-  const isScreenFocused = useIsFocused();
-  const { isAuthenticated } = useConvexAuth();
-  const me = useQuery(api.users.me, isAuthenticated && isScreenFocused ? {} : "skip");
+  const { isAuthenticated } = useAuth();
+  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const hasProfile = Boolean(me?._id);
   const params = useLocalSearchParams();
   const inputRef = useRef<TextInput>(null);
@@ -103,7 +101,7 @@ export default function SearchScreen() {
   const [devicePhoneLookup, setDevicePhoneLookup] = useState<
     Record<string, string>
   >({});
-  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
   const searchReady = trimmedQuery.length >= 3 && debouncedQuery.length >= 3;
   const hasSearchResults = catalogResults.length > 0 || !isSearchingCatalog;
@@ -131,10 +129,7 @@ export default function SearchScreen() {
   const peopleResults =
     useQuery(
       api.users.search,
-      isScreenFocused &&
-      hasProfile &&
-      mode === "people" &&
-      trimmedQuery.length >= 2
+      hasProfile && mode === "people" && trimmedQuery.length >= 2
         ? { text: trimmedQuery, limit: 12 }
         : "skip",
     ) ?? [];
@@ -142,14 +137,13 @@ export default function SearchScreen() {
   const contactStatus =
     useQuery(
       api.contacts.getStatus,
-      isScreenFocused && hasProfile && mode === "people" ? {} : "skip",
+      hasProfile && mode === "people" ? {} : "skip",
     ) ?? null;
 
   const contactMatches =
     useQuery(
       api.contacts.getMatches,
-      isScreenFocused &&
-        hasProfile &&
+      hasProfile &&
         mode === "people" &&
         trimmedQuery.length < 2 &&
         contactStatus?.hasSynced
@@ -160,8 +154,7 @@ export default function SearchScreen() {
   const inviteCandidates =
     useQuery(
       api.contacts.getInviteCandidates,
-      isScreenFocused &&
-        hasProfile &&
+      hasProfile &&
         mode === "people" &&
         trimmedQuery.length < 2 &&
         contactStatus?.hasSynced
@@ -172,8 +165,7 @@ export default function SearchScreen() {
   const searchContactCandidates =
     useQuery(
       api.contacts.searchInviteCandidates,
-      isScreenFocused &&
-        hasProfile &&
+      hasProfile &&
         mode === "people" &&
         trimmedQuery.length >= 2 &&
         contactStatus?.hasSynced
@@ -184,10 +176,7 @@ export default function SearchScreen() {
   const suggestedPeople =
     useQuery(
       api.users.suggested,
-      isScreenFocused &&
-      hasProfile &&
-      mode === "people" &&
-      trimmedQuery.length < 2
+      hasProfile && mode === "people" && trimmedQuery.length < 2
         ? { limit: 6 }
         : "skip",
     ) ?? [];
@@ -210,7 +199,7 @@ export default function SearchScreen() {
   useEffect(() => {
     let active = true;
 
-    if (!isScreenFocused || mode !== "shows" || !isAuthenticated || debouncedQuery.length < 3) {
+    if (mode !== "shows" || !isAuthenticated || debouncedQuery.length < 3) {
       setCatalogResults([]);
       setIsSearchingCatalog(false);
       return;
@@ -231,7 +220,7 @@ export default function SearchScreen() {
     return () => {
       active = false;
     };
-  }, [debouncedQuery, isAuthenticated, isScreenFocused, mode, searchCatalog]);
+  }, [mode, searchCatalog, debouncedQuery, isAuthenticated]);
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(trimmedQuery), 400);
@@ -241,15 +230,8 @@ export default function SearchScreen() {
   /* ── Fetch TMDB discover sections when idle ─────────────────── */
 
   useEffect(() => {
-    if (!isScreenFocused) {
-      return;
-    }
-
     if (!showDiscover) {
       setDiscoverSections({});
-      return;
-    }
-    if (Object.keys(discoverSections).length > 0) {
       return;
     }
     let cancelled = false;
@@ -268,8 +250,12 @@ export default function SearchScreen() {
       { key: "netflix", category: "netflix", label: "Netflix", logoUrl: TMDB_LOGO("/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg") },
       { key: "apple_tv", category: "apple_tv", label: "Apple TV", logoUrl: TMDB_LOGO("/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg") },
       { key: "max", category: "max", label: "HBO Max", logoUrl: TMDB_LOGO("/jbe4gVSfRlbPTdESXhEKpornsfu.jpg") },
+      { key: "disney_plus", category: "disney_plus", label: "Disney+", logoUrl: TMDB_LOGO("/97yvRBw1GzX7fXprcF80er19ot.jpg") },
+      { key: "hulu", category: "hulu", label: "Hulu", logoUrl: TMDB_LOGO("/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg") },
+      { key: "prime_video", category: "prime_video", label: "Prime Video", logoUrl: TMDB_LOGO("/pvske1MyAoymrs5bguRfVqYiM9a.jpg") },
       { key: "genre_drama", category: "genre_drama", label: "Drama", icon: "film" },
       { key: "genre_comedy", category: "genre_comedy", label: "Comedy", icon: "happy" },
+      { key: "genre_sci_fi", category: "genre_sci_fi", label: "Sci-Fi & Fantasy", icon: "rocket" },
     ];
     Promise.all(
       sections.map((s) => getTmdbList({ category: s.category, limit: 12 })),
@@ -299,7 +285,7 @@ export default function SearchScreen() {
     return () => {
       cancelled = true;
     };
-  }, [discoverSections, getTmdbList, isScreenFocused, showDiscover]);
+  }, [showDiscover, getTmdbList]);
 
   /* ── Handlers ──────────────────────────────────────────────── */
 
@@ -464,7 +450,7 @@ export default function SearchScreen() {
             className="flex-row items-center rounded-2xl bg-dark-card px-4"
             style={{
               borderWidth: 1,
-              borderColor: isInputFocused
+              borderColor: isFocused
                 ? "rgba(14, 165, 233, 0.35)"
                 : "rgba(42, 46, 56, 1)",
             }}
@@ -472,14 +458,14 @@ export default function SearchScreen() {
             <Ionicons
               name="search-outline"
               size={20}
-              color={isInputFocused ? "#38bdf8" : "#5A6070"}
+              color={isFocused ? "#38bdf8" : "#5A6070"}
             />
             <TextInput
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-              onFocus={() => setIsInputFocused(true)}
-              onBlur={() => setIsInputFocused(false)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               placeholder={
                 mode === "shows"
                   ? "Try: slow-burn sci-fi or shows like Severance…"

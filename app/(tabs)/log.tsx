@@ -12,10 +12,9 @@ import {
   Text,
   View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useIsFocused } from "@react-navigation/native";
+import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,8 +23,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
-import { api } from "../../convex/_generated/api";
-import type { Doc, Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Doc, Id } from "../../lib/plotlist/types";
 import { formatRelativeTime } from "../../lib/format";
 
 type FilterValue = "all" | "entries" | "reviews" | "notes" | "episodes";
@@ -282,17 +281,16 @@ const LogActivityCard = memo(function LogActivityCard({
 
 export default function LogScreen() {
   const insets = useSafeAreaInsets();
-  const isScreenFocused = useIsFocused();
-  const { isAuthenticated } = useConvexAuth();
-  const me = useQuery(api.users.me, isAuthenticated && isScreenFocused ? {} : "skip");
+  const { isAuthenticated } = useAuth();
+  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const [filter, setFilter] = useState<FilterValue>("all");
   const [sort, setSort] = useState<SortValue>("recent");
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
-  const [limit, setLimit] = useState(40);
+  const [limit, setLimit] = useState(60);
 
   const activity = useQuery(
     api.watchLogs.listActivityForUser,
-    me?._id && isScreenFocused ? { userId: me._id, limit } : "skip",
+    me?._id ? { userId: me._id, limit } : "skip",
   );
 
   const deleteLog = useMutation(api.watchLogs.deleteLog);
