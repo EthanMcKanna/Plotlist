@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { ensurePhoneIdentity, createSession } from "../_lib/auth";
-import { normalizePhoneNumber } from "../_lib/phone";
+import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
 import { enforceRateLimit } from "../_lib/rate-limit";
 import { verifyPhoneVerificationCode } from "../_lib/twilio";
 import { upsertPhoneUser } from "../_lib/users";
@@ -19,9 +19,18 @@ export default withJsonRoute(requestSchema, async ({ body, res }) => {
     throw new ApiError(400, "invalid_phone", "Enter a valid phone number");
   }
 
-  await enforceRateLimit(`phone-verify:${normalizedPhone}`, 10, 10 * 60 * 1000);
+  const usingAppReviewBypass = matchesAppReviewBypass(
+    normalizedPhone,
+    body.code.trim(),
+  );
 
-  const verified = await verifyPhoneVerificationCode(normalizedPhone, body.code);
+  if (!usingAppReviewBypass) {
+    await enforceRateLimit(`phone-verify:${normalizedPhone}`, 10, 10 * 60 * 1000);
+  }
+
+  const verified =
+    usingAppReviewBypass ||
+    (await verifyPhoneVerificationCode(normalizedPhone, body.code));
   if (!verified) {
     throw new ApiError(
       401,
