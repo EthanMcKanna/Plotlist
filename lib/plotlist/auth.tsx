@@ -1,4 +1,4 @@
-import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { authApi } from "../api/client";
 import { getApiBaseUrl } from "../api/env";
@@ -50,19 +50,23 @@ async function validateStoredSession(session: StoredSession) {
 export function PlotlistSessionProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(true);
   const [isApiAuthenticated, setIsApiAuthenticated] = useState(false);
+  const authGeneration = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const generation = authGeneration.current;
 
     void (async () => {
       const session = await getStoredSession();
-      if (!cancelled) {
+      if (!cancelled && generation === authGeneration.current) {
         const validatedSession =
           session && session.refreshTokenExpiresAt > Date.now()
             ? await validateStoredSession(session).catch(() => null)
             : null;
-        setIsApiAuthenticated(Boolean(validatedSession));
-        setIsLoading(false);
+        if (!cancelled && generation === authGeneration.current) {
+          setIsApiAuthenticated(Boolean(validatedSession));
+          setIsLoading(false);
+        }
       }
     })();
 
@@ -85,10 +89,14 @@ export function PlotlistSessionProvider({ children }: PropsWithChildren) {
       isApiAuthenticated,
       isLoading,
       markSignedIn() {
+        authGeneration.current += 1;
         setIsApiAuthenticated(true);
+        setIsLoading(false);
       },
       markSignedOut() {
+        authGeneration.current += 1;
         setIsApiAuthenticated(false);
+        setIsLoading(false);
       },
     }),
     [isApiAuthenticated, isLoading],
