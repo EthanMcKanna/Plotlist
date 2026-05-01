@@ -25,6 +25,15 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
@@ -46,8 +55,10 @@ import {
   type SeasonLoadState,
 } from "../../lib/seasonGuide";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const BACKDROP_HEIGHT = 340;
+const DISMISS_THRESHOLD = 120;
+const DISMISS_VELOCITY = 500;
 const POSTER_HEIGHT = 240;
 const POSTER_WIDTH = 160;
 
@@ -155,13 +166,11 @@ export default function ShowScreen() {
   const getExtendedDetails = useAction(api.shows.getExtendedDetails);
   const getSeasonDetails = useAction(api.shows.getSeasonDetails);
   const getSimilarShows = useAction(api.embeddings.getSimilarShows);
-  const getShowTasteSocialProof = useAction(api.embeddings.getShowTasteSocialProof);
 
   const [extendedDetails, setExtendedDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(true);
   const [similarShows, setSimilarShows] = useState<any[]>([]);
   const [loadingSimilarShows, setLoadingSimilarShows] = useState(false);
-  const [tasteSocialProof, setTasteSocialProof] = useState<any>(null);
   const [seasonDetailsByNumber, setSeasonDetailsByNumber] = useState<Record<number, any>>(
     {}
   );
@@ -185,6 +194,70 @@ export default function ShowScreen() {
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
   const [episodeReviewExpanded, setEpisodeReviewExpanded] = useState(false);
   const [episodeReviewText, setEpisodeReviewText] = useState("");
+
+  // Episode sheet gesture animation
+  const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
+  const sheetOverlayOpacity = useSharedValue(0);
+  const episodeScrollOffset = useRef(0);
+
+  const openEpisodeSheet = useCallback(() => {
+    setEpisodeSheetVisible(true);
+    sheetTranslateY.value = SCREEN_HEIGHT;
+    sheetOverlayOpacity.value = 0;
+    requestAnimationFrame(() => {
+      sheetTranslateY.value = withTiming(0, { duration: 340 });
+      sheetOverlayOpacity.value = withTiming(1, { duration: 280 });
+    });
+  }, []);
+
+  const closeEpisodeSheet = useCallback(() => {
+    sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 280 });
+    sheetOverlayOpacity.value = withTiming(0, { duration: 200 });
+    setTimeout(() => {
+      setEpisodeSheetVisible(false);
+      setSelectedEpisode(null);
+      setEpisodeReviewExpanded(false);
+      setEpisodeReviewText("");
+    }, 290);
+  }, []);
+
+  const episodeSheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sheetTranslateY.value }],
+  }));
+
+  const overlayStyle = useAnimatedStyle(() => ({
+    opacity: sheetOverlayOpacity.value,
+  }));
+
+  const episodePanGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      // Only allow downward drag when scrolled to top
+      if (episodeScrollOffset.current <= 0 && e.translationY > 0) {
+        sheetTranslateY.value = e.translationY;
+        sheetOverlayOpacity.value = interpolate(
+          e.translationY,
+          [0, SCREEN_HEIGHT * 0.4],
+          [1, 0],
+          Extrapolation.CLAMP,
+        );
+      }
+    })
+    .onEnd((e) => {
+      if (
+        e.translationY > DISMISS_THRESHOLD ||
+        e.velocityY > DISMISS_VELOCITY
+      ) {
+        sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
+        sheetOverlayOpacity.value = withTiming(0, { duration: 200 });
+        runOnJS(closeEpisodeSheet)();
+      } else {
+        sheetTranslateY.value = withTiming(0, { duration: 250 });
+        sheetOverlayOpacity.value = withTiming(1, { duration: 150 });
+      }
+    })
+    .activeOffsetY(10)
+    .failOffsetY(-5);
+
   const seasonDetailsByNumberRef = useRef<Record<number, any>>({});
   const seasonLoadStateByNumberRef = useRef<Record<number, SeasonLoadState>>({});
   const seasonLoadErrorByNumberRef = useRef<Record<number, string>>({});
@@ -302,30 +375,6 @@ export default function ShowScreen() {
       cancelled = true;
     };
   }, [getSimilarShows, showId]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !showId) {
-      setTasteSocialProof(null);
-      return;
-    }
-
-    let cancelled = false;
-    getShowTasteSocialProof({ showId })
-      .then((result) => {
-        if (!cancelled) {
-          setTasteSocialProof(result);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTasteSocialProof(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [getShowTasteSocialProof, isAuthenticated, showId]);
 
   const seasonOptions = useMemo(
     () =>
@@ -535,7 +584,7 @@ export default function ShowScreen() {
       seasonName,
       seasonNumber: openSeason,
     });
-    setEpisodeSheetVisible(true);
+    openEpisodeSheet();
   }, [deepLinkConsumed, openSeason, openEpisode, seasonDetailsByNumber, seasonsWithEpisodes]);
 
   const visibleSeasonNumbers = useMemo<number[]>(
@@ -767,8 +816,6 @@ export default function ShowScreen() {
       reviewCount: reviews.length,
     };
   }, [reviews]);
-  const tasteAudienceSummary = tasteSocialProof?.similarAudience ?? null;
-
   const handleProviderPress = useCallback(async (provider: { deepLinkUrl?: string | null }) => {
     if (!provider.deepLinkUrl) {
       return;
@@ -1285,7 +1332,7 @@ export default function ShowScreen() {
                 seasonName,
                 seasonNumber,
               });
-              setEpisodeSheetVisible(true);
+              openEpisodeSheet();
             }}
           />
         )}
@@ -1323,98 +1370,6 @@ export default function ShowScreen() {
 
         {/* ─── Divider ─── */}
         <View className="mx-6 mt-10 h-px bg-dark-border" />
-
-        {/* ─── Taste Signals ─── */}
-        {(tasteSocialProof?.friendsWhoLiked?.length > 0 || tasteAudienceSummary) ? (
-          <View className="mt-8 px-6">
-            <Text
-              className="mb-4 text-xs font-bold uppercase text-text-tertiary"
-              style={{ letterSpacing: 1.5 }}
-            >
-              Taste Signals
-            </Text>
-
-            {tasteSocialProof?.friendsWhoLiked?.length > 0 ? (
-              <View className="mb-4 rounded-2xl border border-dark-border bg-dark-card p-4">
-                <Text className="text-sm font-semibold text-text-primary">
-                  Friends who liked this
-                </Text>
-                <View className="mt-3 gap-3">
-                  {tasteSocialProof.friendsWhoLiked.map((entry: any) => (
-                    <View
-                      key={entry.reviewId}
-                      className="flex-row items-center gap-3 rounded-2xl bg-dark-bg px-3 py-3"
-                    >
-                      <Pressable
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          router.push(`/profile/${entry.user?._id}`);
-                        }}
-                        className="flex-row flex-1 items-center gap-3 active:opacity-80"
-                      >
-                        <Avatar
-                          uri={entry.avatarUrl}
-                          label={entry.user?.displayName ?? entry.user?.name ?? entry.user?.username}
-                          size={40}
-                        />
-                        <View className="flex-1">
-                          <Text className="text-sm font-semibold text-text-primary" numberOfLines={1}>
-                            {entry.user?.displayName ?? entry.user?.name ?? entry.user?.username ?? "Friend"}
-                          </Text>
-                          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={2}>
-                            {entry.reviewText ? entry.reviewText : "Left a strong review for this show."}
-                          </Text>
-                        </View>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          router.push(`/review/${entry.reviewId}`);
-                        }}
-                        className="rounded-full bg-amber-500/12 px-3 py-2 active:opacity-80"
-                      >
-                        <Text className="text-xs font-semibold text-amber-300">
-                          ★ {entry.rating}/5
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-            {tasteAudienceSummary ? (
-              <View className="rounded-2xl border border-brand-500/20 bg-brand-500/8 p-4">
-                <Text className="text-sm font-semibold text-text-primary">
-                  People like you finished this
-                </Text>
-                <Text className="mt-2 text-sm leading-6 text-text-secondary">
-                  Among {tasteAudienceSummary.sampleSize} people with taste similar to yours who
-                  tracked this show, {tasteAudienceSummary.finishedCount} finished it and{" "}
-                  {tasteAudienceSummary.droppedCount} dropped it.
-                </Text>
-                <View className="mt-3 flex-row gap-3">
-                  <View className="flex-1 rounded-2xl bg-dark-card px-3 py-3">
-                    <Text className="text-lg font-bold text-green-400">
-                      {tasteAudienceSummary.finishedPercent}%
-                    </Text>
-                    <Text className="mt-1 text-xs uppercase tracking-wide text-text-tertiary">
-                      Finished
-                    </Text>
-                  </View>
-                  <View className="flex-1 rounded-2xl bg-dark-card px-3 py-3">
-                    <Text className="text-lg font-bold text-amber-300">
-                      {tasteAudienceSummary.droppedPercent}%
-                    </Text>
-                    <Text className="mt-1 text-xs uppercase tracking-wide text-text-tertiary">
-                      Dropped
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
 
         {/* ─── Community Reviews ─── */}
         <View className="mt-8 px-6">
@@ -1455,6 +1410,7 @@ export default function ShowScreen() {
                 renderItem={renderReview}
                 keyExtractor={(item: any) => item.review._id}
                 estimatedItemSize={120}
+                ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
                 contentContainerStyle={{ paddingBottom: 8 }}
                 scrollEnabled={false}
               />
@@ -1710,23 +1666,7 @@ export default function ShowScreen() {
       </Modal>
 
       {/* Episode Detail Sheet */}
-      <Modal
-        visible={episodeSheetVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        statusBarTranslucent
-        onRequestClose={() => {
-          setEpisodeSheetVisible(false);
-          setEpisodeReviewExpanded(false);
-          setEpisodeReviewText("");
-        }}
-        onDismiss={() => {
-          setSelectedEpisode(null);
-          setEpisodeReviewExpanded(false);
-          setEpisodeReviewText("");
-        }}
-      >
-        {selectedEpisode && (() => {
+      {episodeSheetVisible && selectedEpisode && (() => {
           const sheetEpKey = `S${selectedEpisode.seasonNumber}E${selectedEpisode.episode.episodeNumber}`;
           const sheetIsWatched = watchedEpisodeSet.has(sheetEpKey);
           const sheetIsAvailable = isEpisodeAvailable(selectedEpisode.episode.airDate);
@@ -1737,13 +1677,46 @@ export default function ShowScreen() {
           const hasTmdbRating = selectedEpisode.episode.voteCount > 0 && selectedEpisode.episode.voteAverage > 0;
 
           return (
-          <View className="flex-1" style={{ backgroundColor: "#0D0F14" }}>
-            <ScrollView
-              className="flex-1"
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-              keyboardShouldPersistTaps="handled"
+          <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }} pointerEvents="box-none">
+            {/* Dimmed backdrop */}
+            <Animated.View
+              style={[
+                { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
+                overlayStyle,
+              ]}
             >
+              <Pressable style={{ flex: 1 }} onPress={closeEpisodeSheet} />
+            </Animated.View>
+
+            {/* Sheet */}
+            <GestureDetector gesture={episodePanGesture}>
+              <Animated.View
+                style={[
+                  {
+                    position: "absolute",
+                    top: 48,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: "#0D0F14",
+                    borderTopLeftRadius: 14,
+                    borderTopRightRadius: 14,
+                    overflow: "hidden",
+                  },
+                  episodeSheetStyle,
+                ]}
+              >
+                <ScrollView
+                  className="flex-1"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+                  keyboardShouldPersistTaps="handled"
+                  scrollEventThrottle={16}
+                  onScroll={(e) => {
+                    episodeScrollOffset.current = e.nativeEvent.contentOffset.y;
+                  }}
+                  bounces={episodeScrollOffset.current > 0}
+                >
               {/* Hero image with gradient overlay and metadata */}
               <View className="relative" style={{ aspectRatio: 16 / 9 }}>
                 {selectedEpisode.episode.stillPath ? (
@@ -1758,6 +1731,11 @@ export default function ShowScreen() {
                     <Ionicons name="tv-outline" size={40} color="#3b3f4a" />
                   </View>
                 )}
+
+                {/* Drag indicator overlaid on image */}
+                <View style={{ position: "absolute", top: 6, left: 0, right: 0, alignItems: "center", zIndex: 10 }}>
+                  <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.35)" }} />
+                </View>
 
                 <LinearGradient
                   colors={["rgba(13, 15, 20, 0.4)", "transparent", "rgba(13, 15, 20, 0.85)", "#0D0F14"]}
@@ -1775,9 +1753,7 @@ export default function ShowScreen() {
                   }}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setEpisodeSheetVisible(false);
-                    setEpisodeReviewExpanded(false);
-                    setEpisodeReviewText("");
+                    closeEpisodeSheet();
                   }}
                 >
                   <Ionicons name="close" size={18} color="white" />
@@ -2117,10 +2093,11 @@ export default function ShowScreen() {
                 )}
               </View>
             </ScrollView>
+              </Animated.View>
+            </GestureDetector>
           </View>
           );
         })()}
-      </Modal>
     </View>
   );
 }

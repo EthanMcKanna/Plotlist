@@ -13,29 +13,45 @@ export function Avatar({
   uri,
   label,
   size = 40,
+  glow = false,
 }: {
   uri?: string | null;
   label?: string | null;
   size?: number;
+  glow?: boolean;
 }) {
-  if (uri) {
-    return (
-      <Image
-        source={{ uri }}
-        style={{ width: size, height: size, borderRadius: size / 2 }}
-        contentFit="cover"
-      />
-    );
-  }
-
-  const fallback = initials(label);
-
-  return (
+  const avatar = uri ? (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size, borderRadius: size / 2 }}
+      contentFit="cover"
+    />
+  ) : (
     <View
       className="items-center justify-center rounded-full bg-dark-elevated"
       style={{ width: size, height: size }}
     >
-      <Text className="text-xs font-semibold text-text-secondary">{fallback}</Text>
+      <Text className="text-xs font-semibold text-text-secondary">
+        {initials(label)}
+      </Text>
     </View>
   );
+
+  if (glow) {
+    return (
+      <View
+        style={{
+          shadowColor: "#0ea5e9",
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.25,
+          shadowRadius: 20,
+          borderRadius: size / 2,
+        }}
+      >
+        {avatar}
+      </View>
+    );
+  }
+
+  return avatar;
 }

@@ -28,14 +28,14 @@ export function ReleaseCalendarPreview() {
   );
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !preview || preview.staleShowIds.length === 0) {
       return;
     }
 
     void refreshForMe({}).catch(() => {
       // Keep Home rendering even if the refresh fails.
     });
-  }, [isAuthenticated, refreshForMe]);
+  }, [isAuthenticated, preview, refreshForMe]);
 
   if (!isAuthenticated || !preview) {
     return null;
