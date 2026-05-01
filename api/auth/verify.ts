@@ -5,6 +5,7 @@ import { withJsonRoute, json } from "../_lib/http";
 import { ensurePhoneIdentity, createSession } from "../_lib/auth";
 import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
 import { enforceRateLimit } from "../_lib/rate-limit";
+import { setSessionCookies } from "../_lib/session-cookies";
 import { verifyPhoneVerificationCode } from "../_lib/twilio";
 import { upsertPhoneUser } from "../_lib/users";
 
@@ -43,6 +44,7 @@ export default withJsonRoute(requestSchema, async ({ body, res }) => {
   await ensurePhoneIdentity(user.id, normalizedPhone);
 
   const session = await createSession(user.id);
+  setSessionCookies(res, session);
   return json(res, 200, {
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
