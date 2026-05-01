@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { authSessions, userIdentities, users } from "../../db/schema";
 import { db } from "./db";
@@ -220,18 +220,17 @@ export async function refreshSession(refreshToken: string) {
   const sessions = await db
     .select()
     .from(authSessions)
-    .where(
-      and(
-        eq(authSessions.id, payload.sessionId),
-        eq(authSessions.userId, payload.userId),
-        isNull(authSessions.revokedAt),
-        gt(authSessions.expiresAt, now),
-      ),
-    )
+    .where(eq(authSessions.id, payload.sessionId))
     .limit(1);
 
   const session = sessions[0];
-  if (!session || !safeEqual(session.refreshTokenHash, tokenHash)) {
+  if (
+    !session ||
+    session.userId !== payload.userId ||
+    session.revokedAt !== null ||
+    session.expiresAt <= now ||
+    !safeEqual(session.refreshTokenHash, tokenHash)
+  ) {
     throw new ApiError(401, "invalid_refresh_token", "Invalid refresh token");
   }
 
