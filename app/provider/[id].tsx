@@ -6,16 +6,16 @@ import {
   Text,
   View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useAction, useConvexAuth } from "convex/react";
+import { useAction, useAuth } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Poster } from "../../components/Poster";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 
 const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
 
@@ -54,7 +54,7 @@ export default function ProviderScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const providerId = typeof params.id === "string" ? params.id : "";
   const provider = PROVIDERS[providerId];
 

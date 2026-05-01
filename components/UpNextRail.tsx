@@ -5,9 +5,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQuery } from "convex/react";
-import type { Id } from "../convex/_generated/dataModel";
-import { api } from "../convex/_generated/api";
+import { useMutation, useQuery } from "../lib/plotlist/react";
+import type { Id } from "../lib/plotlist/types";
+import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
 
 type UpNextItem = {

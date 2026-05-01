@@ -12,13 +12,13 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
-import { useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { FlashList } from "../../components/FlashList";
+import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { useRouter } from "expo-router";
 
 import { Screen } from "../../components/Screen";
 import { EmptyState } from "../../components/EmptyState";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -26,7 +26,7 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 
 export default function ListsScreen() {
   const router = useRouter();
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me);
   const {
     results: lists,

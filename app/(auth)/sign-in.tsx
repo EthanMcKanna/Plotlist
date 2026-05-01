@@ -11,8 +11,6 @@ import {
   View,
 } from "react-native";
 import { Image } from "expo-image";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { useAction, useConvexAuth } from "convex/react";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -37,8 +35,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { formatPhoneNumber, normalizePhoneNumber } from "../../lib/phone";
+import { useAuthActions } from "../../lib/plotlist/auth";
+import { useAction, useAuth } from "../../lib/plotlist/react";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -368,9 +368,12 @@ function CodeCells({
 export default function SignInScreen() {
   const { signIn } = useAuthActions();
   const startVerification = useAction(api.phone.startVerification);
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const DismissContainer = Platform.OS === "web" ? View : Pressable;
+  const dismissContainerProps =
+    Platform.OS === "web" ? {} : { onPress: Keyboard.dismiss };
 
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
@@ -486,7 +489,7 @@ export default function SignInScreen() {
           className="flex-1 justify-end"
           pointerEvents="box-none"
         >
-          <Pressable onPress={Keyboard.dismiss}>
+          <DismissContainer {...dismissContainerProps}>
             <View
               className="px-7"
               style={{ paddingBottom: insets.bottom + 20 }}
@@ -653,7 +656,7 @@ export default function SignInScreen() {
                 </Animated.View>
               )}
             </View>
-          </Pressable>
+          </DismissContainer>
         </View>
 
         <Animated.View style={keyboardSpacerStyle} pointerEvents="none" />

@@ -10,9 +10,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useAction, useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
@@ -26,7 +26,7 @@ import { Screen } from "../../components/Screen";
 import { SearchResultRow } from "../../components/SearchResultRow";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { UserRow } from "../../components/UserRow";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { setContactsSyncDismissed } from "../../lib/preferences";
@@ -82,7 +82,7 @@ function SectionLine({
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const hasProfile = Boolean(me?._id);
   const params = useLocalSearchParams();

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Alert, Text, View } from "react-native";
-import { useAction, useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
@@ -9,9 +8,10 @@ import { EmptyState } from "../../components/EmptyState";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { UserRow } from "../../components/UserRow";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
 
 export default function OnboardingFollow() {
@@ -31,7 +31,7 @@ export default function OnboardingFollow() {
 
   const handleContinue = async () => {
     await setOnboardingStep({ step: "shows" });
-    router.replace("/(onboarding)/shows");
+    router.replace("/shows");
   };
 
   const handleSkip = async () => {

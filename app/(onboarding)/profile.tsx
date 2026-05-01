@@ -3,14 +3,14 @@ import { Alert, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
-import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
 import { PrimaryButton } from "../../components/PrimaryButton";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
+import { useMutation, useQuery } from "../../lib/plotlist/react";
 
 export default function OnboardingProfile() {
   const router = useRouter();
@@ -45,7 +45,7 @@ export default function OnboardingProfile() {
         username: username || undefined,
       });
       await setOnboardingStep({ step: "follow" });
-      router.replace("/(onboarding)/follow");
+      router.replace("/follow");
     } catch (error) {
       Alert.alert("Could not save", String(error));
     } finally {

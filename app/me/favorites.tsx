@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "../../lib/plotlist/react";
 import { useRouter } from "expo-router";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -14,8 +14,8 @@ import Animated, {
 
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 
 const TV_GENRES = [
   "Action & Adventure",

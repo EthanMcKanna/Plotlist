@@ -1,14 +1,14 @@
 import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams } from "expo-router";
-import { usePaginatedQuery, useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 
 import { Screen } from "../../components/Screen";
 import { EmptyState } from "../../components/EmptyState";
 import { UserRow } from "../../components/UserRow";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 
 export default function FollowingScreen() {
   const params = useLocalSearchParams();

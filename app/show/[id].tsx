@@ -14,20 +14,20 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
   useAction,
-  useConvexAuth,
+  useAuth,
   useMutation,
   usePaginatedQuery,
   useQuery,
-} from "convex/react";
-import { FlashList } from "@shopify/flash-list";
+} from "../../lib/plotlist/react";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { ReviewRow } from "../../components/ReviewRow";
 import { StarRating } from "../../components/StarRating";
@@ -60,12 +60,12 @@ export default function ShowScreen() {
   const openEpisode = typeof params.openEpisode === "string" ? Number(params.openEpisode) : undefined;
   const [deepLinkConsumed, setDeepLinkConsumed] = useState(false);
 
-  const { isAuthenticated } = useConvexAuth();
-  const show = useQuery(api.shows.get, { showId });
+  const { isAuthenticated } = useAuth();
+  const show = useQuery(api.shows.get, showId ? { showId } : "skip");
   const me = useQuery(api.users.me);
   const watchState = useQuery(
     api.watchStates.getForShow,
-    isAuthenticated ? { showId } : "skip"
+    isAuthenticated && showId ? { showId } : "skip"
   );
   const {
     results: reviews,
@@ -73,7 +73,7 @@ export default function ShowScreen() {
     loadMore: loadMoreReviews,
   } = usePaginatedQuery(
     api.reviews.listForShowDetailed,
-    { showId },
+    showId ? { showId } : "skip",
     { initialNumItems: 20 }
   );
   const { results: lists } = usePaginatedQuery(
@@ -111,7 +111,7 @@ export default function ShowScreen() {
   const removeEpisodeRating = useMutation(api.reviews.removeEpisodeRating);
   const myEpisodeRatings = useQuery(
     api.reviews.getMyEpisodeRatings,
-    isAuthenticated ? { showId } : "skip",
+    isAuthenticated && showId ? { showId } : "skip",
   );
   const myEpisodeRatingMap = useMemo(() => {
     const map = new Map<string, { rating: number; reviewText?: string }>();
@@ -130,7 +130,7 @@ export default function ShowScreen() {
   const toggleListItem = useMutation(api.listItems.toggle);
   const listMembership = useQuery(
     api.listItems.getShowMembership,
-    isAuthenticated ? { showId } : "skip",
+    isAuthenticated && showId ? { showId } : "skip",
   );
   const memberSet = useMemo(
     () => new Set(listMembership ?? []),
@@ -138,7 +138,7 @@ export default function ShowScreen() {
   );
   const episodeProgress = useQuery(
     api.episodeProgress.getProgressForShow,
-    isAuthenticated ? { showId } : "skip",
+    isAuthenticated && showId ? { showId } : "skip",
   );
   const watchedEpisodeSet = useMemo(() => {
     const set = new Set<string>();
@@ -193,7 +193,7 @@ export default function ShowScreen() {
   const activeShowExternalIdRef = useRef<string | null>(null);
   const episodeCommunityReviews = useQuery(
     api.reviews.listForEpisodeDetailed,
-    selectedEpisode
+    selectedEpisode && showId
       ? {
           showId,
           seasonNumber: selectedEpisode.seasonNumber,
@@ -203,7 +203,7 @@ export default function ShowScreen() {
   );
   const episodeStats = useQuery(
     api.reviews.getEpisodeStats,
-    selectedEpisode
+    selectedEpisode && showId
       ? {
           showId,
           seasonNumber: selectedEpisode.seasonNumber,
@@ -214,10 +214,13 @@ export default function ShowScreen() {
 
   useEffect(() => {
     const fetchExtendedDetails = async () => {
-      if (!show?.externalId) return;
+      if (!showId || !show?.externalId) {
+        setLoadingDetails(false);
+        return;
+      }
       setLoadingDetails(true);
       try {
-        const details = await getExtendedDetails({ externalId: show.externalId });
+        const details = await getExtendedDetails({ showId });
         setExtendedDetails(details);
       } catch (error) {
         console.error("Failed to fetch extended details:", error);
@@ -226,7 +229,7 @@ export default function ShowScreen() {
       }
     };
     fetchExtendedDetails();
-  }, [show?.externalId, getExtendedDetails]);
+  }, [show?.externalId, getExtendedDetails, showId]);
 
   useEffect(() => {
     if (!isAuthenticated || !watchState || !episodeProgress || !extendedDetails) {
@@ -406,7 +409,7 @@ export default function ShowScreen() {
         setSeasonRequestState(seasonNumber, "loading");
         try {
           const details = await getSeasonDetails({
-            externalId,
+            showId,
             seasonNumber,
           });
           if (activeShowExternalIdRef.current !== externalId) {
@@ -435,7 +438,7 @@ export default function ShowScreen() {
       );
       return await queuedLoad;
     },
-    [cacheSeasonDetails, getSeasonDetails, setSeasonRequestState, show?.externalId],
+    [cacheSeasonDetails, getSeasonDetails, setSeasonRequestState, show?.externalId, showId],
   );
 
   const ensureSeasonDetailsLoaded = useCallback(

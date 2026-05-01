@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { useRouter } from "expo-router";
 
 import { Screen } from "../../components/Screen";
@@ -11,7 +11,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { SectionHeader } from "../../components/SectionHeader";
 import { SearchResultRow } from "../../components/SearchResultRow";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 
 const STARTER_THEMES = [
   "slow-burn sci-fi",

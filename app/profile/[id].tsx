@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StatusBar, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAction, useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useAction, useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,8 +13,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { ReviewRow } from "../../components/ReviewRow";
 import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Avatar } from "../../components/Avatar";
 import { TasteMatchSummary } from "../../components/TasteMatchSummary";
@@ -141,7 +141,7 @@ export default function ProfileScreen() {
   const userId = typeof params.id === "string" ? params.id : "";
 
   const userIdValue = userId as Id<"users">;
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
 
   const me = useQuery(api.users.me);
   const profile = useQuery(api.users.profile, {

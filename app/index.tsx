@@ -1,5 +1,5 @@
-import { LoadingScreen } from "../components/LoadingScreen";
+import { Redirect } from "expo-router";
 
 export default function Index() {
-  return <LoadingScreen />;
+  return <Redirect href="/home" />;
 }

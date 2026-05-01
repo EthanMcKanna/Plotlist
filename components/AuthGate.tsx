@@ -1,24 +1,22 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
 import { usePathname, useRouter, useSegments } from "expo-router";
-import { useConvexAuth } from "convex/react";
 import { LoadingScreen } from "./LoadingScreen";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { api } from "../lib/plotlist/api";
 import { clearAuthTokens } from "../lib/authStorage";
+import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 
 // Set to true to force clear tokens on next app load (for key rotation)
 const FORCE_CLEAR_TOKENS = false;
 let hasCleared = false;
 
 const ONBOARDING_ROUTES = {
-  profile: "/(onboarding)/profile",
-  follow: "/(onboarding)/follow",
-  shows: "/(onboarding)/shows",
+  profile: "/profile",
+  follow: "/follow",
+  shows: "/shows",
 } as const;
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
   const pathname = usePathname();
@@ -55,7 +53,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const onExpectedOnboardingScreen =
       pathname === ONBOARDING_ROUTES[onboardingStep];
 
-    if (!isAuthenticated && !inAuthGroup && Platform.OS !== "web") {
+    if (!isAuthenticated && !inAuthGroup) {
       router.replace("/sign-in");
       return;
     }
@@ -95,7 +93,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     hasEnsuredProfile.current = true;
     setIsEnsuringProfile(true);
     void ensureProfile({})
-      .catch(async (error) => {
+      .catch(async (error: unknown) => {
         console.warn("[AuthGate] Failed to ensure profile", error);
         if (hasHandledAuthFailure.current) {
           return;

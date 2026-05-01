@@ -1,12 +1,12 @@
 import { Pressable, Text, View } from "react-native";
-import { useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { Screen } from "../../components/Screen";
 import { Avatar } from "../../components/Avatar";
+import { useQuery } from "../../lib/plotlist/react";
 
 type MenuItemDef = {
   icon: keyof typeof Ionicons.glyphMap;

@@ -2,14 +2,14 @@ import { useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "../../lib/plotlist/react";
 
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { LikeButton } from "../../components/LikeButton";
 import { Comments } from "../../components/Comments";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../lib/plotlist/api";
+import type { Id } from "../../lib/plotlist/types";
 import { formatDate } from "../../lib/format";
 import { ReportModal } from "../../components/ReportModal";
 

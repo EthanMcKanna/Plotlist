@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
+import { useAction, useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
@@ -20,7 +20,7 @@ import { ReleaseCalendarPreview } from "../../components/ReleaseCalendarPreview"
 import { UpNextRail } from "../../components/UpNextRail";
 import { SecondaryButton } from "../../components/SecondaryButton";
 import { UserRow } from "../../components/UserRow";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
@@ -140,7 +140,7 @@ type SectionData =
   | { type: "feed-empty" };
 
 export default function HomeScreen() {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [syncingContacts, setSyncingContacts] = useState(false);
   const [contactsSyncDismissed, setContactsSyncDismissedState] = useState<boolean | null>(null);

@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "../../lib/plotlist/react";
 import { useRouter } from "expo-router";
 
-import { api } from "../../convex/_generated/api";
+import { api } from "../../lib/plotlist/api";
 import { LoadingScreen } from "../../components/LoadingScreen";
 
 export default function OnboardingIndex() {
@@ -21,10 +21,10 @@ export default function OnboardingIndex() {
 
     const nextRoute =
       step === "profile"
-        ? "/(onboarding)/profile"
+        ? "/profile"
         : step === "follow"
-          ? "/(onboarding)/follow"
-          : "/(onboarding)/shows";
+          ? "/follow"
+          : "/shows";
     router.replace(nextRoute);
   }, [me, router]);
 

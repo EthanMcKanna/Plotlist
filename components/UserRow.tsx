@@ -2,10 +2,10 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { useMutation } from "convex/react";
 
-import { api } from "../convex/_generated/api";
-import type { Id } from "../convex/_generated/dataModel";
+import { api } from "../lib/plotlist/api";
+import type { Id } from "../lib/plotlist/types";
+import { useMutation } from "../lib/plotlist/react";
 import { Avatar } from "./Avatar";
 import { TasteMatchSummary } from "./TasteMatchSummary";
 

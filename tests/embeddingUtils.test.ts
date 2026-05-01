@@ -6,7 +6,7 @@ import {
   mapGenreIdsToNames,
   mergeHybridCandidates,
   weightedCentroid,
-} from "../convex/embeddingUtils";
+} from "../lib/plotlist/embeddingUtils";
 
 describe("embeddingUtils", () => {
   it("maps TMDB genre ids to readable names", () => {

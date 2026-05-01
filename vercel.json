@@ -1,0 +1,45 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/((?!api/.*).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/internal/cron/cleanup-tmdb-cache",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/internal/cron/hot-show-catalog-refresh",
+      "schedule": "10 */6 * * *"
+    },
+    {
+      "path": "/api/internal/cron/hot-embedding-refresh",
+      "schedule": "45 */6 * * *"
+    },
+    {
+      "path": "/api/internal/cron/hot-episode-cache-refresh",
+      "schedule": "20 */12 * * *"
+    },
+    {
+      "path": "/api/internal/cron/full-show-catalog-refresh",
+      "schedule": "0 9 * * 0"
+    },
+    {
+      "path": "/api/internal/cron/full-embedding-refresh",
+      "schedule": "30 10 * * 0"
+    },
+    {
+      "path": "/api/internal/cron/full-episode-cache-refresh",
+      "schedule": "0 12 * * 0"
+    },
+    {
+      "path": "/api/internal/cron/tracked-release-refresh",
+      "schedule": "40 */6 * * *"
+    }
+  ]
+}

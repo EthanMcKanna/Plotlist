@@ -6,7 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useAction, useConvexAuth, useQuery } from "convex/react";
+import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,7 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { EmptyState } from "../components/EmptyState";
 import { Screen } from "../components/Screen";
-import { api } from "../convex/_generated/api";
+import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import {
   getLocalDateString,
@@ -269,7 +269,7 @@ function ReleaseCard({
 /* ─── Main screen ─────────────────────────────────────────────────── */
 
 export default function CalendarScreen() {
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated } = useAuth();
   const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
   const [view, setView] = useState<ReleaseCalendarView>("upcoming");
   const today = useMemo(() => getLocalDateString(), []);

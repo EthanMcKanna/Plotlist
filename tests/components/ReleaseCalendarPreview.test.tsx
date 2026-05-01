@@ -15,8 +15,8 @@ jest.mock("@expo/vector-icons", () => ({
   Ionicons: ({ name }: { name?: string }) => name ?? "icon",
 }));
 
-jest.mock("convex/react", () => ({
-  useConvexAuth: () => ({ isAuthenticated: true }),
+jest.mock("../../lib/plotlist/react", () => ({
+  useAuth: () => ({ isAuthenticated: true }),
   useAction: () => mockRefreshForMe,
   useQuery: (...args: [unknown, unknown?]) => mockUseQuery(...args),
 }));

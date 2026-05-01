@@ -6,12 +6,12 @@ export default tseslint.config(
   {
     ignores: [
       ".expo/**",
+      ".vercel/**",
       "android/**",
       "ios/**",
       "node_modules/**",
       "dist/**",
       "web-build/**",
-      "convex/_generated/**",
     ],
   },
   js.configs.recommended,
