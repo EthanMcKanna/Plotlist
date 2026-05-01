@@ -130,6 +130,65 @@ function showToDoc(show: typeof shows.$inferSelect | null | undefined) {
   return toDoc(show);
 }
 
+function matchesReleaseView(row: typeof releaseEvents.$inferSelect, view: string, today: string) {
+  if (row.airDate < today) {
+    return false;
+  }
+
+  switch (view) {
+    case "tonight":
+      return row.airDate === today;
+    case "premieres":
+      return row.isPremiere;
+    case "finales":
+      return row.isSeasonFinale;
+    case "upcoming":
+    default:
+      return true;
+  }
+}
+
+function buildReleaseGroups(
+  rows: Array<typeof releaseEvents.$inferSelect>,
+  showRows: Array<typeof shows.$inferSelect>,
+  args: {
+    limit?: number;
+    today: string;
+    view?: string;
+  },
+) {
+  const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
+  const items = rows
+    .filter((row) => matchesReleaseView(row, args.view ?? "upcoming", args.today))
+    .map((row) => ({
+      ...toDoc(row),
+      show: showMap.get(row.showId) ?? null,
+      providers: [],
+    }))
+    .filter((item) => item.show)
+    .sort((left, right) => {
+      return (
+        left.airDateTs - right.airDateTs ||
+        left.show.title.localeCompare(right.show.title) ||
+        left.seasonNumber - right.seasonNumber ||
+        left.episodeNumber - right.episodeNumber
+      );
+    })
+    .slice(0, Math.max(1, Math.min(args.limit ?? 25, 100)));
+
+  const groups: Array<{ airDate: string; airDateTs: number; items: any[] }> = [];
+  for (const item of items) {
+    const previous = groups[groups.length - 1];
+    if (previous?.airDate === item.airDate) {
+      previous.items.push(item);
+    } else {
+      groups.push({ airDate: item.airDate, airDateTs: item.airDateTs, items: [item] });
+    }
+  }
+
+  return groups;
+}
+
 function listToDoc(list: typeof lists.$inferSelect | null | undefined) {
   return toDoc(list);
 }
@@ -959,25 +1018,68 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const rows = await db.select().from(userTastePreferences).where(eq(userTastePreferences.userId, user.id)).limit(1);
     return rows[0] ? toDoc(rows[0]) : { favoriteShowIds: [], favoriteThemes: [] };
   },
-  "releaseCalendar:getHomePreview": async ({ req }) => {
+  "releaseCalendar:getHomePreview": async ({ args, req }) => {
     const user = await requireAuthUser(req);
+    const parsed = z.object({ today: z.string().optional() }).parse(args ?? {});
     const states = await db.select().from(watchStates).where(eq(watchStates.userId, user.id));
     const showIds = states.map((state) => state.showId);
-    if (!showIds.length) return [];
+    if (!showIds.length) {
+      return {
+        tonightGroups: [],
+        upcomingGroups: [],
+        totalTonight: 0,
+        totalUpcoming: 0,
+        staleShowIds: [],
+        selectedProviders: [],
+      };
+    }
     const rows = await db.select().from(releaseEvents).where(and(inArray(releaseEvents.showId, showIds), gte(releaseEvents.airDateTs, Date.now()))).orderBy(asc(releaseEvents.airDateTs)).limit(10);
     const showRows = rows.length ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId))) : [];
-    const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)]));
-    return rows.map((row) => ({ ...toDoc(row), show: showMap.get(row.showId) ?? null }));
+    const today = parsed.today ?? new Date().toISOString().slice(0, 10);
+    const tonightGroups = buildReleaseGroups(rows, showRows, { today, view: "tonight", limit: 6 });
+    const upcomingGroups = buildReleaseGroups(rows, showRows, { today, view: "upcoming", limit: 6 });
+    return {
+      tonightGroups,
+      upcomingGroups,
+      totalTonight: tonightGroups.reduce((sum, group) => sum + group.items.length, 0),
+      totalUpcoming: upcomingGroups.reduce((sum, group) => sum + group.items.length, 0),
+      staleShowIds: [],
+      selectedProviders: [],
+    };
   },
   "releaseCalendar:listForMe": async ({ args, req }) => {
     const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        today: z.string().optional(),
+        view: z.string().optional(),
+        limit: z.number().int().positive().optional(),
+      })
+      .parse(args ?? {});
     const states = await db.select().from(watchStates).where(eq(watchStates.userId, user.id));
     const showIds = states.map((state) => state.showId);
-    if (!showIds.length) return pageRows([], args);
+    const empty = {
+      groups: [],
+      selectedProviders: [],
+      totalItems: 0,
+      staleShowIds: [],
+      continueCursor: "0",
+      isDone: true,
+    };
+    if (!showIds.length) return empty;
     const rows = await db.select().from(releaseEvents).where(and(inArray(releaseEvents.showId, showIds), gte(releaseEvents.airDateTs, Date.now()))).orderBy(asc(releaseEvents.airDateTs));
     const showRows = rows.length ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId))) : [];
-    const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)]));
-    return pageRows(rows.map((row) => ({ ...toDoc(row), show: showMap.get(row.showId) ?? null })), args);
+    const today = parsed.today ?? new Date().toISOString().slice(0, 10);
+    const groups = buildReleaseGroups(rows, showRows, {
+      today,
+      view: parsed.view ?? "upcoming",
+      limit: parsed.limit ?? 100,
+    });
+    return {
+      ...empty,
+      groups,
+      totalItems: groups.reduce((sum, group) => sum + group.items.length, 0),
+    };
   },
   "reports:listOpen": async ({ args, req }) => {
     const user = await requireAuthUser(req);

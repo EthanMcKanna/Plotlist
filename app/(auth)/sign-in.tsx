@@ -324,41 +324,46 @@ function CodeCells({
 }) {
   const ref = useRef<TextInput>(null);
   return (
-    <Pressable onPress={() => ref.current?.focus()}>
-      <View className="flex-row gap-2.5">
+    <Pressable onPress={() => ref.current?.focus()} style={{ width: "100%" }}>
+      <View className="flex-row gap-2.5" style={{ width: "100%" }}>
         {Array.from({ length: CODE_LEN }).map((_, i) => {
           const ch = value[i];
           const active = value.length === i;
           return (
-            <Animated.View
+            <View
               key={i}
-              entering={FadeInDown.delay(i * 50 + 80).springify()}
-              className={`flex-1 items-center justify-center rounded-xl border-2 py-3.5 ${
-                active
-                  ? "border-brand-400 bg-brand-500/10"
-                  : ch
-                    ? "border-brand-500/30 bg-dark-elevated"
-                    : "border-dark-border bg-dark-card"
-              }`}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: 58,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: active ? "#38bdf8" : ch ? "rgba(14, 165, 233, 0.3)" : "#252A35",
+                backgroundColor: active ? "rgba(14, 165, 233, 0.1)" : ch ? "#171B24" : "#11151D",
+              }}
             >
               <Text
                 className={`text-2xl font-bold ${ch ? "text-text-primary" : ""}`}
               >
                 {ch ?? ""}
               </Text>
-            </Animated.View>
+            </View>
           );
         })}
       </View>
       <TextInput
         ref={ref}
+        accessibilityLabel="Verification code"
+        testID="verification-code-input"
         value={value}
         onChangeText={(t) => onChange(t.replace(/\D/g, "").slice(0, CODE_LEN))}
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         autoComplete="sms-otp"
         maxLength={CODE_LEN}
-        style={{ position: "absolute", opacity: 0, height: 0, width: 0 }}
+        style={{ position: "absolute", opacity: 0, height: 1, width: 1, left: 0, top: 0 }}
       />
     </Pressable>
   );
