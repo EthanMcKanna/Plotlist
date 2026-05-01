@@ -442,6 +442,8 @@ export default function SignInScreen() {
           "Verification failed",
           "That code was invalid or expired. Request a new code and try again.",
         );
+      } else {
+        router.replace("/home");
       }
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
