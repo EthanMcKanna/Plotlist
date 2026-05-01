@@ -13,6 +13,7 @@ export type StoredSession = {
 };
 
 const sessionClearedListeners = new Set<() => void>();
+let memorySession: StoredSession | null = null;
 
 export function subscribeToSessionCleared(listener: () => void) {
   sessionClearedListeners.add(listener);
@@ -28,6 +29,10 @@ function notifySessionCleared() {
 }
 
 export async function getStoredSession(): Promise<StoredSession | null> {
+  if (memorySession) {
+    return memorySession;
+  }
+
   const [accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt] =
     await Promise.all([
       authStorage.getItem(ACCESS_TOKEN_KEY),
@@ -45,15 +50,17 @@ export async function getStoredSession(): Promise<StoredSession | null> {
     return null;
   }
 
-  return {
+  memorySession = {
     accessToken,
     refreshToken,
     accessTokenExpiresAt: Number(accessTokenExpiresAt),
     refreshTokenExpiresAt: Number(refreshTokenExpiresAt),
   };
+  return memorySession;
 }
 
 export async function setStoredSession(session: StoredSession) {
+  memorySession = session;
   await Promise.all([
     authStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken),
     authStorage.setItem(REFRESH_TOKEN_KEY, session.refreshToken),
@@ -69,6 +76,7 @@ export async function setStoredSession(session: StoredSession) {
 }
 
 export async function clearStoredSession() {
+  memorySession = null;
   await Promise.all([
     authStorage.removeItem(ACCESS_TOKEN_KEY),
     authStorage.removeItem(REFRESH_TOKEN_KEY),

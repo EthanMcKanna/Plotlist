@@ -8,25 +8,61 @@ type TokenStorage = {
 
 const service = "plotlist";
 const nativeFallbackStorage = new Map<string, string>();
+const webFallbackStorage = new Map<string, string>();
 
 // Sanitize key for SecureStore (only allow alphanumeric, dots, dashes, underscores)
 function sanitizeKey(key: string) {
   return key.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function getCookieItem(key: string) {
+  if (typeof document === "undefined") return null;
+  const encodedKey = encodeURIComponent(key);
+  const entry = document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${encodedKey}=`));
+  if (!entry) return null;
+  return decodeURIComponent(entry.slice(encodedKey.length + 1));
+}
+
+function setCookieItem(key: string, value: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(
+    value,
+  )}; path=/; max-age=2592000; samesite=lax; secure`;
+}
+
+function removeCookieItem(key: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${encodeURIComponent(
+    key,
+  )}=; path=/; max-age=0; samesite=lax; secure`;
+}
+
 // Web fallback using localStorage
 const webStorage: TokenStorage = {
   getItem: async (key) => {
     if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(sanitizeKey(key));
+    const sanitized = sanitizeKey(key);
+    return (
+      webFallbackStorage.get(sanitized) ??
+      window.localStorage.getItem(sanitized) ??
+      getCookieItem(sanitized)
+    );
   },
   setItem: async (key, value) => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(sanitizeKey(key), value);
+    const sanitized = sanitizeKey(key);
+    webFallbackStorage.set(sanitized, value);
+    window.localStorage.setItem(sanitized, value);
+    setCookieItem(sanitized, value);
   },
   removeItem: async (key) => {
     if (typeof window === "undefined") return;
-    window.localStorage.removeItem(sanitizeKey(key));
+    const sanitized = sanitizeKey(key);
+    webFallbackStorage.delete(sanitized);
+    window.localStorage.removeItem(sanitized);
+    removeCookieItem(sanitized);
   },
 };
 
