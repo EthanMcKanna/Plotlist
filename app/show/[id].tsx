@@ -359,6 +359,14 @@ export default function ShowScreen() {
         }
       : "skip",
   );
+  const episodeCommunityReviewItems = useMemo(() => {
+    if (Array.isArray(episodeCommunityReviews)) {
+      return episodeCommunityReviews;
+    }
+    return episodeCommunityReviews?.results ?? episodeCommunityReviews?.page ?? [];
+  }, [episodeCommunityReviews]);
+  const hasEpisodeRatingStats =
+    typeof episodeStats?.averageRating === "number" && (episodeStats.reviewCount ?? episodeStats.count ?? 0) > 0;
 
   useEffect(() => {
     const fetchExtendedDetails = async () => {
@@ -2127,27 +2135,27 @@ export default function ShowScreen() {
                 )}
 
                 {/* ─── Community Reviews ─── */}
-                {(episodeStats || (episodeCommunityReviews && episodeCommunityReviews.length > 0)) && (
+                {(hasEpisodeRatingStats || episodeCommunityReviewItems.length > 0) && (
                   <View className="mt-6">
                     <View className="flex-row items-center gap-2.5">
                       <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
                         Community
                       </Text>
-                      {episodeStats && (
+                      {hasEpisodeRatingStats && (
                         <View className="flex-row items-center gap-1 rounded-full px-2 py-0.5" style={{ backgroundColor: "rgba(251, 191, 36, 0.08)" }}>
                           <Ionicons name="star" size={10} color="#fbbf24" />
                           <Text className="text-[11px] font-semibold" style={{ color: "#fcd34d" }}>
                             {episodeStats.averageRating.toFixed(1)}
                           </Text>
                           <Text className="text-[11px] text-text-tertiary">
-                            ({episodeStats.reviewCount})
+                            ({episodeStats.reviewCount ?? episodeStats.count})
                           </Text>
                         </View>
                       )}
                     </View>
-                    {episodeCommunityReviews && episodeCommunityReviews.length > 0 && (
+                    {episodeCommunityReviewItems.length > 0 && (
                       <View className="mt-3 gap-3">
-                        {episodeCommunityReviews.map((item: any) => (
+                        {episodeCommunityReviewItems.map((item: any) => (
                           <View
                             key={item.review._id}
                             className="rounded-2xl p-3.5"

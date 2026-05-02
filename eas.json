@@ -12,12 +12,17 @@
       "distribution": "internal"
     },
     "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://plotlist.app"
+      },
       "autoIncrement": true
     }
   },
   "submit": {
     "production": {
-      "ios": {}
+      "ios": {
+        "ascAppId": "6760368159"
+      }
     }
   }
 }
