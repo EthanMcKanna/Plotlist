@@ -1,11 +1,9 @@
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from "react";
 
-import { authApi } from "../api/client";
-import { getApiBaseUrl } from "../api/env";
+import { authApi, refreshSessionIfNeeded } from "../api/client";
 import {
   clearStoredSession,
   getStoredSession,
-  setStoredSession,
   type StoredSession,
   subscribeToSessionCleared,
 } from "../api/session";
@@ -27,24 +25,11 @@ const FALLBACK_SESSION: PlotlistSessionContextValue = {
 const PlotlistSessionContext = createContext<PlotlistSessionContextValue | null>(null);
 
 async function validateStoredSession(session: StoredSession) {
-  const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      refreshToken: session.refreshToken,
-    }),
-  });
-
-  if (!response.ok) {
-    await clearStoredSession();
-    return null;
+  if (session.accessTokenExpiresAt > Date.now() + 30_000) {
+    return session;
   }
 
-  const nextSession = (await response.json()) as StoredSession;
-  await setStoredSession(nextSession);
-  return nextSession;
+  return await refreshSessionIfNeeded();
 }
 
 export function PlotlistSessionProvider({ children }: PropsWithChildren) {

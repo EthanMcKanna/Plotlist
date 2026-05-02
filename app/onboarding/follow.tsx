@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, Platform, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
@@ -13,6 +13,7 @@ import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
 
 export default function OnboardingFollow() {
   const router = useRouter();
@@ -28,14 +29,19 @@ export default function OnboardingFollow() {
     ) ?? [];
   const suggested = useQuery(api.users.suggested, hasProfile ? { limit: 10 } : "skip") ?? [];
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
+  const isWeb = Platform.OS === "web";
 
   const handleContinue = async () => {
-    await setOnboardingStep({ step: "shows" });
-    router.replace("/shows");
+    const result = await setOnboardingStep({ step: "shows" });
+    cacheOnboardingStep(result?.userId, "shows");
+    markOnboardingStep("shows");
+    router.replace("/onboarding/shows");
   };
 
   const handleSkip = async () => {
-    await setOnboardingStep({ step: "complete" });
+    const result = await setOnboardingStep({ step: "complete" });
+    cacheOnboardingStep(result?.userId, "complete");
+    markOnboardingStep("complete");
     router.replace("/home");
   };
 
@@ -60,24 +66,30 @@ export default function OnboardingFollow() {
         step={2}
         totalSteps={3}
         title="Find your people"
-        description="Sync contacts first, then follow a few people so your feed feels alive right away."
+        description={
+          isWeb
+            ? "Follow a few people so your feed feels alive right away. You can sync contacts later from the mobile app."
+            : "Sync contacts first, then follow a few people so your feed feels alive right away."
+        }
         onSkip={handleSkip}
       />
 
-      <View className="px-6 pt-6">
-        <ContactsSyncCard
-          title={contactStatus?.hasSynced ? "Contacts already synced" : "Sync your contacts"}
-          description="Plotlist uses your address book to surface people you already know. Raw numbers are never stored."
-          buttonLabel={contactStatus?.hasSynced ? "Resync contacts" : "Sync contacts"}
-          onPress={handleSyncContacts}
-          loading={isSyncingContacts}
-          meta={
-            contactStatus?.hasSynced
-              ? `${contactStatus.matchedCount} matches · ${contactStatus.inviteCount} invite-ready`
-              : null
-          }
-        />
-      </View>
+      {!isWeb ? (
+        <View className="px-6 pt-6">
+          <ContactsSyncCard
+            title={contactStatus?.hasSynced ? "Contacts already synced" : "Sync your contacts"}
+            description="Plotlist uses your address book to surface people you already know. Raw numbers are never stored."
+            buttonLabel={contactStatus?.hasSynced ? "Resync contacts" : "Sync contacts"}
+            onPress={handleSyncContacts}
+            loading={isSyncingContacts}
+            meta={
+              contactStatus?.hasSynced
+                ? `${contactStatus.matchedCount} matches · ${contactStatus.inviteCount} invite-ready`
+                : null
+            }
+          />
+        </View>
+      ) : null}
 
       <View className="px-6 pb-10">
         {contactMatches.length > 0 ? (

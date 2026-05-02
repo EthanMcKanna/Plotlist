@@ -1,4 +1,4 @@
-import { Alert, Pressable, Text, View } from "react-native";
+import { Alert, Platform, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -31,7 +31,7 @@ export function SimilarShowCard({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       if (showId) {
-        router.push(`/show/${showId}`);
+        router.push({ pathname: "/show/[id]", params: { id: showId } });
         return;
       }
       if (!externalId) {
@@ -53,8 +53,8 @@ export function SimilarShowCard({
     }
   };
 
-  return (
-    <Pressable onPress={handlePress} className="mr-4 w-32 active:opacity-80">
+  const content = (
+    <>
       <Poster uri={posterUrl ?? posterPath ?? undefined} size="md" />
       <Text className="mt-2 text-sm font-semibold text-text-primary" numberOfLines={2}>
         {title}
@@ -70,6 +70,37 @@ export function SimilarShowCard({
           {subtitle}
         </Text>
       ) : null}
+    </>
+  );
+
+  if (Platform.OS === "web" && showId) {
+    return (
+      <a
+        href={`/show/${showId}`}
+        aria-label={`Open ${title}`}
+        style={{
+          cursor: "pointer",
+          display: "block",
+          marginRight: 16,
+          textDecoration: "none",
+          width: 128,
+        }}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  const card = (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${title}`}
+      className="mr-4 w-32 active:opacity-80"
+    >
+      {content}
     </Pressable>
   );
+
+  return card;
 }

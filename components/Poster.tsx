@@ -18,6 +18,8 @@ export function Poster({
       source={uri ? { uri } : undefined}
       style={{ width: dimension, height: dimension * 1.5, borderRadius: 12 }}
       contentFit="cover"
+      cachePolicy="memory-disk"
+      priority="low"
       transition={200}
       className={className}
     />

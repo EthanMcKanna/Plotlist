@@ -2,17 +2,29 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSegments } from "expo-router";
 import { LoadingScreen } from "./LoadingScreen";
 import { api } from "../lib/plotlist/api";
-import { clearAuthTokens } from "../lib/authStorage";
+import { PlotlistApiError } from "../lib/api/client";
+import { clearStoredSession } from "../lib/api/session";
+import { getCachedOnboardingStep } from "../lib/onboardingCache";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
+
+function isAuthFailure(error: unknown): boolean {
+  if (error instanceof PlotlistApiError) {
+    return error.status === 401 || error.status === 403;
+  }
+  if (error instanceof Error) {
+    return error.message.toLowerCase().includes("not authenticated");
+  }
+  return false;
+}
 
 // Set to true to force clear tokens on next app load (for key rotation)
 const FORCE_CLEAR_TOKENS = false;
 let hasCleared = false;
 
 const ONBOARDING_ROUTES = {
-  profile: "/profile",
-  follow: "/follow",
-  shows: "/shows",
+  profile: "/onboarding/profile",
+  follow: "/onboarding/follow",
+  shows: "/onboarding/shows",
 } as const;
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -30,7 +42,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (FORCE_CLEAR_TOKENS && !hasCleared) {
       hasCleared = true;
-      clearAuthTokens();
+      void clearStoredSession();
     }
   }, []);
 
@@ -42,23 +54,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     const inAuthGroup =
       segments[0] === "(auth)" || pathname?.startsWith("/sign-in");
-    const inOnboardingGroup = segments[0] === "(onboarding)";
+    const inOnboardingGroup = segments[0] === "onboarding";
     const atRoot = pathname === "/";
+    const cachedOnboardingStep = getCachedOnboardingStep(me?._id ?? me?.id);
+    const effectiveOnboardingStep = cachedOnboardingStep ?? me?.onboardingStep;
     const onboardingStep: keyof typeof ONBOARDING_ROUTES =
-      isAuthenticated && me?.onboardingStep && me.onboardingStep !== "complete"
-        ? me.onboardingStep
+      isAuthenticated && effectiveOnboardingStep && effectiveOnboardingStep !== "complete"
+        ? effectiveOnboardingStep
         : "profile";
     const needsOnboarding =
-      isAuthenticated && (me?.onboardingStep ?? "profile") !== "complete";
-    const onExpectedOnboardingScreen =
-      pathname === ONBOARDING_ROUTES[onboardingStep];
+      isAuthenticated && (effectiveOnboardingStep ?? "profile") !== "complete";
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace("/sign-in");
       return;
     }
 
-    if (isAuthenticated && needsOnboarding && !onExpectedOnboardingScreen) {
+    if (isAuthenticated && needsOnboarding && !inOnboardingGroup) {
       router.replace(ONBOARDING_ROUTES[onboardingStep]);
       return;
     }
@@ -75,7 +87,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     isAuthenticated,
     isLoading,
     isProfileLoading,
+    me?.id,
     me?.onboardingStep,
+    me?._id,
     pathname,
     router,
     segments,
@@ -98,8 +112,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
         if (hasHandledAuthFailure.current) {
           return;
         }
+        if (!isAuthFailure(error)) {
+          hasEnsuredProfile.current = false;
+          return;
+        }
         hasHandledAuthFailure.current = true;
-        await clearAuthTokens();
+        await clearStoredSession();
+        if (typeof window !== "undefined" && typeof window.location?.assign === "function") {
+          window.location.assign("/sign-in");
+          return;
+        }
         router.replace("/sign-in");
       })
       .finally(() => {

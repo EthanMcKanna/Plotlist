@@ -38,7 +38,9 @@ async function parseError(response: Response) {
   );
 }
 
-async function refreshSessionIfNeeded() {
+let refreshSessionPromise: Promise<StoredSession | null> | null = null;
+
+export async function refreshSessionIfNeeded() {
   const session = await getStoredSession();
   if (!session) {
     return null;
@@ -53,6 +55,18 @@ async function refreshSessionIfNeeded() {
     return null;
   }
 
+  if (refreshSessionPromise) {
+    return await refreshSessionPromise;
+  }
+
+  refreshSessionPromise = refreshStoredSession(session).finally(() => {
+    refreshSessionPromise = null;
+  });
+
+  return await refreshSessionPromise;
+}
+
+async function refreshStoredSession(session: StoredSession) {
   const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
     method: "POST",
     headers: {
@@ -64,7 +78,9 @@ async function refreshSessionIfNeeded() {
   });
 
   if (!response.ok) {
-    await clearStoredSession();
+    if (response.status === 401 || response.status === 403) {
+      await clearStoredSession();
+    }
     await parseError(response);
   }
 

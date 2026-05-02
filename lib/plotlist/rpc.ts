@@ -1,26 +1,37 @@
-import { apiRequest } from "../api/client";
-import { getStoredSession } from "../api/session";
+import { apiRequest, refreshSessionIfNeeded } from "../api/client";
 import { getFunctionName } from "./api";
 
 type RpcKind = "query" | "mutation" | "action";
+
+let rpcQueue: Promise<unknown> = Promise.resolve();
+
+async function enqueueRpc<T>(task: () => Promise<T>) {
+  const run = rpcQueue.then(task, task);
+  rpcQueue = run.catch(() => undefined);
+  return await run;
+}
 
 async function callRpc<T>(
   kind: RpcKind,
   fn: unknown,
   args: Record<string, unknown> | undefined,
 ) {
-  const name = getFunctionName(fn as any);
-  const session = await getStoredSession();
-  const response = await apiRequest<{ result: T }>(`/api/rpc/${kind}`, {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      args: args ?? {},
-      accessToken: session?.accessToken,
-    }),
-  });
+  return await enqueueRpc(async () => {
+    const name = getFunctionName(fn as any);
+    const session = await refreshSessionIfNeeded().catch(() => null);
+    const response = await apiRequest<{ result: T }>(`/api/rpc/${kind}`, {
+      method: "POST",
+      authenticate: false,
+      body: JSON.stringify({
+        name,
+        args: args ?? {},
+        accessToken: session?.accessToken,
+        refreshToken: session?.refreshToken,
+      }),
+    });
 
-  return response.result;
+    return response.result;
+  });
 }
 
 export async function callQuery<T>(fn: unknown, args?: Record<string, unknown>) {

@@ -19,6 +19,8 @@ export function SearchResultRow({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${title}`}
       className="flex-row gap-4 rounded-2xl border border-dark-border bg-dark-card p-3"
     >
       <Poster uri={posterUrl ?? undefined} size="sm" />
