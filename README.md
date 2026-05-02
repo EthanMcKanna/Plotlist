@@ -77,7 +77,7 @@ Required for normal development:
 - `JWT_SECRET`: signing secret for API access tokens
 - `REFRESH_TOKEN_SECRET`: signing secret for API refresh tokens
 - `CRON_SECRET`: bearer token expected by Vercel cron endpoints
-- `VERCEL_BLOB_READ_WRITE_TOKEN`: Blob token for avatar/list-cover uploads
+- `BLOB_READ_WRITE_TOKEN`: Vercel Blob token for avatar/list-cover uploads
 - `TMDB_API_KEY`: TMDB API key for show metadata, search, details, and release data
 - `TWILIO_ACCOUNT_SID`: Twilio account SID
 - `TWILIO_AUTH_TOKEN`: Twilio auth token
