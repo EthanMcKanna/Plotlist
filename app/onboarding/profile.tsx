@@ -12,6 +12,7 @@ import { api } from "../../lib/plotlist/api";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
 import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
+import { uploadAvatarImage } from "../../lib/avatarUpload";
 
 export default function OnboardingProfile() {
   const router = useRouter();
@@ -75,20 +76,11 @@ export default function OnboardingProfile() {
       if (result.canceled) return;
 
       const asset = result.assets[0];
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const uploadUrl = await generateUploadUrl({});
-      const uploadResponse = await fetch(uploadUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": asset.mimeType ?? "image/jpeg",
-        },
-        body: blob,
+      const storageId = await uploadAvatarImage({
+        uri: asset.uri,
+        mimeType: asset.mimeType,
+        generateUploadUrl: () => generateUploadUrl({}),
       });
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed with ${uploadResponse.status}`);
-      }
-      const { storageId } = await uploadResponse.json();
       await updateProfile({ avatarStorageId: storageId });
     } catch (error) {
       Alert.alert("Upload failed", String(error));

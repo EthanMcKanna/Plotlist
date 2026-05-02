@@ -10,6 +10,7 @@ const serverEnvSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1),
   TWILIO_VERIFY_SERVICE_SID: z.string().min(1),
   CONTACT_HASH_SECRET: z.string().min(1),
+  BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
   VERCEL_BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2-preview"),

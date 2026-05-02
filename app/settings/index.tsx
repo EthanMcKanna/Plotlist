@@ -15,6 +15,7 @@ import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
 import { api } from "../../lib/plotlist/api";
 import { clearAuthTokens } from "../../lib/authStorage";
+import { uploadAvatarImage } from "../../lib/avatarUpload";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import { useAuthActions } from "../../lib/plotlist/auth";
@@ -357,18 +358,11 @@ export default function SettingsScreen() {
     setCropImage(null);
     try {
       setUploading(true);
-      const response = await fetch(croppedUri);
-      const blob = await response.blob();
-      const uploadUrl = await generateUploadUrl({});
-      const uploadResponse = await fetch(uploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": "image/jpeg" },
-        body: blob,
+      const storageId = await uploadAvatarImage({
+        uri: croppedUri,
+        mimeType: "image/jpeg",
+        generateUploadUrl: () => generateUploadUrl({}),
       });
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed with ${uploadResponse.status}`);
-      }
-      const { storageId } = await uploadResponse.json();
       await updateProfile({ avatarStorageId: storageId });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
