@@ -20,11 +20,16 @@ type EpisodeGuideEpisode = {
   id: number | string;
   name: string;
   episodeNumber: number;
+  episode_number?: number;
   airDate?: string | null;
+  air_date?: string | null;
   overview?: string | null;
   stillPath?: string | null;
+  still_path?: string | null;
   voteAverage?: number;
   voteCount?: number;
+  vote_average?: number;
+  vote_count?: number;
 };
 
 type EpisodeGuideSeason = {
@@ -33,6 +38,8 @@ type EpisodeGuideSeason = {
   season_number: number;
   air_date?: string | null;
   episode_count?: number;
+  posterPath?: string | null;
+  poster_path?: string | null;
 };
 
 type EpisodeGuideProps = {
@@ -59,6 +66,16 @@ type EpisodeGuideProps = {
     episode: EpisodeGuideEpisode,
   ) => void;
 };
+
+function tmdbImageUrl(path: unknown, size = "original") {
+  if (typeof path !== "string" || path.length === 0) {
+    return null;
+  }
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
 
 function EpisodeGuideComponent({
   seasons,
@@ -101,7 +118,15 @@ function EpisodeGuideComponent({
       <View className="mt-4 gap-10">
         {visibleSeasons.map((season) => {
           const details = seasonDetailsByNumber[season.season_number];
-          const episodes = details?.episodes ?? [];
+          const episodes = (details?.episodes ?? []).map((episode) => ({
+            ...episode,
+            airDate: episode.airDate ?? episode.air_date ?? null,
+            episodeNumber: episode.episodeNumber ?? episode.episode_number,
+            stillPath:
+              episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780"),
+            voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
+            voteCount: episode.voteCount ?? episode.vote_count ?? 0,
+          }));
           const availableEpisodes = episodes.filter((episode) =>
             isEpisodeAvailable(episode.airDate),
           );
@@ -122,94 +147,138 @@ function EpisodeGuideComponent({
           const isLoading =
             loadState === "loading" || (loadState === "idle" && details === undefined);
           const hasLoadError = loadState === "error" && details === undefined;
+          const seasonPosterPath =
+            season.posterPath ?? tmdbImageUrl(season.poster_path, "w342");
+          const seasonYear = season.air_date
+            ? new Date(season.air_date).getFullYear()
+            : null;
 
           return (
             <View key={season.id}>
-              <View className="mb-2 flex-row items-center gap-3 px-6">
-                <Text
-                  className="text-xs font-bold uppercase tracking-widest"
-                  style={{ color: allWatched ? "#0ea5e9" : "#5A6070" }}
-                >
-                  {season.name}
-                </Text>
-                {episodes.length > 0 && isAuthenticated ? (
-                  <View
-                    className="rounded-full px-2 py-0.5"
+              <View className="mb-3 flex-row gap-3 px-6">
+                {seasonPosterPath ? (
+                  <Image
+                    source={{ uri: seasonPosterPath }}
                     style={{
-                      backgroundColor: allWatched
-                        ? "rgba(14, 165, 233, 0.15)"
-                        : "#1E2028",
+                      width: 54,
+                      height: 81,
+                      borderRadius: 8,
+                      backgroundColor: "#1C2028",
                     }}
-                  >
-                    <Text
-                      className="text-xs font-medium"
-                      style={{
-                        color: allWatched ? "#38bdf8" : "#5A6070",
-                      }}
-                    >
-                      {allWatched
-                        ? "Complete"
-                        : hasAvailableEpisodes
-                          ? `${watchedInSeason}/${totalEpisodeCount}`
-                          : "Upcoming"}
-                    </Text>
-                  </View>
+                    contentFit="cover"
+                    transition={200}
+                  />
                 ) : (
-                  <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-                    <Text className="text-xs font-medium text-text-tertiary">
-                      {totalEpisodeCount} eps
-                    </Text>
+                  <View
+                    style={{
+                      width: 54,
+                      height: 81,
+                      borderRadius: 8,
+                      backgroundColor: "#1C2028",
+                    }}
+                    className="items-center justify-center"
+                  >
+                    <Ionicons name="albums-outline" size={22} color="#5A6070" />
                   </View>
                 )}
-                {season.air_date ? (
-                  <Text className="text-xs text-text-tertiary">
-                    {new Date(season.air_date).getFullYear()}
-                  </Text>
-                ) : null}
-                <View
-                  className="h-px flex-1"
-                  style={{
-                    backgroundColor: allWatched
-                      ? "rgba(14, 165, 233, 0.2)"
-                      : "rgba(42, 46, 56, 0.8)",
-                  }}
-                />
-                {episodes.length > 0 && isAuthenticated ? (
-                  <Pressable
-                    className="active:opacity-60"
-                    disabled={!hasAvailableEpisodes}
-                    style={{ opacity: hasAvailableEpisodes ? 1 : 0.45 }}
-                    onPress={() => {
-                      if (!hasAvailableEpisodes) {
-                        return;
-                      }
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      if (allWatched) {
-                        onUnmarkSeasonWatched(season.season_number);
-                        return;
-                      }
-                      onMarkSeasonWatched(
-                        season.season_number,
-                        availableEpisodes.map((episode) => ({
-                          episodeNumber: episode.episodeNumber,
-                          title: episode.name,
-                        })),
-                      );
-                    }}
-                  >
-                    <Ionicons
-                      name={allWatched ? "checkmark-circle" : "checkmark-circle-outline"}
-                      size={20}
-                      color={
-                        !hasAvailableEpisodes
-                          ? "#404654"
-                          : allWatched
-                            ? "#0ea5e9"
-                            : "#5A6070"
-                      }
+
+                <View className="min-w-0 flex-1 justify-center">
+                  <View className="flex-row items-center gap-3">
+                    <Text
+                      className="shrink text-xs font-bold uppercase tracking-widest"
+                      numberOfLines={2}
+                      style={{ color: allWatched ? "#0ea5e9" : "#5A6070" }}
+                    >
+                      {season.name}
+                    </Text>
+                    <View
+                      className="h-px flex-1"
+                      style={{
+                        backgroundColor: allWatched
+                          ? "rgba(14, 165, 233, 0.2)"
+                          : "rgba(42, 46, 56, 0.8)",
+                      }}
                     />
-                  </Pressable>
-                ) : null}
+                    {episodes.length > 0 && isAuthenticated ? (
+                      <Pressable
+                        className="active:opacity-60"
+                        disabled={!hasAvailableEpisodes}
+                        style={{ opacity: hasAvailableEpisodes ? 1 : 0.45 }}
+                        onPress={() => {
+                          if (!hasAvailableEpisodes) {
+                            return;
+                          }
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          if (allWatched) {
+                            onUnmarkSeasonWatched(season.season_number);
+                            return;
+                          }
+                          onMarkSeasonWatched(
+                            season.season_number,
+                            availableEpisodes.map((episode) => ({
+                              episodeNumber: episode.episodeNumber,
+                              title: episode.name,
+                            })),
+                          );
+                        }}
+                      >
+                        <Ionicons
+                          name={allWatched ? "checkmark-circle" : "checkmark-circle-outline"}
+                          size={20}
+                          color={
+                            !hasAvailableEpisodes
+                              ? "#404654"
+                              : allWatched
+                                ? "#0ea5e9"
+                                : "#5A6070"
+                          }
+                        />
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  <View className="mt-2 flex-row flex-wrap items-center gap-2">
+                    {episodes.length > 0 && isAuthenticated ? (
+                      <View
+                        className="rounded-full px-2 py-0.5"
+                        style={{
+                          backgroundColor: allWatched
+                            ? "rgba(14, 165, 233, 0.15)"
+                            : "#1E2028",
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-medium"
+                          style={{
+                            color: allWatched ? "#38bdf8" : "#5A6070",
+                          }}
+                        >
+                          {allWatched
+                            ? "Complete"
+                            : hasAvailableEpisodes
+                              ? `${watchedInSeason}/${totalEpisodeCount}`
+                              : "Upcoming"}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View className="rounded-full bg-dark-elevated px-2 py-0.5">
+                        <Text className="text-xs font-medium text-text-tertiary">
+                          {totalEpisodeCount} eps
+                        </Text>
+                      </View>
+                    )}
+                    {seasonYear ? (
+                      <Text className="text-xs text-text-tertiary">
+                        {seasonYear}
+                      </Text>
+                    ) : null}
+                    {episodes.length > 0 && isAuthenticated ? (
+                      <Text className="text-xs text-text-tertiary">
+                        {totalEpisodeCount} episodes
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
               </View>
 
               {episodes.length > 0 && isAuthenticated && totalEpisodeCount > 0 && (watchedInSeason > 0 || allWatched) ? (
@@ -265,6 +334,7 @@ function EpisodeGuideComponent({
                   }}
                 >
                   {episodes.map((episode) => {
+                    const stillPath = episode.stillPath ?? episode.still_path ?? null;
                     const tmdbRating =
                       (episode.voteCount ?? 0) > 0 && (episode.voteAverage ?? 0) > 0
                         ? episode.voteAverage?.toFixed(1)
@@ -295,9 +365,9 @@ function EpisodeGuideComponent({
                           }}
                         >
                           <View>
-                            {episode.stillPath ? (
+                            {stillPath ? (
                               <Image
-                                source={{ uri: episode.stillPath }}
+                                source={{ uri: stillPath }}
                                 style={{
                                   width: 144,
                                   height: 81,

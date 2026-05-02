@@ -21,10 +21,10 @@ export default function OnboardingIndex() {
 
     const nextRoute =
       step === "profile"
-        ? "/profile"
+        ? "/onboarding/profile"
         : step === "follow"
-          ? "/follow"
-          : "/shows";
+          ? "/onboarding/follow"
+          : "/onboarding/shows";
     router.replace(nextRoute);
   }, [me, router]);
 

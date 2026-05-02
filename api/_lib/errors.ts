@@ -17,9 +17,6 @@ export function asApiError(error: unknown) {
     return error;
   }
 
-  if (error instanceof Error) {
-    return new ApiError(500, "internal_error", error.message);
-  }
-
+  console.error("[api] Unexpected error", error);
   return new ApiError(500, "internal_error", "Unexpected error");
 }

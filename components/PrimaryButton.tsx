@@ -25,6 +25,8 @@ export function PrimaryButton({
     <Pressable
       onPress={handlePress}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       className={`items-center justify-center rounded-full bg-brand-500 px-5 py-3.5 active:bg-brand-600 ${
         disabled || loading ? "opacity-50" : ""
       } ${className ?? ""}`}

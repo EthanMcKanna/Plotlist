@@ -6,9 +6,18 @@ type RecommendationRailProps = {
   title: string;
   description?: string;
   items: Array<{
+    _id?: string;
+    show?: {
+      _id?: string;
+      externalId?: string;
+      title?: string;
+      year?: number;
+      posterUrl?: string;
+      overview?: string;
+    } | null;
     showId?: string;
     externalId?: string;
-    title: string;
+    title?: string;
     year?: number;
     posterUrl?: string;
     overview?: string;
@@ -46,16 +55,25 @@ export function RecommendationRail({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingRight: 16 }}
       >
-        {items.map((item) => (
-          <SimilarShowCard
-            key={`${item.showId ?? item.externalId ?? item.title}`}
-            showId={item.showId}
-            externalId={item.externalId}
-            title={item.title}
-            posterUrl={item.posterUrl}
-            subtitle={item.subtitle ?? item.reason ?? item.overview}
-          />
-        ))}
+        {items.map((item, index) => {
+          const show = item.show ?? item;
+          const title = show.title ?? item.title ?? "Unknown";
+          const showId = item.showId ?? show._id ?? item._id;
+          const externalId = item.externalId ?? show.externalId;
+          const posterUrl = show.posterUrl ?? item.posterUrl;
+          const subtitle = item.subtitle ?? item.reason ?? show.overview ?? item.overview;
+
+          return (
+            <SimilarShowCard
+              key={`${showId ?? externalId ?? title}-${index}`}
+              showId={showId}
+              externalId={externalId}
+              title={title}
+              posterUrl={posterUrl}
+              subtitle={subtitle}
+            />
+          );
+        })}
       </ScrollView>
     </View>
   );

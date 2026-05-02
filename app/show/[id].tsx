@@ -62,6 +62,81 @@ const DISMISS_VELOCITY = 500;
 const POSTER_HEIGHT = 240;
 const POSTER_WIDTH = 160;
 
+function tmdbImageUrl(path: unknown, size = "original") {
+  if (typeof path !== "string" || path.length === 0) {
+    return null;
+  }
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+
+function normalizeEpisodeDetails(episode: any) {
+  return {
+    ...episode,
+    airDate: episode.airDate ?? episode.air_date ?? null,
+    episodeNumber: episode.episodeNumber ?? episode.episode_number,
+    seasonNumber: episode.seasonNumber ?? episode.season_number,
+    stillPath: episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780"),
+    voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
+    voteCount: episode.voteCount ?? episode.vote_count ?? 0,
+  };
+}
+
+function normalizeSeasonDetails(details: any) {
+  if (!details) {
+    return details;
+  }
+
+  return {
+    ...details,
+    airDate: details.airDate ?? details.air_date ?? null,
+    posterPath: details.posterPath ?? tmdbImageUrl(details.poster_path, "w342"),
+    seasonNumber: details.seasonNumber ?? details.season_number,
+    episodes: Array.isArray(details.episodes)
+      ? details.episodes.map(normalizeEpisodeDetails)
+      : [],
+  };
+}
+
+function normalizeExtendedDetails(details: any) {
+  if (!details) {
+    return details;
+  }
+  const seasons = Array.isArray(details.seasons)
+    ? details.seasons.map((season: any) => ({
+        ...season,
+        airDate: season.airDate ?? season.air_date ?? null,
+        episodeCount: season.episodeCount ?? season.episode_count ?? 0,
+        posterPath: season.posterPath ?? tmdbImageUrl(season.poster_path, "w342"),
+        seasonNumber: season.seasonNumber ?? season.season_number,
+      }))
+    : [];
+  const regularSeasons = seasons.filter((season: any) => season.seasonNumber > 0);
+
+  return {
+    ...details,
+    backdropPath: tmdbImageUrl(details.backdrop_path, "w1280") ?? details.backdropPath,
+    episodeRunTime:
+      details.episodeRunTime ??
+      (Array.isArray(details.episode_run_time) ? details.episode_run_time[0] : undefined),
+    numberOfEpisodes:
+      details.numberOfEpisodes ??
+      details.number_of_episodes ??
+      regularSeasons.reduce(
+        (total: number, season: any) => total + (season.episodeCount ?? season.episode_count ?? 0),
+        0,
+      ),
+    numberOfSeasons:
+      details.numberOfSeasons ??
+      details.number_of_seasons ??
+      regularSeasons.length,
+    posterPath: details.posterPath ?? tmdbImageUrl(details.poster_path, "w500"),
+    seasons,
+  };
+}
+
 export default function ShowScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -291,10 +366,11 @@ export default function ShowScreen() {
         setLoadingDetails(false);
         return;
       }
+
       setLoadingDetails(true);
       try {
         const details = await getExtendedDetails({ showId });
-        setExtendedDetails(details);
+        setExtendedDetails(normalizeExtendedDetails(details));
       } catch (error) {
         console.error("Failed to fetch extended details:", error);
       } finally {
@@ -375,6 +451,19 @@ export default function ShowScreen() {
       cancelled = true;
     };
   }, [getSimilarShows, showId]);
+  const similarShowItems = useMemo(() => {
+    if (similarShows.length > 0) {
+      return similarShows;
+    }
+    const tmdbSimilar = extendedDetails?.similar;
+    if (Array.isArray(tmdbSimilar)) {
+      return tmdbSimilar;
+    }
+    if (Array.isArray(tmdbSimilar?.results)) {
+      return tmdbSimilar.results;
+    }
+    return [];
+  }, [extendedDetails?.similar, similarShows]);
 
   const seasonOptions = useMemo(
     () =>
@@ -422,8 +511,9 @@ export default function ShowScreen() {
   );
 
   const cacheSeasonDetails = useCallback((seasonNumber: number, details: any) => {
+    const normalizedDetails = normalizeSeasonDetails(details);
     setSeasonDetailsByNumber((current) => {
-      const next = { ...current, [seasonNumber]: details };
+      const next = { ...current, [seasonNumber]: normalizedDetails };
       seasonDetailsByNumberRef.current = next;
       return next;
     });
@@ -461,12 +551,13 @@ export default function ShowScreen() {
             showId,
             seasonNumber,
           });
+          const normalizedDetails = normalizeSeasonDetails(details);
           if (activeShowExternalIdRef.current !== externalId) {
-            return details;
+            return normalizedDetails;
           }
-          cacheSeasonDetails(seasonNumber, details);
+          cacheSeasonDetails(seasonNumber, normalizedDetails);
           setSeasonRequestState(seasonNumber, "loaded");
-          return details;
+          return normalizedDetails;
         } catch (error) {
           if (activeShowExternalIdRef.current !== externalId) {
             throw error;
@@ -827,6 +918,18 @@ export default function ShowScreen() {
       Alert.alert("Couldn't open provider", "Try again in a moment.");
     }
   }, []);
+  const handleBackPress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/home");
+  }, [router]);
+  const backdropUri =
+    extendedDetails?.backdropPath ??
+    show?.backdropUrl ??
+    null;
 
   return (
     <View className="flex-1 bg-dark-bg">
@@ -839,11 +942,13 @@ export default function ShowScreen() {
         <View style={{ height: BACKDROP_HEIGHT + POSTER_HEIGHT * 0.45 }}>
           {/* Backdrop */}
           <View style={{ height: BACKDROP_HEIGHT, width: SCREEN_WIDTH }}>
-            {extendedDetails?.backdropPath ? (
+            {backdropUri ? (
               <Image
-                source={{ uri: extendedDetails.backdropPath }}
+                source={{ uri: backdropUri }}
                 style={{ width: SCREEN_WIDTH, height: BACKDROP_HEIGHT }}
                 contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="high"
                 transition={300}
               />
             ) : (
@@ -913,6 +1018,8 @@ export default function ShowScreen() {
                   borderColor: "rgba(255,255,255,0.08)",
                 }}
                 contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="high"
                 transition={300}
               />
             </View>
@@ -932,10 +1039,9 @@ export default function ShowScreen() {
           }}
         >
           <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.back();
-            }}
+            accessibilityLabel="Back"
+            accessibilityRole="button"
+            onPress={handleBackPress}
             className="active:opacity-70"
           >
             <BlurView
@@ -1438,8 +1544,7 @@ export default function ShowScreen() {
 
         {/* ─── Similar Shows ─── */}
         {!loadingSimilarShows &&
-          ((similarShows.length > 0) ||
-            (!similarShows.length && !loadingDetails && extendedDetails?.similar?.length > 0)) && (
+          similarShowItems.length > 0 && (
             <View className="mt-10">
               <Text
                 className="mb-4 px-6 text-xs font-bold uppercase text-text-tertiary"
@@ -1448,27 +1553,62 @@ export default function ShowScreen() {
                 More Like This
               </Text>
               <FlashList
-                data={
-                  similarShows.length > 0
-                    ? similarShows
-                    : extendedDetails?.similar ?? []
-                }
-                renderItem={({ item }: { item: any }) => (
-                  <SimilarShowCard
-                    showId={item.showId}
-                    externalId={item.showId ? undefined : String(item.id)}
-                    title={item.title}
-                    posterUrl={item.posterUrl}
-                    posterPath={item.posterPath}
-                    rating={typeof item.score === "number" ? undefined : item.voteAverage}
-                    subtitle={
-                      item.sharedGenres?.length
-                        ? item.sharedGenres.join(" • ")
-                        : undefined
-                    }
-                  />
-                )}
-                keyExtractor={(item: any) => String(item.showId ?? item.id)}
+                data={similarShowItems}
+                renderItem={({ item }: { item: any }) => {
+                  const itemShow = item.show ?? item;
+                  const candidateShowId = item.showId ?? itemShow._id ?? itemShow.id ?? item._id;
+                  const itemShowId =
+                    typeof candidateShowId === "string" && candidateShowId.startsWith("show_")
+                      ? candidateShowId
+                      : undefined;
+                  const itemExternalId =
+                    item.externalId ?? itemShow.externalId ?? itemShow.id ?? candidateShowId;
+                  const itemTitle =
+                    itemShow.title ?? itemShow.name ?? itemShow.original_name ?? "Untitled";
+                  const itemPosterUrl =
+                    itemShow.posterUrl ??
+                    item.posterUrl ??
+                    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+                  const itemPosterPath =
+                    itemShow.posterPath ??
+                    item.posterPath ??
+                    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+                  const itemRating =
+                    typeof item.score === "number"
+                      ? undefined
+                      : itemShow.tmdbVoteAverage ??
+                        itemShow.voteAverage ??
+                        itemShow.vote_average ??
+                        item.voteAverage;
+
+                  return (
+                    <SimilarShowCard
+                      showId={itemShowId}
+                      externalId={itemShowId ? undefined : String(itemExternalId)}
+                      title={itemTitle}
+                      posterUrl={itemPosterUrl}
+                      posterPath={itemPosterPath}
+                      rating={itemRating}
+                      subtitle={
+                        item.sharedGenres?.length
+                          ? item.sharedGenres.join(" • ")
+                          : itemShow.overview ?? item.overview
+                      }
+                    />
+                  );
+                }}
+                keyExtractor={(item: any) => {
+                  const itemShow = item.show ?? item;
+                  return String(
+                    item.showId ??
+                      itemShow._id ??
+                      itemShow.id ??
+                      item._id ??
+                      itemShow.externalId ??
+                      itemShow.title ??
+                      itemShow.name,
+                  );
+                }}
                 estimatedItemSize={160}
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -1675,6 +1815,8 @@ export default function ShowScreen() {
           const myEpReviewText = myEpData?.reviewText;
           const epCode = `S${String(selectedEpisode.seasonNumber).padStart(2, "0")} E${String(selectedEpisode.episode.episodeNumber).padStart(2, "0")}`;
           const hasTmdbRating = selectedEpisode.episode.voteCount > 0 && selectedEpisode.episode.voteAverage > 0;
+          const selectedStillPath =
+            selectedEpisode.episode.stillPath ?? selectedEpisode.episode.still_path ?? null;
 
           return (
           <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }} pointerEvents="box-none">
@@ -1719,9 +1861,9 @@ export default function ShowScreen() {
                 >
               {/* Hero image with gradient overlay and metadata */}
               <View className="relative" style={{ aspectRatio: 16 / 9 }}>
-                {selectedEpisode.episode.stillPath ? (
+                {selectedStillPath ? (
                   <Image
-                    source={{ uri: selectedEpisode.episode.stillPath }}
+                    source={{ uri: selectedStillPath }}
                     style={{ width: "100%", height: "100%", backgroundColor: "#1C2028" }}
                     contentFit="cover"
                     transition={200}

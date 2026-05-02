@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
@@ -60,6 +60,15 @@ function getCarouselShow(item: CarouselItem) {
   const show = isRankedCarouselItem(item) ? item.show : item;
 
   return show;
+}
+
+function getCarouselShowId(item: CarouselItem) {
+  if (isRankedCarouselItem(item)) {
+    return item.show?._id ?? item._id;
+  }
+
+  return (item as CatalogItem & { _id?: string; showId?: string })._id ??
+    (item as CatalogItem & { _id?: string; showId?: string }).showId;
 }
 
 function getRecommendationItemKey(item: {
@@ -527,26 +536,57 @@ export default function HomeScreen() {
       >
         {items.map((item, index) => {
           const show = getCarouselShow(item);
+          const showId = getCarouselShowId(item);
           const key = isRankedCarouselItem(item)
-            ? item.show?._id ?? String(index)
-            : item.externalId;
+            ? item.show?._id ?? item._id ?? `${show?.title ?? "ranked"}-${index}`
+            : (item as CatalogItem & { _id?: string })._id ??
+              item.externalId ??
+              `${show?.title ?? "catalog"}-${index}`;
+          const cardContent = (
+            <>
+              <Poster uri={show?.posterUrl} size="md" />
+              <Text className="mt-2 text-sm font-semibold text-text-primary" numberOfLines={2}>
+                {show?.title ?? "Unknown"}
+              </Text>
+              {show?.year ? (
+                <Text className="text-xs text-text-tertiary">{show.year}</Text>
+              ) : null}
+            </>
+          );
+          const card = Platform.OS === "web" && showId ? (
+            <a
+              href={`/show/${showId}`}
+              aria-label={show?.title ? `Open ${show.title}` : "Open show"}
+              style={{
+                cursor: "pointer",
+                display: "block",
+                textDecoration: "none",
+                width: 112,
+              }}
+            >
+              {cardContent}
+            </a>
+          ) : (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                if (showId) {
+                  router.push({ pathname: "/show/[id]", params: { id: showId } });
+                  return;
+                }
+                onPress(item);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={show?.title ? `Open ${show.title}` : "Open show"}
+              className="w-28 active:opacity-80"
+            >
+              {cardContent}
+            </Pressable>
+          );
+
           return (
             <Animated.View key={key} entering={FadeInRight.delay(index * 50)}>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onPress(item);
-                }}
-                className="w-28 active:opacity-80"
-              >
-                <Poster uri={show?.posterUrl} size="md" />
-                <Text className="mt-2 text-sm font-semibold text-text-primary" numberOfLines={2}>
-                  {show?.title ?? "Unknown"}
-                </Text>
-                {show?.year ? (
-                  <Text className="text-xs text-text-tertiary">{show.year}</Text>
-                ) : null}
-              </Pressable>
+              {card}
             </Animated.View>
           );
         })}
@@ -603,7 +643,7 @@ export default function HomeScreen() {
               </View>
               <View className="mt-4 h-56">
                 {renderShowCarousel(
-                  item.items.map((entry: any) => ({ show: { ...entry, _id: entry.showId } })),
+                  item.items,
                   (recommendedItem) => {
                     if (isRankedCarouselItem(recommendedItem) && recommendedItem.show?._id) {
                       router.push(`/show/${recommendedItem.show._id}`);

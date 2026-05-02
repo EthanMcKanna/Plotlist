@@ -49,6 +49,7 @@ export function TextField({
           <Text className="pl-4 text-base text-text-tertiary">{prefix}</Text>
         ) : null}
         <TextInput
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}

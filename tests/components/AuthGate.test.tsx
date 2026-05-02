@@ -11,7 +11,7 @@ import { render, screen, waitFor } from "@testing-library/react-native";
 
 const mockReplace = jest.fn();
 const mockEnsureProfile = jest.fn<() => Promise<void>>();
-const mockClearAuthTokens = jest.fn<() => Promise<void>>();
+const mockClearStoredSession = jest.fn<() => Promise<void>>();
 const mockUseAuth = jest.fn();
 const mockUsePathname = jest.fn();
 const mockUseQuery = jest.fn();
@@ -30,8 +30,8 @@ jest.mock("../../lib/plotlist/react", () => ({
   useQuery: (...args: [unknown, unknown?]) => mockUseQuery(...args),
 }));
 
-jest.mock("../../lib/authStorage", () => ({
-  clearAuthTokens: () => mockClearAuthTokens(),
+jest.mock("../../lib/api/session", () => ({
+  clearStoredSession: () => mockClearStoredSession(),
 }));
 
 import { AuthGate } from "../../components/AuthGate";
@@ -42,7 +42,7 @@ describe("AuthGate", () => {
   beforeEach(() => {
     mockReplace.mockReset();
     mockEnsureProfile.mockReset().mockResolvedValue(undefined);
-    mockClearAuthTokens.mockReset().mockResolvedValue(undefined);
+    mockClearStoredSession.mockReset().mockResolvedValue(undefined);
     warnSpy.mockClear();
     mockUseMutation.mockReturnValue(mockEnsureProfile);
     mockUseAuth.mockReturnValue({
@@ -83,13 +83,36 @@ describe("AuthGate", () => {
     );
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/follow");
+      expect(mockReplace).toHaveBeenCalledWith("/onboarding/follow");
     });
     expect(mockEnsureProfile).toHaveBeenCalledWith({});
   });
 
-  it("clears tokens and returns to sign-in when profile bootstrap fails", async () => {
-    mockEnsureProfile.mockRejectedValue(new Error("boom"));
+  it("does not fight the user while they advance inside onboarding", async () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    mockUseSegments.mockReturnValue(["onboarding", "follow"]);
+    mockUsePathname.mockReturnValue("/onboarding/follow");
+    mockUseQuery.mockReturnValue({
+      onboardingStep: "profile",
+    });
+
+    render(
+      <AuthGate>
+        <Text>Protected content</Text>
+      </AuthGate>
+    );
+
+    await waitFor(() => {
+      expect(mockEnsureProfile).toHaveBeenCalledWith({});
+    });
+    expect(mockReplace).not.toHaveBeenCalledWith("/onboarding/profile");
+  });
+
+  it("clears tokens and returns to sign-in when profile bootstrap reports auth failure", async () => {
+    mockEnsureProfile.mockRejectedValue(new Error("Not authenticated"));
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -105,13 +128,39 @@ describe("AuthGate", () => {
     );
 
     await waitFor(() => {
-      expect(mockClearAuthTokens).toHaveBeenCalled();
+      expect(mockClearStoredSession).toHaveBeenCalled();
     });
     expect(mockReplace).toHaveBeenCalledWith("/sign-in");
     expect(warnSpy).toHaveBeenCalledWith(
       "[AuthGate] Failed to ensure profile",
       expect.any(Error)
     );
+  });
+
+  it("preserves the session when profile bootstrap fails with a transient error", async () => {
+    mockEnsureProfile.mockRejectedValue(new Error("Network request failed"));
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    mockUseQuery.mockReturnValue({
+      onboardingStep: "complete",
+    });
+
+    render(
+      <AuthGate>
+        <Text>Protected content</Text>
+      </AuthGate>
+    );
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[AuthGate] Failed to ensure profile",
+        expect.any(Error)
+      );
+    });
+    expect(mockClearStoredSession).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalledWith("/sign-in");
   });
 
   it("shows a loading state until auth resolution completes", () => {

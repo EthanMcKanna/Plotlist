@@ -1,7 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { router } from "expo-router";
 import { LoadingScreen } from "./LoadingScreen";
-import { clearAuthTokens } from "../lib/authStorage";
+import { clearStoredSession } from "../lib/api/session";
 
 function isAuthError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -29,7 +29,7 @@ export class AuthErrorBoundary extends Component<Props, State> {
   async componentDidCatch(error: unknown) {
     if (isAuthError(error)) {
       this.setState({ isAuthError: true });
-      await clearAuthTokens();
+      await clearStoredSession();
       router.replace("/sign-in");
     }
   }

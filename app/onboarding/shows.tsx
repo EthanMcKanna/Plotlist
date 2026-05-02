@@ -12,6 +12,7 @@ import { SectionHeader } from "../../components/SectionHeader";
 import { SearchResultRow } from "../../components/SearchResultRow";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
 import { api } from "../../lib/plotlist/api";
+import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
 
 const STARTER_THEMES = [
   "slow-burn sci-fi",
@@ -221,14 +222,13 @@ export default function OnboardingShows() {
     setCustomTheme("");
   }, [customTheme, selectedThemes]);
 
-  const canFinish =
-    selectedShows.length >= 3 || (selectedShows.length >= 2 && selectedThemes.length >= 1);
+  const hasTasteSignal = selectedShows.length > 0 || selectedThemes.length > 0;
 
   const handleFinish = useCallback(async () => {
-    if (!canFinish) {
+    if (!hasTasteSignal) {
       Alert.alert(
-        "Pick a little more",
-        "Choose 3 favorites, or pick 2 favorites and at least 1 theme.",
+        "Pick a starting point",
+        "Choose at least one favorite show or theme to personalize your first Home feed.",
       );
       return;
     }
@@ -239,17 +239,21 @@ export default function OnboardingShows() {
         favoriteShowIds: selectedShows.map((show) => show.showId as any),
         favoriteThemes: selectedThemes,
       });
-      await setOnboardingStep({ step: "complete" });
+      const result = await setOnboardingStep({ step: "complete" });
+      cacheOnboardingStep(result?.userId, "complete");
+      markOnboardingStep("complete");
       router.replace("/home");
     } catch (error) {
       Alert.alert("Could not save your taste", String(error));
     } finally {
       setIsSaving(false);
     }
-  }, [canFinish, router, saveViewerTastePreferences, selectedShows, selectedThemes, setOnboardingStep]);
+  }, [hasTasteSignal, router, saveViewerTastePreferences, selectedShows, selectedThemes, setOnboardingStep]);
 
   const handleSkip = useCallback(async () => {
-    await setOnboardingStep({ step: "complete" });
+    const result = await setOnboardingStep({ step: "complete" });
+    cacheOnboardingStep(result?.userId, "complete");
+    markOnboardingStep("complete");
     router.replace("/home");
   }, [router, setOnboardingStep]);
 
@@ -366,14 +370,15 @@ export default function OnboardingShows() {
         renderItem={renderItem}
         keyExtractor={(item: ListItem, index: number) => `${item.type}-${index}`}
         estimatedItemSize={120}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
         ListHeaderComponent={
           <>
             <OnboardingHeader
               step={3}
               totalSteps={3}
               title="Teach Plotlist your taste"
-              description="Pick 3 to 5 favorite shows and a few themes so your Home feed starts strong."
+              description="Pick a favorite show or a theme so your Home feed starts strong."
               onSkip={handleSkip}
             />
 
@@ -383,7 +388,7 @@ export default function OnboardingShows() {
                   Favorite seeds
                 </Text>
                 <Text className="mt-1 text-sm text-text-tertiary">
-                  {selectedShows.length}/5 selected. Choose at least 3, or pick 2 shows and 1 theme.
+                  {selectedShows.length}/5 selected. One show or theme is enough to get started.
                 </Text>
                 {selectedShows.length > 0 ? (
                   <View className="mt-4 gap-2">
@@ -417,7 +422,7 @@ export default function OnboardingShows() {
                 Themes and vibes
               </Text>
               <Text className="mt-1 text-sm text-text-tertiary">
-                Choose a few shortcuts for the kinds of shows you want more of.
+                Choose shortcuts for the kinds of shows you want more of.
               </Text>
               <View className="mt-4 flex-row flex-wrap gap-2">
                 {STARTER_THEMES.map((theme) => {
@@ -498,17 +503,15 @@ export default function OnboardingShows() {
             ) : null}
           </>
         }
-        ListFooterComponent={
-          <View className="px-6 pt-8">
-            <PrimaryButton
-              label="Finish taste setup"
-              onPress={handleFinish}
-              loading={isSaving}
-              disabled={!canFinish}
-            />
-          </View>
-        }
       />
+      <View className="border-t border-dark-border bg-dark-bg px-6 py-4">
+        <PrimaryButton
+          label="Finish taste setup"
+          onPress={handleFinish}
+          loading={isSaving}
+          disabled={!hasTasteSignal}
+        />
+      </View>
     </Screen>
   );
 }

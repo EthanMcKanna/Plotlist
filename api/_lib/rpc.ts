@@ -28,7 +28,7 @@ import {
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
-import { normalizePhoneNumber, hashPhoneNumber } from "./phone";
+import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
 import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
 import { enforceRateLimit } from "./rate-limit";
 import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social";
@@ -216,6 +216,116 @@ function catalogFromTmdb(result: any) {
   };
 }
 
+function tmdbImageUrl(path: unknown, size = "original") {
+  if (typeof path !== "string" || path.length === 0) {
+    return null;
+  }
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+
+function normalizeTmdbSeasonSummary(season: any) {
+  return {
+    ...season,
+    airDate: season.airDate ?? season.air_date ?? null,
+    episodeCount: season.episodeCount ?? season.episode_count ?? 0,
+    posterPath: season.posterPath ?? tmdbImageUrl(season.poster_path, "w342"),
+    seasonNumber: season.seasonNumber ?? season.season_number,
+  };
+}
+
+function normalizeTmdbEpisode(episode: any) {
+  return {
+    ...episode,
+    airDate: episode.airDate ?? episode.air_date ?? null,
+    episodeNumber: episode.episodeNumber ?? episode.episode_number,
+    seasonNumber: episode.seasonNumber ?? episode.season_number,
+    stillPath: episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780"),
+    voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
+    voteCount: episode.voteCount ?? episode.vote_count ?? 0,
+  };
+}
+
+function normalizeTmdbShowDetails(payload: any) {
+  if (!payload) {
+    return payload;
+  }
+  const seasons = Array.isArray(payload.seasons)
+    ? payload.seasons.map(normalizeTmdbSeasonSummary)
+    : [];
+  const regularSeasons = seasons.filter((season: any) => season.seasonNumber > 0);
+
+  return {
+    ...payload,
+    backdropPath: tmdbImageUrl(payload.backdrop_path, "w1280") ?? payload.backdropPath,
+    episodeRunTime:
+      payload.episodeRunTime ??
+      (Array.isArray(payload.episode_run_time) ? payload.episode_run_time[0] : undefined),
+    numberOfEpisodes:
+      payload.numberOfEpisodes ??
+      payload.number_of_episodes ??
+      regularSeasons.reduce(
+        (total: number, season: any) => total + (season.episodeCount ?? season.episode_count ?? 0),
+        0,
+      ),
+    numberOfSeasons:
+      payload.numberOfSeasons ??
+      payload.number_of_seasons ??
+      regularSeasons.length,
+    posterPath: payload.posterPath ?? tmdbImageUrl(payload.poster_path, "w500"),
+    seasons,
+  };
+}
+
+function normalizeTmdbSeasonDetails(payload: any) {
+  if (!payload) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    airDate: payload.airDate ?? payload.air_date ?? null,
+    posterPath: payload.posterPath ?? tmdbImageUrl(payload.poster_path, "w342"),
+    seasonNumber: payload.seasonNumber ?? payload.season_number,
+    episodes: Array.isArray(payload.episodes)
+      ? payload.episodes.map(normalizeTmdbEpisode)
+      : [],
+  };
+}
+
+async function showDocWithCachedArtwork(show: typeof shows.$inferSelect | null | undefined) {
+  const doc = showToDoc(show);
+  const hasUsableStoredBackdrop =
+    typeof doc?.backdropUrl === "string" && !doc.backdropUrl.includes("/original/");
+  if (!doc || show?.externalSource !== "tmdb" || hasUsableStoredBackdrop) {
+    return doc;
+  }
+
+  const cached = await db
+    .select()
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, show.externalSource),
+        eq(tmdbDetailsCache.externalId, show.externalId),
+      ),
+    )
+    .limit(1);
+  const details = normalizeTmdbShowDetails(cached[0]?.payload);
+  const cachedBackdropUrl = details?.backdropPath ?? null;
+  const storedBackdropUrl =
+    typeof doc.backdropUrl === "string" && doc.backdropUrl.includes("/original/")
+      ? null
+      : doc.backdropUrl;
+  return {
+    ...doc,
+    backdropUrl: storedBackdropUrl ?? cachedBackdropUrl,
+    posterUrl: doc.posterUrl ?? details?.posterPath ?? null,
+  };
+}
+
 async function tmdb(path: string, params: Record<string, string | number | undefined> = {}) {
   const apiKey = process.env.TMDB_API_KEY;
   if (!apiKey) {
@@ -316,14 +426,14 @@ async function upsertShowFromCatalog(item: any) {
     originalTitle: item.originalTitle ?? item.title ?? null,
     year: item.year ?? null,
     overview: item.overview ?? null,
-    posterUrl: item.posterUrl ?? null,
-    backdropUrl: item.backdropUrl ?? null,
-    genreIds: item.genreIds ?? null,
-    originalLanguage: item.originalLanguage ?? null,
-    originCountries: item.originCountries ?? null,
-    tmdbPopularity: item.tmdbPopularity ?? null,
-    tmdbVoteAverage: item.tmdbVoteAverage ?? null,
-    tmdbVoteCount: item.tmdbVoteCount ?? null,
+    posterUrl: item.posterUrl ?? existing[0]?.posterUrl ?? null,
+    backdropUrl: item.backdropUrl ?? existing[0]?.backdropUrl ?? null,
+    genreIds: item.genreIds ?? existing[0]?.genreIds ?? null,
+    originalLanguage: item.originalLanguage ?? existing[0]?.originalLanguage ?? null,
+    originCountries: item.originCountries ?? existing[0]?.originCountries ?? null,
+    tmdbPopularity: item.tmdbPopularity ?? existing[0]?.tmdbPopularity ?? null,
+    tmdbVoteAverage: item.tmdbVoteAverage ?? existing[0]?.tmdbVoteAverage ?? null,
+    tmdbVoteCount: item.tmdbVoteCount ?? existing[0]?.tmdbVoteCount ?? null,
     searchText: normalizeSearchText(`${item.title ?? ""} ${item.overview ?? ""}`),
     updatedAt: now,
   };
@@ -843,7 +953,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "shows:get": async ({ args }) => {
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
     const rows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
-    return showToDoc(rows[0]);
+    return await showDocWithCachedArtwork(rows[0]);
   },
   "shows:search": async ({ args }) => {
     const parsed = z.object({ text: z.string(), limit: z.number().optional() }).parse(args ?? {});
@@ -1170,7 +1280,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         onboardingCompletedAt: parsed.step === "complete" ? Date.now() : user.onboardingCompletedAt,
       })
       .where(eq(users.id, user.id));
-    return { success: true };
+    return { success: true, userId: user.id, step: parsed.step };
   },
   "users:deleteAccount": async ({ req }) => {
     const user = await requireAuthUser(req);
@@ -1495,6 +1605,9 @@ export const actionHandlers: Record<string, RpcHandler> = {
     if (!normalizedPhone) {
       throw new ApiError(400, "invalid_phone", "Enter a valid phone number");
     }
+    if (matchesAppReviewBypass(normalizedPhone)) {
+      return { ok: true, phone: normalizedPhone };
+    }
     await enforceRateLimit(`phone-verification:${normalizedPhone}`, 5, 10 * 60 * 1000);
     await sendPhoneVerificationCode(normalizedPhone);
     const now = Date.now();
@@ -1579,14 +1692,30 @@ export const actionHandlers: Record<string, RpcHandler> = {
     if (!show) return null;
     const cached = await db.select().from(tmdbDetailsCache).where(and(eq(tmdbDetailsCache.externalSource, show.externalSource), eq(tmdbDetailsCache.externalId, show.externalId))).limit(1);
     if (cached[0] && cached[0].expiresAt > Date.now()) {
-      return cached[0].payload;
+      return normalizeTmdbShowDetails(cached[0].payload);
     }
     if (show.externalSource !== "tmdb") {
       return null;
     }
-    const payload = await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar" });
+    const payload = normalizeTmdbShowDetails(
+      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar" }),
+    );
     const now = Date.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
+    const storedBackdropUrl =
+      typeof show.backdropUrl === "string" && show.backdropUrl.includes("/original/")
+        ? null
+        : show.backdropUrl;
+    if ((!storedBackdropUrl && payload?.backdropPath) || (!show.posterUrl && payload?.posterPath)) {
+      await db
+        .update(shows)
+        .set({
+          backdropUrl: storedBackdropUrl ?? payload.backdropPath ?? null,
+          posterUrl: show.posterUrl ?? payload.posterPath ?? null,
+          updatedAt: now,
+        })
+        .where(eq(shows.id, show.id));
+    }
     if (cached[0]) {
       await db.update(tmdbDetailsCache).set({ payload, fetchedAt: now, expiresAt }).where(eq(tmdbDetailsCache.id, cached[0].id));
     } else {
@@ -1599,7 +1728,9 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
     const show = showRows[0];
     if (!show || show.externalSource !== "tmdb") return null;
-    return await tmdb(`/tv/${show.externalId}/season/${parsed.seasonNumber}`);
+    return normalizeTmdbSeasonDetails(
+      await tmdb(`/tv/${show.externalId}/season/${parsed.seasonNumber}`),
+    );
   },
   "embeddings:saveViewerTastePreferences": async ({ args, req }) => {
     const user = await requireAuthUser(req);

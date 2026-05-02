@@ -19,7 +19,11 @@ export function OnboardingHeader({
         <Text className="text-xs font-semibold uppercase tracking-widest text-text-tertiary">
           Step {step} of {totalSteps}
         </Text>
-        <Pressable onPress={onSkip} className="active:opacity-80">
+        <Pressable
+          onPress={onSkip}
+          accessibilityRole="button"
+          className="active:opacity-80"
+        >
           <Text className="text-sm font-semibold text-text-tertiary">Skip for now</Text>
         </Pressable>
       </View>

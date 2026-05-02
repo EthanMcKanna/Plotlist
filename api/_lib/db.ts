@@ -12,7 +12,9 @@ function getPostgresJsUrl(value: string) {
 }
 
 const queryClient = postgres(getPostgresJsUrl(env.PLANETSCALE_DATABASE_URL), {
-  max: env.NODE_ENV === "development" ? 5 : 10,
+  max: env.NODE_ENV === "development" ? 5 : 1,
+  idle_timeout: 5,
+  connect_timeout: 10,
   prepare: false,
 });
 

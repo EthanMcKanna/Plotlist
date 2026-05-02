@@ -10,6 +10,23 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { PlotlistApiError } from "../../lib/api/client";
+
+function notifyError(title: string, message: string) {
+  if (Platform.OS === "web") {
+    return;
+  }
+  Alert.alert(title, message);
+}
+
+function readErrorMessage(error: unknown): string {
+  if (error instanceof PlotlistApiError && error.code === "internal_error") {
+    return "Something went wrong on our side. Please try again in a moment.";
+  }
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  return "Something went wrong. Please try again.";
+}
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -385,6 +402,7 @@ export default function SignInScreen() {
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const verifyingRef = useRef(false);
 
   useEffect(() => {
@@ -401,10 +419,12 @@ export default function SignInScreen() {
   }, [secondsRemaining]);
 
   const handleSend = async () => {
+    setErrorMessage(null);
     const n = normalizePhoneNumber(phone);
     if (!n) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Invalid number", "Enter a valid phone number to continue.");
+      setErrorMessage("Enter a valid phone number to continue.");
+      notifyError("Invalid number", "Enter a valid phone number to continue.");
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -416,18 +436,22 @@ export default function SignInScreen() {
       setSecondsRemaining(30);
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Could not send code", String(e));
+      const message = readErrorMessage(e);
+      setErrorMessage(message);
+      notifyError("Could not send code", message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleVerify = async (submitted?: string) => {
+    setErrorMessage(null);
     const c = submitted ?? code;
     const n = normalizePhoneNumber(phone);
     if (!n || c.length < CODE_LEN) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Missing code", "Enter the 6-digit code we sent you.");
+      setErrorMessage("Enter the 6-digit code we sent you.");
+      notifyError("Missing code", "Enter the 6-digit code we sent you.");
       return;
     }
     if (verifyingRef.current) return;
@@ -438,16 +462,18 @@ export default function SignInScreen() {
       const result = await signIn("phone", { phone: n, code: c });
       if (!result.signingIn) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert(
-          "Verification failed",
-          "That code was invalid or expired. Request a new code and try again.",
-        );
+        const message =
+          "That code was invalid or expired. Request a new code and try again.";
+        setErrorMessage(message);
+        notifyError("Verification failed", message);
       } else {
         router.replace("/home");
       }
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Verification failed", String(e));
+      const message = readErrorMessage(e);
+      setErrorMessage(message);
+      notifyError("Verification failed", message);
     } finally {
       verifyingRef.current = false;
       setLoading(false);
@@ -456,6 +482,7 @@ export default function SignInScreen() {
 
   const onCodeChange = (v: string) => {
     setCode(v);
+    if (errorMessage) setErrorMessage(null);
     if (v.length === CODE_LEN && step === "code") handleVerify(v);
   };
 
@@ -521,6 +548,17 @@ export default function SignInScreen() {
                 </Text>
               </Animated.View>
 
+              {errorMessage ? (
+                <View
+                  accessibilityRole="alert"
+                  className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3"
+                >
+                  <Text className="text-[13px] font-semibold text-red-300">
+                    {errorMessage}
+                  </Text>
+                </View>
+              ) : null}
+
               {/* ── Form ── */}
               {step === "phone" ? (
                 <Animated.View
@@ -541,7 +579,10 @@ export default function SignInScreen() {
                       </View>
                       <TextInput
                         value={phone}
-                        onChangeText={(t) => setPhone(formatPhoneNumber(t))}
+                        onChangeText={(t) => {
+                          setPhone(formatPhoneNumber(t));
+                          if (errorMessage) setErrorMessage(null);
+                        }}
                         placeholder="(555) 123-4567"
                         placeholderTextColor="#3A3F4D"
                         keyboardType="phone-pad"
@@ -633,6 +674,7 @@ export default function SignInScreen() {
                         );
                         setStep("phone");
                         setCode("");
+                        setErrorMessage(null);
                       }}
                       className="py-2 pr-4 active:opacity-70"
                     >

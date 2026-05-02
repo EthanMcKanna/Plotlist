@@ -11,6 +11,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { api } from "../../lib/plotlist/api";
 import { OnboardingHeader } from "../../components/OnboardingHeader";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
+import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
 
 export default function OnboardingProfile() {
   const router = useRouter();
@@ -44,8 +45,10 @@ export default function OnboardingProfile() {
         displayName: displayName || undefined,
         username: username || undefined,
       });
-      await setOnboardingStep({ step: "follow" });
-      router.replace("/follow");
+      const result = await setOnboardingStep({ step: "follow" });
+      cacheOnboardingStep(result?.userId, "follow");
+      markOnboardingStep("follow");
+      router.replace("/onboarding/follow");
     } catch (error) {
       Alert.alert("Could not save", String(error));
     } finally {
@@ -54,7 +57,9 @@ export default function OnboardingProfile() {
   };
 
   const handleSkip = async () => {
-    await setOnboardingStep({ step: "complete" });
+    const result = await setOnboardingStep({ step: "complete" });
+    cacheOnboardingStep(result?.userId, "complete");
+    markOnboardingStep("complete");
     router.replace("/home");
   };
 

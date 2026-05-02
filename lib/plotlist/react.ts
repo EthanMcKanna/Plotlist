@@ -44,8 +44,8 @@ export function useMutation<Mutation extends PlotlistFunctionReference<"mutation
   const rpcMutation = useTanstackMutation(
     {
       mutationFn: (args: any) => callMutation(mutation, args),
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
       },
     },
     queryClient,
@@ -64,9 +64,6 @@ export function useAction<Action extends PlotlistFunctionReference<"action">>(
   const rpcAction = useTanstackMutation(
     {
       mutationFn: (args: any) => callAction(action, args),
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
-      },
     },
     queryClient,
   );
