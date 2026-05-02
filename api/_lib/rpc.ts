@@ -130,6 +130,193 @@ function showToDoc(show: typeof shows.$inferSelect | null | undefined) {
   return toDoc(show);
 }
 
+type ProfileVisibilitySetting = "public" | "following" | "private";
+
+const DEFAULT_PROFILE_VISIBILITY = {
+  favorites: "public",
+  currentlyWatching: "public",
+  watchlist: "public",
+} satisfies Record<string, ProfileVisibilitySetting>;
+
+function getProfileVisibility(user: typeof users.$inferSelect) {
+  return {
+    ...DEFAULT_PROFILE_VISIBILITY,
+    ...(user.profileVisibility ?? {}),
+  } as typeof DEFAULT_PROFILE_VISIBILITY;
+}
+
+function canViewProfileSection(
+  setting: unknown,
+  context: { isOwnProfile: boolean; profileFollowsViewer: boolean },
+) {
+  if (context.isOwnProfile || setting === "public") {
+    return true;
+  }
+  return setting === "following" && context.profileFollowsViewer;
+}
+
+function toShowPreview(show: typeof shows.$inferSelect) {
+  return {
+    _id: show.id,
+    title: show.title,
+    posterUrl: show.posterUrl,
+    year: show.year,
+  };
+}
+
+async function getWatchStateShowPreviews(userId: string, status: "watching" | "watchlist") {
+  const stateRows = await db
+    .select()
+    .from(watchStates)
+    .where(and(eq(watchStates.userId, userId), eq(watchStates.status, status)))
+    .orderBy(desc(watchStates.updatedAt))
+    .limit(12);
+
+  if (stateRows.length === 0) {
+    return [];
+  }
+
+  const showRows = await db
+    .select()
+    .from(shows)
+    .where(inArray(shows.id, stateRows.map((row) => row.showId)));
+  const showById = new Map(showRows.map((show) => [show.id, show] as const));
+
+  return stateRows
+    .map((row) => showById.get(row.showId))
+    .filter((show): show is typeof shows.$inferSelect => Boolean(show))
+    .map(toShowPreview);
+}
+
+async function buildUserProfile(
+  profileUser: typeof users.$inferSelect,
+  viewer: typeof users.$inferSelect | null,
+) {
+  const viewerId = viewer?.id ?? null;
+  const isOwnProfile = viewerId === profileUser.id;
+  const [viewerFollowingRows, viewerFollowerRows, viewerContactRows] = viewerId
+    ? await Promise.all([
+        db.select().from(follows).where(eq(follows.followerId, viewerId)),
+        db.select().from(follows).where(eq(follows.followeeId, viewerId)),
+        db.select().from(contactSyncEntries).where(eq(contactSyncEntries.ownerId, viewerId)),
+      ])
+    : [[], [], []];
+
+  const viewerFolloweeIds = new Set(viewerFollowingRows.map((row) => row.followeeId));
+  const viewerFollowerIds = new Set(viewerFollowerRows.map((row) => row.followerId));
+  const isFollowing = viewerFolloweeIds.has(profileUser.id);
+  const profileFollowsViewer = viewerFollowerIds.has(profileUser.id);
+
+  const profileFollowerRows = await db
+    .select()
+    .from(follows)
+    .where(eq(follows.followeeId, profileUser.id));
+  const mutualCount = profileFollowerRows.filter((row) => viewerFolloweeIds.has(row.followerId)).length;
+  const inContacts = viewerContactRows.some((entry) => entry.matchedUserId === profileUser.id);
+
+  const visibility = getProfileVisibility(profileUser);
+  const permissions = {
+    favorites: canViewProfileSection(visibility.favorites, {
+      isOwnProfile,
+      profileFollowsViewer,
+    }),
+    currentlyWatching: canViewProfileSection(visibility.currentlyWatching, {
+      isOwnProfile,
+      profileFollowsViewer,
+    }),
+    watchlist: canViewProfileSection(visibility.watchlist, {
+      isOwnProfile,
+      profileFollowsViewer,
+    }),
+  };
+
+  const reviewRows = await db
+    .select()
+    .from(reviews)
+    .where(eq(reviews.authorId, profileUser.id))
+    .orderBy(desc(reviews.createdAt));
+  const averageRating =
+    reviewRows.length > 0
+      ? Number(
+          (
+            reviewRows.reduce((sum, review) => sum + review.rating, 0) / reviewRows.length
+          ).toFixed(1),
+        )
+      : null;
+
+  const favoriteShowIds = permissions.favorites ? profileUser.favoriteShowIds ?? [] : [];
+  const favoriteShowRows =
+    favoriteShowIds.length > 0
+      ? await db.select().from(shows).where(inArray(shows.id, favoriteShowIds))
+      : [];
+  const favoriteShowById = new Map(favoriteShowRows.map((show) => [show.id, show] as const));
+  const favoriteShows = favoriteShowIds
+    .map((showId) => favoriteShowById.get(showId))
+    .filter((show): show is typeof shows.$inferSelect => Boolean(show))
+    .map(toShowPreview);
+
+  const topRatedRows = reviewRows
+    .filter((review) => review.rating !== null)
+    .sort((left, right) => right.rating - left.rating || right.createdAt - left.createdAt)
+    .slice(0, 12);
+  const topRatedShowRows =
+    topRatedRows.length > 0
+      ? await db.select().from(shows).where(inArray(shows.id, topRatedRows.map((row) => row.showId)))
+      : [];
+  const topRatedShowById = new Map(topRatedShowRows.map((show) => [show.id, show] as const));
+
+  const [currentlyWatching, watchlistPreview] = await Promise.all([
+    permissions.currentlyWatching ? getWatchStateShowPreviews(profileUser.id, "watching") : [],
+    permissions.watchlist ? getWatchStateShowPreviews(profileUser.id, "watchlist") : [],
+  ]);
+
+  return {
+    user: toClientUser(profileUser),
+    avatarUrl: profileUser.avatarUrl ?? profileUser.image ?? null,
+    memberSince: profileUser.createdAt,
+    counts: {
+      followers: profileUser.countsFollowers ?? 0,
+      following: profileUser.countsFollowing ?? 0,
+      reviews: profileUser.countsReviews ?? reviewRows.length,
+      lists: profileUser.countsLists ?? 0,
+      shows: profileUser.countsTotalShows ?? 0,
+      completed: profileUser.countsCompleted ?? 0,
+      watching: permissions.currentlyWatching ? profileUser.countsWatching ?? 0 : null,
+      watchlist: permissions.watchlist ? profileUser.countsWatchlist ?? 0 : null,
+    },
+    averageRating,
+    permissions,
+    relationship: viewerId
+      ? {
+          inContacts,
+          isFollowing,
+          followsYou: profileFollowsViewer,
+          isMutualFollow: isFollowing && profileFollowsViewer,
+          mutualCount,
+        }
+      : null,
+    favoriteShows,
+    favoriteGenres: permissions.favorites ? profileUser.favoriteGenres ?? [] : [],
+    currentlyWatching,
+    watchlistPreview,
+    topRated: topRatedRows
+      .map((review) => {
+        const show = topRatedShowById.get(review.showId);
+        if (!show) {
+          return null;
+        }
+        return {
+          reviewId: review.id,
+          rating: review.rating,
+          showId: show.id,
+          title: show.title,
+          posterUrl: show.posterUrl,
+        };
+      })
+      .filter(Boolean),
+  };
+}
+
 function matchesReleaseView(row: typeof releaseEvents.$inferSelect, view: string, today: string) {
   if (row.airDate < today) {
     return false;
@@ -801,6 +988,49 @@ async function buildFeed(userId: string, args: any) {
   );
 }
 
+async function buildWatchLogActivity(userId: string, args: any) {
+  const parsed = z
+    .object({
+      userId: z.string(),
+      limit: z.number().int().positive().optional(),
+    })
+    .parse(args ?? {});
+  const limit = Math.min(parsed.limit ?? 60, 160);
+
+  const [logRows, reviewRows] = await Promise.all([
+    db.select().from(watchLogs).where(eq(watchLogs.userId, userId)).orderBy(desc(watchLogs.watchedAt)),
+    db.select().from(reviews).where(eq(reviews.authorId, userId)).orderBy(desc(reviews.createdAt)),
+  ]);
+  const showIds = Array.from(
+    new Set([...logRows.map((row) => row.showId), ...reviewRows.map((row) => row.showId)]),
+  );
+  const showRows =
+    showIds.length > 0 ? await db.select().from(shows).where(inArray(shows.id, showIds)) : [];
+  const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
+
+  const items = [
+    ...logRows.map((log) => ({
+      id: log.id,
+      type: "log" as const,
+      timestamp: log.watchedAt,
+      show: showMap.get(log.showId) ?? null,
+      log: toDoc(log),
+    })),
+    ...reviewRows.map((review) => ({
+      id: review.id,
+      type: "review" as const,
+      timestamp: review.createdAt,
+      show: showMap.get(review.showId) ?? null,
+      review: toDoc(review),
+    })),
+  ].sort((left, right) => right.timestamp - left.timestamp);
+
+  return {
+    items: items.slice(0, limit),
+    hasMore: items.length > limit,
+  };
+}
+
 async function addFeedForFollowers(actorId: string, type: "review" | "log", targetId: string, showId: string, timestamp: number) {
   const followerRows = await db.select().from(follows).where(eq(follows.followeeId, actorId));
   const ownerIds = Array.from(new Set([actorId, ...followerRows.map((row) => row.followerId)]));
@@ -839,10 +1069,11 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsed = optionalLimitArgs.parse(args ?? {});
     return await getSuggestedUsers(user.id, Math.min(parsed.limit ?? 6, 20));
   },
-  "users:profile": async ({ args }) => {
+  "users:profile": async ({ args, req }) => {
     const userId = z.object({ userId: z.string() }).parse(args ?? {}).userId;
     const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    return rows[0] ? toClientUser(rows[0]) : null;
+    const viewer = await getOptionalAuthUser(req);
+    return rows[0] ? await buildUserProfile(rows[0], viewer) : null;
   },
   "users:search": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -1005,6 +1236,14 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
     return await detailedWatchStates(parsed.userId, { ...args, status: "watchlist" }, true);
   },
+  "watchLogs:listActivityForUser": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
+    if (parsed.userId !== user.id) {
+      throw new ApiError(403, "forbidden", "You can only view your own log activity");
+    }
+    return await buildWatchLogActivity(user.id, args);
+  },
   "episodeProgress:getStats": async ({ req }) => {
     const user = await requireAuthUser(req);
     return await getEpisodeStats(user.id);
@@ -1072,7 +1311,13 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .select()
       .from(reviews)
       .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)));
-    return { count: rows.length, averageRating: rows.length ? rows.reduce((sum, row) => sum + row.rating, 0) / rows.length : null };
+    return {
+      count: rows.length,
+      reviewCount: rows.length,
+      averageRating: rows.length
+        ? rows.reduce((sum, row) => sum + row.rating, 0) / rows.length
+        : null,
+    };
   },
   "lists:get": async ({ args }) => {
     const listId = z.object({ listId: z.string() }).parse(args ?? {}).listId;
