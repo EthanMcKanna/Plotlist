@@ -1809,6 +1809,23 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     return true;
   },
+  "episodeProgress:markEpisodeWatched": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), createLog: z.boolean().optional() }).parse(args ?? {});
+    const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
+    if (existing[0]) {
+      return true;
+    }
+    const id = createId("episode");
+    const now = Date.now();
+    await db.insert(episodeProgress).values({ id, userId: user.id, showId: parsed.showId, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, watchedAt: now });
+    if (parsed.createLog) {
+      const logId = createId("log");
+      await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
+      await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
+    }
+    return true;
+  },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodes: z.array(z.object({ episodeNumber: z.number(), title: z.string().optional() })), createLog: z.boolean().optional() }).parse(args ?? {});
