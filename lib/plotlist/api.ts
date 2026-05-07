@@ -90,6 +90,7 @@ export const api = {
     getStats: ref("query", "episodeProgress:getStats"),
     getUpNext: ref("query", "episodeProgress:getUpNext"),
     getProgressForShow: ref("query", "episodeProgress:getProgressForShow"),
+    markEpisodeWatched: ref("mutation", "episodeProgress:markEpisodeWatched"),
     toggleEpisode: ref("mutation", "episodeProgress:toggleEpisode"),
     markSeasonWatched: ref("mutation", "episodeProgress:markSeasonWatched"),
     unmarkSeasonWatched: ref("mutation", "episodeProgress:unmarkSeasonWatched"),
