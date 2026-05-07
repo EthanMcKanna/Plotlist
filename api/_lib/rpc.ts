@@ -130,6 +130,50 @@ function showToDoc(show: typeof shows.$inferSelect | null | undefined) {
   return toDoc(show);
 }
 
+type SeasonSummary = {
+  seasonNumber: number;
+  episodeCount: number;
+  airDate: string | null;
+};
+
+function readSeasonSummaries(payload: unknown): SeasonSummary[] {
+  const raw = (payload as { seasons?: unknown })?.seasons;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((season): SeasonSummary | null => {
+      const seasonNumber =
+        (season?.seasonNumber as number | undefined) ??
+        (season?.season_number as number | undefined);
+      const episodeCount =
+        (season?.episodeCount as number | undefined) ??
+        (season?.episode_count as number | undefined) ??
+        0;
+      const airDate =
+        (season?.airDate as string | null | undefined) ??
+        (season?.air_date as string | null | undefined) ??
+        null;
+      if (typeof seasonNumber !== "number" || seasonNumber < 1) {
+        return null;
+      }
+      return { seasonNumber, episodeCount: Math.max(0, episodeCount), airDate };
+    })
+    .filter((season): season is SeasonSummary => Boolean(season))
+    .sort((left, right) => left.seasonNumber - right.seasonNumber);
+}
+
+async function touchWatchingState(userId: string, showId: string, updatedAt: number) {
+  await db
+    .update(watchStates)
+    .set({ updatedAt })
+    .where(
+      and(
+        eq(watchStates.userId, userId),
+        eq(watchStates.showId, showId),
+        eq(watchStates.status, "watching"),
+      ),
+    );
+}
+
 type ProfileVisibilitySetting = "public" | "following" | "private";
 
 const DEFAULT_PROFILE_VISIBILITY = {
@@ -1264,9 +1308,158 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .from(watchStates)
       .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "watching")))
       .orderBy(desc(watchStates.updatedAt))
-      .limit(10);
-    const showRows = rows.length ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId))) : [];
-    return showRows.map((show) => ({ show: showToDoc(show), showId: show.id }));
+      .limit(50);
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const showIds = rows.map((row) => row.showId);
+    const [showRows, progressRows] = await Promise.all([
+      db.select().from(shows).where(inArray(shows.id, showIds)),
+      db
+        .select()
+        .from(episodeProgress)
+        .where(
+          and(
+            eq(episodeProgress.userId, user.id),
+            inArray(episodeProgress.showId, showIds),
+          ),
+        ),
+    ]);
+    const showById = new Map(showRows.map((show) => [show.id, show] as const));
+
+    const tmdbExternalIds = showRows
+      .filter((show) => show.externalSource === "tmdb")
+      .map((show) => show.externalId);
+    const detailRows =
+      tmdbExternalIds.length > 0
+        ? await db
+            .select()
+            .from(tmdbDetailsCache)
+            .where(
+              and(
+                eq(tmdbDetailsCache.externalSource, "tmdb"),
+                inArray(tmdbDetailsCache.externalId, tmdbExternalIds),
+              ),
+            )
+        : [];
+    const detailsByExternalId = new Map(
+      detailRows.map((row) => [row.externalId, row.payload] as const),
+    );
+
+    type ProgressByShow = Map<
+      string,
+      {
+        count: number;
+        latest: { season: number; episode: number } | null;
+        latestWatchedAt: number | null;
+      }
+    >;
+    const progressByShow: ProgressByShow = new Map();
+    for (const entry of progressRows) {
+      const current =
+        progressByShow.get(entry.showId) ??
+        ({ count: 0, latest: null, latestWatchedAt: null } as {
+          count: number;
+          latest: { season: number; episode: number } | null;
+          latestWatchedAt: number | null;
+        });
+      current.count += 1;
+      current.latestWatchedAt = Math.max(current.latestWatchedAt ?? 0, entry.watchedAt);
+      const candidate = { season: entry.seasonNumber, episode: entry.episodeNumber };
+      if (
+        !current.latest ||
+        candidate.season > current.latest.season ||
+        (candidate.season === current.latest.season &&
+          candidate.episode > current.latest.episode)
+      ) {
+        current.latest = candidate;
+      }
+      progressByShow.set(entry.showId, current);
+    }
+
+    const todayMs = Date.now();
+
+    return rows
+      .map((row) => {
+        const show = showById.get(row.showId);
+        if (!show) return null;
+        const detailPayload =
+          show.externalSource === "tmdb"
+            ? detailsByExternalId.get(show.externalId)
+            : undefined;
+        const seasons = readSeasonSummaries(detailPayload);
+        const totalEpisodes = seasons.reduce(
+          (sum, season) => sum + season.episodeCount,
+          0,
+        );
+        const progress = progressByShow.get(show.id) ?? {
+          count: 0,
+          latest: null,
+          latestWatchedAt: null,
+        };
+
+        let nextSeasonNumber = seasons[0]?.seasonNumber ?? 1;
+        let nextEpisodeNumber = 1;
+
+        if (progress.latest) {
+          const latestSeason = seasons.find(
+            (season) => season.seasonNumber === progress.latest!.season,
+          );
+          if (latestSeason && progress.latest.episode < latestSeason.episodeCount) {
+            nextSeasonNumber = latestSeason.seasonNumber;
+            nextEpisodeNumber = progress.latest.episode + 1;
+          } else {
+            const nextSeason = seasons.find(
+              (season) => season.seasonNumber > progress.latest!.season,
+            );
+            if (nextSeason) {
+              nextSeasonNumber = nextSeason.seasonNumber;
+              nextEpisodeNumber = 1;
+            } else if (seasons.length === 0) {
+              nextSeasonNumber = progress.latest.season;
+              nextEpisodeNumber = progress.latest.episode + 1;
+            } else {
+              nextSeasonNumber = progress.latest.season;
+              nextEpisodeNumber = progress.latest.episode;
+            }
+          }
+        }
+
+        const seasonRecord = seasons.find(
+          (season) => season.seasonNumber === nextSeasonNumber,
+        );
+        const seasonAirMs = seasonRecord?.airDate
+          ? Date.parse(seasonRecord.airDate)
+          : Number.NaN;
+        const isUpcoming =
+          progress.count === 0 &&
+          Number.isFinite(seasonAirMs) &&
+          seasonAirMs > todayMs;
+        const progressPct =
+          totalEpisodes > 0
+            ? Math.min(1, Math.max(0, progress.count / totalEpisodes))
+            : 0;
+
+        return {
+          showId: show.id,
+          show: showToDoc(show),
+          totalWatched: progress.count,
+          totalEpisodes,
+          progressPct,
+          nextSeasonNumber,
+          nextEpisodeNumber,
+          nextEpisodeName: null,
+          nextEpisodeStillUrl: null,
+          nextAirDate: isUpcoming && Number.isFinite(seasonAirMs) ? seasonAirMs : null,
+          isUpcoming,
+          sortTimestamp: Math.max(progress.latestWatchedAt ?? 0, row.updatedAt),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .sort((left, right) => right.sortTimestamp - left.sortTimestamp)
+      .slice(0, 10)
+      .map(({ sortTimestamp: _sortTimestamp, ...entry }) => entry);
   },
   "reviews:getDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
@@ -1794,36 +1987,40 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "episodeProgress:toggleEpisode": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), createLog: z.boolean().optional() }).parse(args ?? {});
+    const now = Date.now();
     const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
     if (existing[0]) {
       await db.delete(episodeProgress).where(eq(episodeProgress.id, existing[0].id));
+      await touchWatchingState(user.id, parsed.showId, now);
       return false;
     }
     const id = createId("episode");
-    const now = Date.now();
     await db.insert(episodeProgress).values({ id, userId: user.id, showId: parsed.showId, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, watchedAt: now });
     if (parsed.createLog) {
       const logId = createId("log");
       await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
       await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
     }
+    await touchWatchingState(user.id, parsed.showId, now);
     return true;
   },
   "episodeProgress:markEpisodeWatched": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), createLog: z.boolean().optional() }).parse(args ?? {});
+    const now = Date.now();
     const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
     if (existing[0]) {
+      await touchWatchingState(user.id, parsed.showId, now);
       return true;
     }
     const id = createId("episode");
-    const now = Date.now();
     await db.insert(episodeProgress).values({ id, userId: user.id, showId: parsed.showId, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, watchedAt: now });
     if (parsed.createLog) {
       const logId = createId("log");
       await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
       await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
     }
+    await touchWatchingState(user.id, parsed.showId, now);
     return true;
   },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
@@ -1836,12 +2033,15 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         await db.insert(episodeProgress).values({ id: createId("episode"), userId: user.id, showId: parsed.showId, seasonNumber: parsed.seasonNumber, episodeNumber: episode.episodeNumber, watchedAt: now });
       }
     }
+    await touchWatchingState(user.id, parsed.showId, now);
     return { success: true };
   },
   "episodeProgress:unmarkSeasonWatched": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});
+    const now = Date.now();
     await db.delete(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber)));
+    await touchWatchingState(user.id, parsed.showId, now);
     return { success: true };
   },
   "reports:create": async ({ args, req }) => {
