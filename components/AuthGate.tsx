@@ -1,5 +1,11 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { usePathname, useRouter, useSegments } from "expo-router";
+import { Platform } from "react-native";
+import {
+  useGlobalSearchParams,
+  usePathname,
+  useRouter,
+  useSegments,
+} from "expo-router";
 import { LoadingScreen } from "./LoadingScreen";
 import { api } from "../lib/plotlist/api";
 import { PlotlistApiError } from "../lib/api/client";
@@ -27,11 +33,45 @@ const ONBOARDING_ROUTES = {
   shows: "/onboarding/shows",
 } as const;
 
+type AuthRoute =
+  | "/sign-in"
+  | "/home"
+  | (typeof ONBOARDING_ROUTES)[keyof typeof ONBOARDING_ROUTES];
+
+function replaceRoute(router: ReturnType<typeof useRouter>, href: AuthRoute) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (window.location.pathname !== href) {
+      window.location.replace(href);
+    }
+    return;
+  }
+  router.replace(href);
+}
+
+function isDevPreviewRoute(
+  pathname: string | null | undefined,
+  previewParam: string | null,
+) {
+  return Boolean(
+    typeof __DEV__ !== "undefined" &&
+      __DEV__ &&
+      (pathname?.startsWith("/dev/") ||
+        (pathname?.startsWith("/show/") && previewParam === "1") ||
+        (pathname === "/home" && previewParam === "1")),
+  );
+}
+
 export function AuthGate({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
   const pathname = usePathname();
+  const params = useGlobalSearchParams();
+  const previewParam = Array.isArray(params.preview)
+    ? params.preview[0] ?? null
+    : typeof params.preview === "string"
+      ? params.preview
+      : null;
   const ensureProfile = useMutation(api.users.ensureProfile);
   const hasEnsuredProfile = useRef(false);
   const hasHandledAuthFailure = useRef(false);
@@ -55,6 +95,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const inAuthGroup =
       segments[0] === "(auth)" || pathname?.startsWith("/sign-in");
     const inOnboardingGroup = segments[0] === "onboarding";
+    const inDevPreview = isDevPreviewRoute(pathname, previewParam);
     const atRoot = pathname === "/";
     const cachedOnboardingStep = getCachedOnboardingStep(me?._id ?? me?.id);
     const effectiveOnboardingStep = cachedOnboardingStep ?? me?.onboardingStep;
@@ -65,23 +106,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const needsOnboarding =
       isAuthenticated && (effectiveOnboardingStep ?? "profile") !== "complete";
 
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace("/sign-in");
+    if (!isAuthenticated && !inAuthGroup && !inDevPreview) {
+      replaceRoute(router, "/sign-in");
       return;
     }
 
     if (isAuthenticated && needsOnboarding && !inOnboardingGroup) {
-      router.replace(ONBOARDING_ROUTES[onboardingStep]);
+      replaceRoute(router, ONBOARDING_ROUTES[onboardingStep]);
       return;
     }
 
     if (isAuthenticated && !needsOnboarding && inOnboardingGroup) {
-      router.replace("/home");
+      replaceRoute(router, "/home");
       return;
     }
 
     if (isAuthenticated && (inAuthGroup || atRoot)) {
-      router.replace("/home");
+      replaceRoute(router, "/home");
     }
   }, [
     isAuthenticated,
@@ -91,6 +132,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     me?.onboardingStep,
     me?._id,
     pathname,
+    previewParam,
     router,
     segments,
   ]);

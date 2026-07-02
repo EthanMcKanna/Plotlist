@@ -60,6 +60,23 @@ function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
   return next;
 }
 
+function getDetailedListItem(entry: any) {
+  return entry?.item ?? entry;
+}
+
+function getDetailedListItemId(entry: any): string | null {
+  const item = getDetailedListItem(entry);
+  return typeof item?._id === "string"
+    ? item._id
+    : typeof item?.id === "string"
+      ? item.id
+      : null;
+}
+
+function getDetailedListItemShow(entry: any) {
+  return entry?.show ?? entry?.item?.show ?? null;
+}
+
 function SortablePosterCard({
   item,
   index,
@@ -93,7 +110,8 @@ function SortablePosterCard({
   onDragMove: (toIndex: number) => void;
   onDragEnd: () => void;
 }) {
-  const itemId = item.item._id as string;
+  const itemId = getDetailedListItemId(item) ?? `${index}`;
+  const show = getDetailedListItemShow(item);
   const isActive = draggingId === itemId;
   const target = getGridPosition(index);
   const canDrag = isOwner && totalItems > 1;
@@ -156,11 +174,15 @@ function SortablePosterCard({
     <GestureDetector gesture={dragGesture}>
       <Animated.View style={animatedStyle}>
         <Pressable
-          onPress={() => onPress(item.show._id)}
+          onPress={() => {
+            if (show?._id) {
+              onPress(show._id);
+            }
+          }}
           className="active:opacity-80"
         >
           <View className="overflow-hidden rounded-2xl">
-            <Poster uri={item.show?.posterUrl} width={ITEM_WIDTH} />
+            <Poster uri={show?.posterUrl} width={ITEM_WIDTH} />
             <View className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1">
               <Text className="text-[11px] font-semibold text-white">
                 #{index + 1}
@@ -171,10 +193,10 @@ function SortablePosterCard({
             className="mt-2 text-xs font-medium text-text-primary"
             numberOfLines={2}
           >
-            {item.show?.title ?? "Unknown"}
+            {show?.title ?? "Unknown"}
           </Text>
           <Text className="mt-0.5 text-xs text-text-tertiary">
-            {item.show?.year ?? "Unknown year"}
+            {show?.year ?? "Unknown year"}
           </Text>
         </Pressable>
       </Animated.View>
@@ -189,15 +211,27 @@ export default function ListScreen() {
   const me = useQuery(api.users.me);
   const rawItems = useQuery(api.listItems.listDetailed, { listId });
   const items = useMemo(
-    () => rawItems?.filter((entry: any) => entry.show) ?? [],
+    () =>
+      rawItems?.filter(
+        (entry: any) => getDetailedListItemId(entry) && getDetailedListItemShow(entry),
+      ) ?? [],
     [rawItems],
   );
   const report = useMutation(api.reports.create);
   const reorder = useMutation(api.listItems.reorder);
-  const coverUrl = useQuery(
+  const listCoverUrl =
+    typeof list?.coverUrl === "string" && list.coverUrl.length > 0
+      ? list.coverUrl
+      : null;
+  const legacyCoverStorageId =
+    typeof list?.coverStorageId === "string" && list.coverStorageId.length > 0
+      ? list.coverStorageId
+      : null;
+  const resolvedLegacyCoverUrl = useQuery(
     api.storage.getUrl,
-    list?.coverStorageId ? { storageId: list.coverStorageId } : "skip",
+    !listCoverUrl && legacyCoverStorageId ? { storageId: legacyCoverStorageId } : "skip",
   );
+  const coverUrl = listCoverUrl ?? resolvedLegacyCoverUrl;
   const [orderedItems, setOrderedItems] = useState(items);
   const [showReport, setShowReport] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -243,7 +277,9 @@ export default function ListScreen() {
       try {
         await reorder({
           listId,
-          orderedItemIds: nextOrder.map((entry: any) => entry.item._id),
+          itemIds: nextOrder
+            .map((entry: any) => getDetailedListItemId(entry))
+            .filter((id: string | null): id is string => Boolean(id)),
         });
       } catch (error) {
         Alert.alert("Reorder failed", String(error));
@@ -278,7 +314,7 @@ export default function ListScreen() {
         return;
       }
       setOrderedItems((prev: any[]) => {
-        const fromIndex = prev.findIndex((entry) => entry.item._id === activeId);
+        const fromIndex = prev.findIndex((entry) => getDetailedListItemId(entry) === activeId);
         if (fromIndex < 0 || fromIndex === toIndex) {
           return prev;
         }
@@ -302,7 +338,7 @@ export default function ListScreen() {
   const renderPoster = useCallback(
     (item: any, index: number) => (
       <SortablePosterCard
-        key={item.item._id}
+        key={getDetailedListItemId(item) ?? `${index}`}
         item={item}
         index={index}
         totalItems={orderedItems.length}

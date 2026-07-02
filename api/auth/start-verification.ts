@@ -6,14 +6,14 @@ import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { createId } from "../_lib/ids";
 import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
-import { enforceRateLimit } from "../_lib/rate-limit";
+import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "../_lib/rate-limit";
 import { sendPhoneVerificationCode } from "../_lib/twilio";
 
 const requestSchema = z.object({
   phone: z.string(),
 });
 
-export default withJsonRoute(requestSchema, async ({ body, res }) => {
+export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
   const normalizedPhone = normalizePhoneNumber(body.phone);
   if (!normalizedPhone) {
     throw new ApiError(400, "invalid_phone", "Enter a valid phone number");
@@ -26,7 +26,8 @@ export default withJsonRoute(requestSchema, async ({ body, res }) => {
     });
   }
 
-  await enforceRateLimit(`phone-verification:${normalizedPhone}`, 5, 10 * 60 * 1000);
+  await enforceRateLimit(rateLimitKey("phone-verification", normalizedPhone), 5, 10 * 60 * 1000);
+  await enforceRateLimit(clientRateLimitKey(req, "phone-verification-ip"), 20, 10 * 60 * 1000);
   await sendPhoneVerificationCode(normalizedPhone);
 
   const now = Date.now();

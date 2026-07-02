@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 const serverEnvSchema = z.object({
-  PLANETSCALE_DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32),
   REFRESH_TOKEN_SECRET: z.string().min(32),
   CRON_SECRET: z.string().min(1),
@@ -10,8 +9,6 @@ const serverEnvSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1),
   TWILIO_VERIFY_SERVICE_SID: z.string().min(1),
   CONTACT_HASH_SECRET: z.string().min(1),
-  BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
-  VERCEL_BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2-preview"),
   GEMINI_EMBEDDING_VERSION: z.string().default("shows-v1"),
@@ -30,4 +27,10 @@ export function getServerEnv() {
 
   cachedEnv = serverEnvSchema.parse(process.env);
   return cachedEnv;
+}
+
+// The Worker entrypoint feeds bindings into process.env before any request
+// touches getServerEnv; this reset hook keeps tests hermetic.
+export function resetServerEnvCache() {
+  cachedEnv = null;
 }

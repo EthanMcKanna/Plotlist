@@ -140,6 +140,79 @@ describe("CalendarScreen", () => {
     expect(screen.getByText("Beta")).toBeTruthy();
   });
 
+  it("shows provider names when logo URLs are not available yet", () => {
+    render(<CalendarScreen />);
+
+    expect(screen.getByText("Netflix")).toBeTruthy();
+    expect(screen.getByText("Hulu")).toBeTruthy();
+  });
+
+  it("offers the full release calendar view set", () => {
+    render(<CalendarScreen />);
+
+    expect(screen.getByText("Tonight")).toBeTruthy();
+    expect(screen.getByText("All Upcoming")).toBeTruthy();
+    expect(screen.getByText("Premieres")).toBeTruthy();
+    expect(screen.getByText("New Seasons")).toBeTruthy();
+    expect(screen.getByText("Finales")).toBeTruthy();
+  });
+
+  it("requests the returning season view when the new seasons filter is selected", () => {
+    const observedViews: string[] = [];
+    (mockUseQuery as any).mockImplementation((_: unknown, args?: CalendarArgs | "skip") => {
+      if (!args || args === "skip") return undefined;
+      observedViews.push(args.view);
+      return buildQueryResult(args);
+    });
+
+    render(<CalendarScreen />);
+    fireEvent.press(screen.getByText("New Seasons"));
+
+    expect(observedViews).toContain("returning");
+  });
+
+  it("uses date-only group labels instead of timezone-sensitive timestamps", () => {
+    jest.useFakeTimers({
+      now: new Date("2026-06-01T12:00:00.000Z"),
+    });
+
+    try {
+      (mockUseQuery as any).mockImplementation((_: unknown, args?: CalendarArgs | "skip") => {
+        if (!args || args === "skip") return undefined;
+        if (args.view === "upcoming") {
+          return {
+            providerOptions: [],
+            selectedProviders: [],
+            groups: [
+              {
+                airDate: "2026-06-02",
+                airDateTs: Date.parse("2026-06-01T00:00:00.000Z"),
+                items: [
+                  {
+                    ...makeEvent("Love Island USA", ["Peacock"]),
+                    airDate: "2026-06-02",
+                    airDateTs: Date.parse("2026-06-01T00:00:00.000Z"),
+                  },
+                ],
+              },
+            ],
+            totalItems: 1,
+            staleShowIds: [],
+            continueCursor: "1",
+            isDone: true,
+          };
+        }
+        return buildQueryResult(args);
+      });
+
+      render(<CalendarScreen />);
+
+      expect(screen.getAllByText("Tuesday, Jun 2").length).toBeGreaterThanOrEqual(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("renders the empty state when the selected view has no results", async () => {
     (mockUseQuery as any).mockImplementation((_: unknown, args?: CalendarArgs | "skip") => {
       if (!args || args === "skip") return undefined;
@@ -162,5 +235,48 @@ describe("CalendarScreen", () => {
     await waitFor(() => {
       expect(screen.getByText("No upcoming releases")).toBeTruthy();
     });
+  });
+
+  it("refreshes stale release data using the client local date", async () => {
+    (mockUseQuery as any).mockImplementation((_: unknown, args?: CalendarArgs | "skip") => {
+      if (!args || args === "skip") return undefined;
+      return {
+        ...buildQueryResult(args),
+        staleShowIds: ["show-alpha"],
+      };
+    });
+
+    render(<CalendarScreen />);
+
+    await waitFor(() => {
+      expect(mockRefreshForMe).toHaveBeenCalledWith({
+        today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      });
+    });
+    expect(screen.getByText("Checking latest episode dates")).toBeTruthy();
+  });
+
+  it("refreshes stale saved shows even when no cached release cards exist yet", async () => {
+    (mockUseQuery as any).mockImplementation((_: unknown, args?: CalendarArgs | "skip") => {
+      if (!args || args === "skip") return undefined;
+      return {
+        providerOptions: [],
+        selectedProviders: [],
+        groups: [],
+        totalItems: 0,
+        staleShowIds: ["favorite-without-cache"],
+        continueCursor: "0",
+        isDone: true,
+      };
+    });
+
+    render(<CalendarScreen />);
+
+    await waitFor(() => {
+      expect(mockRefreshForMe).toHaveBeenCalledWith({
+        today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      });
+    });
+    expect(screen.getByText("Checking latest episode dates")).toBeTruthy();
   });
 });

@@ -10,6 +10,8 @@ import * as Sharing from "expo-sharing";
 
 import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
+import { GlassSurface } from "../../components/NativeGlass";
+import { PrimaryButton } from "../../components/PrimaryButton";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
@@ -133,7 +135,7 @@ function PrivacyCard({
   onChange: (value: ProfileVisibilitySetting) => void;
 }) {
   return (
-    <View className="rounded-2xl border border-dark-border bg-dark-card p-4">
+    <GlassSurface radius={8} variant="surface" contentStyle={{ padding: 16 }}>
       <Text className="text-sm font-semibold text-text-primary">{title}</Text>
       <Text className="mt-1 text-sm leading-5 text-text-tertiary">{description}</Text>
       <View className="mt-3">
@@ -143,7 +145,7 @@ function PrivacyCard({
           onChange={(next) => onChange(next as ProfileVisibilitySetting)}
         />
       </View>
-    </View>
+    </GlassSurface>
   );
 }
 
@@ -504,39 +506,13 @@ export default function SettingsScreen() {
           </View>
 
           {/* Save */}
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              handleSave();
-            }}
+          <PrimaryButton
+            label={saving ? "Saving..." : isDirty ? "Save changes" : "No changes"}
+            onPress={handleSave}
             disabled={!canSave}
-            className={`mt-6 items-center justify-center rounded-full py-3.5 ${
-              canSave
-                ? "bg-brand-500 active:bg-brand-600"
-                : "bg-dark-elevated"
-            }`}
-            style={
-              canSave
-                ? {
-                    shadowColor: "#0ea5e9",
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 12,
-                  }
-                : undefined
-            }
-          >
-            <View className="flex-row items-center gap-2">
-              {saving ? <ActivityIndicator color="#fff" size="small" /> : null}
-              <Text
-                className={`text-base font-semibold ${
-                  canSave ? "text-white" : "text-text-tertiary"
-                }`}
-              >
-                {saving ? "Saving..." : isDirty ? "Save changes" : "No changes"}
-              </Text>
-            </View>
-          </Pressable>
+            loading={saving}
+            className="mt-6"
+          />
         </View>
 
         <View className="mt-10">
@@ -600,7 +576,7 @@ export default function SettingsScreen() {
         {/* ── Account ── */}
         <View className="mt-10">
           <SectionHeader title="Account" />
-          <View className="mt-2 rounded-2xl border border-dark-border bg-dark-card">
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
             {me?.isAdmin ? (
               <>
                 <SettingsRow
@@ -623,19 +599,19 @@ export default function SettingsScreen() {
               label="Sign out"
               onPress={handleSignOut}
             />
-          </View>
+          </GlassSurface>
         </View>
 
         {/* ── Danger zone ── */}
         <View className="mt-10">
-          <View className="rounded-2xl border border-dark-border bg-dark-card">
+          <GlassSurface radius={8} variant="surface">
             <SettingsRow
               icon="trash-outline"
               label="Delete my account"
               onPress={handleDelete}
               destructive
             />
-          </View>
+          </GlassSurface>
         </View>
 
         {/* Footer */}

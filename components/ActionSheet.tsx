@@ -2,6 +2,8 @@ import { Modal, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
+import { GlassSurface } from "./NativeGlass";
+
 export type ActionSheetOption = {
   label: string;
   icon?: keyof typeof Ionicons.glyphMap;
@@ -30,10 +32,13 @@ export function ActionSheet({
       onRequestClose={onClose}
     >
       <Pressable onPress={onClose} className="flex-1 justify-end bg-black/50">
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          className="rounded-t-3xl bg-dark-elevated pb-8 pt-4"
-        >
+        <Pressable onPress={(e) => e.stopPropagation()}>
+          <GlassSurface
+            radius={28}
+            variant="sheet"
+            style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
+            contentStyle={{ paddingBottom: 32, paddingTop: 16 }}
+          >
           {/* Handle bar */}
           <View className="mb-4 items-center">
             <View className="h-1 w-10 rounded-full bg-dark-border" />
@@ -87,6 +92,7 @@ export function ActionSheet({
               </Text>
             </Pressable>
           </View>
+          </GlassSurface>
         </Pressable>
       </Pressable>
     </Modal>

@@ -8,9 +8,23 @@
       "port": 8081
     },
     {
-      "name": "vercel-api",
+      "name": "web-against-prod",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "EXPO_PUBLIC_API_URL=https://plotlist.ethanmckanna.workers.dev",
+        "npx",
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8082"
+      ],
+      "port": 8082
+    },
+    {
+      "name": "worker-api",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vercel", "dev", "--listen", "3001"],
+      "runtimeArgs": ["wrangler", "dev", "--port", "3001"],
       "port": 3001
     }
   ]

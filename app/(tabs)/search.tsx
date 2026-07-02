@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
   Alert,
   Linking,
   Platform,
   Pressable,
-  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -15,37 +21,93 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAction, useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInDown, FadeInRight } from "react-native-reanimated";
-import { Image } from "expo-image";
+import Animated, { FadeInDown } from "react-native-reanimated";
 
 import { ContactInviteRow } from "../../components/ContactInviteRow";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
 import { EmptyState } from "../../components/EmptyState";
-import { Poster } from "../../components/Poster";
+import { RailSkeleton } from "../../components/RailSkeleton";
 import { Screen } from "../../components/Screen";
+import {
+  SearchCommandCenter,
+  type SearchMode,
+} from "../../components/SearchCommandCenter";
+import { SearchDiscoveryRail } from "../../components/SearchDiscoveryRail";
 import { SearchResultRow } from "../../components/SearchResultRow";
-import { SegmentedControl } from "../../components/SegmentedControl";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../lib/plotlist/api";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { buildInviteMessage, buildSmsInviteUrl } from "../../lib/invite";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import {
+  SEARCH_DISCOVER_SECTIONS,
+  buildSearchDiscoverSections,
+  getSearchDiscoverCacheKey,
+  getSearchDiscoverFetchPlan,
+  getDailyDiscoverPage,
+  type SearchDiscoverSection,
+} from "../../lib/searchDiscover";
+import {
+  getCatalogSearchViewState,
+  getTrimmedSearchQuery,
+} from "../../lib/searchExperience";
 
-type SearchMode = "shows" | "people";
+const SHOW_QUERY_MIN_LENGTH = 3;
+const PEOPLE_QUERY_MIN_LENGTH = 2;
 
-const modeOptions = [
-  { value: "shows", label: "Shows" },
-  { value: "people", label: "People" },
+const DISCOVER_FETCH_LIMIT = 18;
+const DISCOVER_SKELETONS = [
+  {
+    accent: "#F59E0B",
+    icon: "flame" as keyof typeof Ionicons.glyphMap,
+    kicker: "Discover",
+    title: "Trending Today",
+  },
+  {
+    accent: "#38BDF8",
+    icon: "sparkles" as keyof typeof Ionicons.glyphMap,
+    kicker: "Discover",
+    title: "Fresh Premieres",
+  },
+  {
+    accent: "#F472B6",
+    icon: "diamond" as keyof typeof Ionicons.glyphMap,
+    kicker: "Discover",
+    title: "Hidden Gems",
+  },
 ];
+const DISCOVER_ACCENTS: Record<string, string> = {
+  airing_today: "#A3E635",
+  apple_tv: "#F1F3F7",
+  disney_plus: "#60A5FA",
+  fresh_premieres: "#38BDF8",
+  genre_comedy: "#FDE68A",
+  genre_crime: "#FB7185",
+  genre_drama: "#C084FC",
+  genre_sci_fi: "#22D3EE",
+  hidden_gems: "#F472B6",
+  hulu: "#22C55E",
+  max: "#818CF8",
+  netflix: "#F87171",
+  prime_video: "#38BDF8",
+  top_rated: "#FACC15",
+  trending_day: "#F59E0B",
+};
 
-const SEMANTIC_PROMPTS = [
-  "smart funny mystery with great dialogue",
-  "slow-burn sci-fi",
-  "comfort comedy",
-  "shows like Severance but less dark",
-  "dark crime",
-  "good with parents",
-];
+let searchDiscoverCache:
+  | { key: string; sections: SearchDiscoverSection<any>[] }
+  | null = null;
+
+export function getSearchSectionAccent(
+  section: Pick<SearchDiscoverSection<any>, "key">,
+  index = 0,
+) {
+  return (
+    DISCOVER_ACCENTS[section.key] ??
+    ["#38BDF8", "#22C55E", "#F59E0B", "#F472B6"][index % 4]
+  );
+}
 
 /* ─── Section Header ───────────────────────────────────────────────── */
 
@@ -59,21 +121,94 @@ function SectionLine({
   icon?: keyof typeof Ionicons.glyphMap;
 }) {
   return (
-    <View className="flex-row items-center gap-3 mb-4">
-      <View className="flex-row items-center gap-2">
+    <View className="mb-2 flex-row items-center gap-2">
+      <View className="flex-row items-center gap-1.5">
         {icon && <Ionicons name={icon} size={14} color="#5A6070" />}
-        <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
+        <Text className="text-[11px] font-bold uppercase text-text-tertiary">
           {label}
         </Text>
       </View>
       {count !== undefined && count > 0 && (
-        <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-          <Text className="text-xs font-medium text-text-tertiary">
+        <View className="rounded-full bg-dark-elevated px-1.5 py-0.5">
+          <Text className="text-[11px] font-medium text-text-tertiary">
             {count}
           </Text>
         </View>
       )}
       <View className="flex-1 h-px bg-dark-border" />
+    </View>
+  );
+}
+
+function SearchLoadingRows() {
+  return (
+    <View className="py-1">
+      {[0, 1, 2].map((item) => (
+        <View
+          key={item}
+          style={styles.resultSkeleton}
+          className="flex-row gap-3"
+        >
+          <View className="h-[78px] w-[52px] rounded-lg bg-dark-elevated" />
+          <View className="flex-1 py-1">
+            <View className="h-4 w-3/4 rounded bg-dark-elevated" />
+            <View className="mt-3 h-3 w-20 rounded bg-dark-elevated" />
+            <View className="mt-4 h-3 w-full rounded bg-dark-elevated" />
+            <View className="mt-2 h-3 w-2/3 rounded bg-dark-elevated" />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function SearchDiscoverSkeletons() {
+  return (
+    <View style={styles.discoverSkeletonStack}>
+      {DISCOVER_SKELETONS.map((section, index) => (
+        <RailSkeleton
+          key={section.title}
+          index={index + 1}
+          kicker={section.kicker}
+          title={section.title}
+          accent={section.accent}
+          icon={section.icon}
+          variant="poster"
+        />
+      ))}
+    </View>
+  );
+}
+
+function SearchErrorCard({
+  title,
+  description,
+  onRetry,
+}: {
+  title: string;
+  description: string;
+  onRetry: () => void;
+}) {
+  return (
+    <View style={styles.errorCard}>
+      <View style={styles.errorIcon}>
+        <Ionicons name="refresh" size={18} color="#0D0F14" />
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text className="text-base font-black text-text-primary">{title}</Text>
+        <Text className="mt-1 text-sm leading-5 text-text-tertiary">
+          {description}
+        </Text>
+      </View>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel={`Retry ${title}`}
+        style={styles.retryButton}
+        className="active:opacity-75"
+      >
+        <Text className="text-[13px] font-black text-text-inverse">Retry</Text>
+      </Pressable>
     </View>
   );
 }
@@ -90,10 +225,16 @@ export default function SearchScreen() {
 
   const [mode, setMode] = useState<SearchMode>("shows");
   const [query, setQuery] = useState("");
-  const trimmedQuery = query.trim();
+  const trimmedQuery = getTrimmedSearchQuery(query);
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [catalogResults, setCatalogResults] = useState<any[]>([]);
+  const [catalogResultsQuery, setCatalogResultsQuery] = useState("");
   const [isSearchingCatalog, setIsSearchingCatalog] = useState(false);
+  const [catalogError, setCatalogError] = useState<{
+    query: string;
+    message: string;
+  } | null>(null);
+  const [catalogRetryKey, setCatalogRetryKey] = useState(0);
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [invitingContactId, setInvitingContactId] = useState<string | null>(
     null,
@@ -102,14 +243,36 @@ export default function SearchScreen() {
     Record<string, string>
   >({});
   const [isFocused, setIsFocused] = useState(false);
+  const deferredCatalogResults = useDeferredValue(catalogResults);
 
-  const searchReady = trimmedQuery.length >= 3 && debouncedQuery.length >= 3;
-  const hasSearchResults = catalogResults.length > 0 || !isSearchingCatalog;
-  const showDiscover =
-    mode === "shows" &&
-    (trimmedQuery.length < 3 ||
-      debouncedQuery.length < 3 ||
-      (searchReady && isSearchingCatalog && !hasSearchResults));
+  const catalogViewState = useMemo(
+    () =>
+      getCatalogSearchViewState({
+        mode,
+        query,
+        debouncedQuery,
+        minLength: SHOW_QUERY_MIN_LENGTH,
+        isAuthenticated,
+        isSearching: isSearchingCatalog,
+        resultCount: deferredCatalogResults.length,
+        resultsQuery: catalogResultsQuery,
+        hasError: catalogError?.query === debouncedQuery,
+      }),
+    [
+      mode,
+      query,
+      debouncedQuery,
+      isAuthenticated,
+      isSearchingCatalog,
+      deferredCatalogResults.length,
+      catalogResultsQuery,
+      catalogError?.query,
+    ],
+  );
+  const showCatalogPanel =
+    catalogViewState.surface !== "hidden" &&
+    catalogViewState.surface !== "discover";
+  const showDiscover = catalogViewState.surface === "discover";
 
   /* ── URL param sync ────────────────────────────────────────── */
 
@@ -129,7 +292,9 @@ export default function SearchScreen() {
   const peopleResults =
     useQuery(
       api.users.search,
-      hasProfile && mode === "people" && trimmedQuery.length >= 2
+      hasProfile &&
+        mode === "people" &&
+        trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH
         ? { text: trimmedQuery, limit: 12 }
         : "skip",
     ) ?? [];
@@ -145,7 +310,7 @@ export default function SearchScreen() {
       api.contacts.getMatches,
       hasProfile &&
         mode === "people" &&
-        trimmedQuery.length < 2 &&
+        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH &&
         contactStatus?.hasSynced
         ? { limit: 6 }
         : "skip",
@@ -156,7 +321,7 @@ export default function SearchScreen() {
       api.contacts.getInviteCandidates,
       hasProfile &&
         mode === "people" &&
-        trimmedQuery.length < 2 &&
+        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH &&
         contactStatus?.hasSynced
         ? { limit: 10 }
         : "skip",
@@ -167,7 +332,7 @@ export default function SearchScreen() {
       api.contacts.searchInviteCandidates,
       hasProfile &&
         mode === "people" &&
-        trimmedQuery.length >= 2 &&
+        trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH &&
         contactStatus?.hasSynced
         ? { text: trimmedQuery, limit: 10 }
         : "skip",
@@ -176,7 +341,9 @@ export default function SearchScreen() {
   const suggestedPeople =
     useQuery(
       api.users.suggested,
-      hasProfile && mode === "people" && trimmedQuery.length < 2
+      hasProfile &&
+        mode === "people" &&
+        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH
         ? { limit: 6 }
         : "skip",
     ) ?? [];
@@ -190,8 +357,8 @@ export default function SearchScreen() {
   const sendInvite = useMutation(api.contacts.sendInvite);
 
   const [discoverSections, setDiscoverSections] = useState<
-    Record<string, { label: string; icon?: keyof typeof Ionicons.glyphMap; logoUrl?: string; items: any[] }>
-  >({});
+    SearchDiscoverSection<any>[]
+  >([]);
   const [isLoadingDiscover, setIsLoadingDiscover] = useState(false);
 
   /* ── Effects ───────────────────────────────────────────────── */
@@ -199,19 +366,39 @@ export default function SearchScreen() {
   useEffect(() => {
     let active = true;
 
-    if (mode !== "shows" || !isAuthenticated || debouncedQuery.length < 3) {
-      setCatalogResults([]);
+    if (
+      mode !== "shows" ||
+      !isAuthenticated ||
+      debouncedQuery.length < SHOW_QUERY_MIN_LENGTH
+    ) {
       setIsSearchingCatalog(false);
+      setCatalogError(null);
       return;
     }
 
     setIsSearchingCatalog(true);
-    searchCatalog({ text: debouncedQuery })
+    setCatalogError(null);
+    const requestQuery = debouncedQuery;
+
+    searchCatalog({ text: requestQuery })
       .then((results) => {
-        if (active) setCatalogResults(results);
+        if (active) {
+          setCatalogResults(results);
+          setCatalogResultsQuery(requestQuery);
+        }
       })
-      .catch(() => {
-        if (active) setCatalogResults([]);
+      .catch((error) => {
+        if (active) {
+          setCatalogResults([]);
+          setCatalogResultsQuery(requestQuery);
+          setCatalogError({
+            query: requestQuery,
+            message:
+              error instanceof Error
+                ? error.message
+                : "Catalog search failed. Please try again.",
+          });
+        }
       })
       .finally(() => {
         if (active) setIsSearchingCatalog(false);
@@ -220,68 +407,95 @@ export default function SearchScreen() {
     return () => {
       active = false;
     };
-  }, [mode, searchCatalog, debouncedQuery, isAuthenticated]);
+  }, [mode, searchCatalog, debouncedQuery, isAuthenticated, catalogRetryKey]);
 
   useEffect(() => {
-    const handle = setTimeout(() => setDebouncedQuery(trimmedQuery), 400);
+    const handle = setTimeout(() => setDebouncedQuery(trimmedQuery), 250);
     return () => clearTimeout(handle);
   }, [trimmedQuery]);
+
+  useEffect(() => {
+    if (mode !== "shows" || trimmedQuery.length >= SHOW_QUERY_MIN_LENGTH) {
+      return;
+    }
+    setCatalogResults([]);
+    setCatalogResultsQuery("");
+    setCatalogError(null);
+  }, [mode, trimmedQuery]);
 
   /* ── Fetch TMDB discover sections when idle ─────────────────── */
 
   useEffect(() => {
     if (!showDiscover) {
-      setDiscoverSections({});
+      setDiscoverSections([]);
+      setIsLoadingDiscover(false);
       return;
     }
     let cancelled = false;
+
+    const cacheKey = getSearchDiscoverCacheKey(SEARCH_DISCOVER_SECTIONS);
+    if (searchDiscoverCache?.key === cacheKey) {
+      setDiscoverSections(searchDiscoverCache.sections);
+      setIsLoadingDiscover(false);
+      return;
+    }
+
+    setDiscoverSections([]);
     setIsLoadingDiscover(true);
-    const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
-    const sections: Array<{
-      key: string;
-      category: Parameters<typeof getTmdbList>[0]["category"];
-      label: string;
-      icon?: keyof typeof Ionicons.glyphMap;
-      logoUrl?: string;
-    }> = [
-      { key: "popular", category: "popular", label: "Popular Now", icon: "flame" },
-      { key: "top_rated", category: "top_rated", label: "Top Rated", icon: "star" },
-      { key: "on_the_air", category: "on_the_air", label: "Airing Now", icon: "tv" },
-      { key: "netflix", category: "netflix", label: "Netflix", logoUrl: TMDB_LOGO("/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg") },
-      { key: "apple_tv", category: "apple_tv", label: "Apple TV", logoUrl: TMDB_LOGO("/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg") },
-      { key: "max", category: "max", label: "HBO Max", logoUrl: TMDB_LOGO("/jbe4gVSfRlbPTdESXhEKpornsfu.jpg") },
-      { key: "disney_plus", category: "disney_plus", label: "Disney+", logoUrl: TMDB_LOGO("/97yvRBw1GzX7fXprcF80er19ot.jpg") },
-      { key: "hulu", category: "hulu", label: "Hulu", logoUrl: TMDB_LOGO("/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg") },
-      { key: "prime_video", category: "prime_video", label: "Prime Video", logoUrl: TMDB_LOGO("/pvske1MyAoymrs5bguRfVqYiM9a.jpg") },
-      { key: "genre_drama", category: "genre_drama", label: "Drama", icon: "film" },
-      { key: "genre_comedy", category: "genre_comedy", label: "Comedy", icon: "happy" },
-      { key: "genre_sci_fi", category: "genre_sci_fi", label: "Sci-Fi & Fantasy", icon: "rocket" },
-    ];
-    Promise.all(
-      sections.map((s) => getTmdbList({ category: s.category, limit: 12 })),
-    )
-      .then((results) => {
-        if (cancelled) return;
-        const next: Record<
-          string,
-          { label: string; icon?: keyof typeof Ionicons.glyphMap; logoUrl?: string; items: any[] }
-        > = {};
-        sections.forEach((s, i) => {
-          next[s.key] = {
-            label: s.label,
-            icon: s.icon,
-            logoUrl: s.logoUrl,
-            items: results[i] ?? [],
-          };
-        });
-        setDiscoverSections(next);
-      })
-      .catch(() => {
-        if (!cancelled) setDiscoverSections({});
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingDiscover(false);
+
+    const resultsByKey: Record<string, any[]> = {};
+    const loadSections = async (
+      sections: typeof SEARCH_DISCOVER_SECTIONS,
+    ) => {
+      const results = await Promise.allSettled(
+        sections.map((section) =>
+          getTmdbList({
+            category: section.category,
+            limit: DISCOVER_FETCH_LIMIT,
+            page: getDailyDiscoverPage(section),
+          }),
+        ),
+      );
+
+      sections.forEach((section, index) => {
+        const result = results[index];
+        if (result?.status === "fulfilled" && Array.isArray(result.value)) {
+          resultsByKey[section.key] = result.value;
+        }
       });
+
+      const sectionsToRender = buildSearchDiscoverSections(
+        SEARCH_DISCOVER_SECTIONS,
+        resultsByKey,
+      );
+
+      if (!cancelled) {
+        setDiscoverSections(sectionsToRender);
+        if (sectionsToRender.length > 0) {
+          setIsLoadingDiscover(false);
+        }
+      }
+      return sectionsToRender;
+    };
+
+    const { primary, secondary } = getSearchDiscoverFetchPlan(
+      SEARCH_DISCOVER_SECTIONS,
+    );
+
+    void (async () => {
+      const primarySections = await loadSections(primary);
+      if (cancelled) return;
+
+      if (secondary.length > 0) {
+        const fullSections = await loadSections(secondary);
+        if (cancelled) return;
+        searchDiscoverCache = { key: cacheKey, sections: fullSections };
+      } else {
+        searchDiscoverCache = { key: cacheKey, sections: primarySections };
+      }
+      if (!cancelled) setIsLoadingDiscover(false);
+    })();
+
     return () => {
       cancelled = true;
     };
@@ -297,7 +511,7 @@ export default function SearchScreen() {
           "Create an account to add shows and track what you watch.",
           [
             { text: "Cancel", style: "cancel" },
-            { text: "Sign in", onPress: () => router.push("/(auth)/sign-in") },
+            { text: "Sign in", onPress: () => router.push("/sign-in") },
           ],
         );
         return;
@@ -364,10 +578,11 @@ export default function SearchScreen() {
         setInvitingContactId(
           candidate.sourceRecordId ?? candidate.displayName,
         );
-        const inviteMessage =
-          "Join me on Plotlist. Track shows, find friends, and share what you're watching.";
-        const sep = Platform.OS === "ios" ? "&" : "?";
-        const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(inviteMessage)}`;
+        const smsUrl = buildSmsInviteUrl({
+          phone,
+          message: buildInviteMessage(),
+          platform: Platform.OS,
+        });
         if (!(await Linking.canOpenURL(smsUrl))) {
           throw new Error("SMS is not available on this device");
         }
@@ -384,8 +599,17 @@ export default function SearchScreen() {
 
   const handleClear = useCallback(() => {
     setQuery("");
+    setDebouncedQuery("");
+    setCatalogResults([]);
+    setCatalogResultsQuery("");
+    setCatalogError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     inputRef.current?.focus();
+  }, []);
+
+  const handleRetryCatalogSearch = useCallback(() => {
+    setCatalogRetryKey((value) => value + 1);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
   /* ── List renderers ────────────────────────────────────────── */
@@ -394,13 +618,16 @@ export default function SearchScreen() {
 
   const renderCatalogItem = useCallback(
     ({ item }: { item: any }) => (
-      <View className="mb-3">
+      <View>
         <SearchResultRow
           title={item.title}
           year={item.year}
           overview={item.overview}
           posterUrl={item.posterUrl}
           actionLabel={item.matchLabel ?? "Add to Plotlist"}
+          sourceLabel={
+            item.externalSource === "tmdb" ? "TMDB" : item.externalSource
+          }
           onPress={() => handleAddFromCatalog(item)}
         />
       </View>
@@ -410,7 +637,7 @@ export default function SearchScreen() {
 
   const renderUserItem = useCallback(
     ({ item }: { item: any }) => (
-      <View className="mb-3">
+      <View className="mb-2">
         <UserRow
           userId={item.user._id}
           displayName={item.user.displayName ?? item.user.name}
@@ -421,6 +648,7 @@ export default function SearchScreen() {
           isMutualFollow={item.isMutualFollow}
           mutualCount={item.mutualCount}
           inContacts={item.inContacts}
+          sharedShowCount={item.sharedShowCount}
         />
       </View>
     ),
@@ -432,179 +660,55 @@ export default function SearchScreen() {
   return (
     <Screen scroll hasTabBar keyboardShouldPersistTaps="always">
       <View style={{ paddingBottom: 100 }}>
-        {/* ── Header ─────────────────────────────────────────── */}
-        <View className="px-5 pt-4">
-          <Text className="text-3xl font-bold tracking-tight text-text-primary">
-            Explore
-          </Text>
-          <Text className="mt-1 text-sm text-text-tertiary">
-            {mode === "shows"
-              ? "Search by title or describe the vibe you want."
-              : "Search by name or @username, or sync your contacts."}
-          </Text>
-        </View>
-
-        {/* ── Search Bar ─────────────────────────────────────── */}
-        <View className="px-5 mt-4">
-          <View
-            className="flex-row items-center rounded-2xl bg-dark-card px-4"
-            style={{
-              borderWidth: 1,
-              borderColor: isFocused
-                ? "rgba(14, 165, 233, 0.35)"
-                : "rgba(42, 46, 56, 1)",
-            }}
-          >
-            <Ionicons
-              name="search-outline"
-              size={20}
-              color={isFocused ? "#38bdf8" : "#5A6070"}
-            />
-            <TextInput
-              ref={inputRef}
-              value={query}
-              onChangeText={setQuery}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              placeholder={
-                mode === "shows"
-                  ? "Try: slow-burn sci-fi or shows like Severance…"
-                  : "Search people or @username\u2026"
-              }
-              placeholderTextColor="#5A6070"
-              className="flex-1 ml-3 py-3.5 text-[16px] text-text-primary"
-              returnKeyType="search"
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-            {query.length > 0 && (
-              <Pressable onPress={handleClear} hitSlop={8}>
-                <Ionicons name="close-circle" size={20} color="#5A6070" />
-              </Pressable>
-            )}
-          </View>
-        </View>
-
-        {/* ── Mode Toggle ────────────────────────────────────── */}
-        <View className="px-5 mt-4">
-          <SegmentedControl
-            options={modeOptions}
-            value={mode}
-            onChange={(v) => {
-              setMode(v as SearchMode);
+        <View className="px-5 pt-2">
+          <SearchCommandCenter
+            mode={mode}
+            query={query}
+            inputRef={inputRef}
+            isFocused={isFocused}
+            isBusy={catalogViewState.isBusy}
+            onModeChange={(nextMode) => {
+              setMode(nextMode);
               setQuery("");
+              setDebouncedQuery("");
+              setCatalogResults([]);
+              setCatalogResultsQuery("");
+              setCatalogError(null);
             }}
+            onQueryChange={setQuery}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onClear={handleClear}
           />
+
         </View>
 
-        {mode === "shows" ? (
-          <View className="mt-4 px-5">
-            <SectionLine label="Try Searching" icon="sparkles" />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, paddingRight: 16 }}
-            >
-              {SEMANTIC_PROMPTS.map((prompt) => (
-                <Pressable
-                  key={prompt}
-                  onPress={() => setQuery(prompt)}
-                  className="rounded-full border border-dark-border bg-dark-card px-3 py-2"
-                >
-                  <Text className="text-xs font-semibold text-text-secondary">
-                    {prompt}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
-
-        {/* ── Shows: Discover (before 3-char search) ───────────── */}
+        {/* ── Shows: Discover ──────────────────────────────────── */}
         {showDiscover && (
-          <View className="mt-8 gap-10">
+          <View>
             {isLoadingDiscover ? (
-              <View className="items-center justify-center py-16">
-                <ActivityIndicator size="small" color="#0ea5e9" />
-                <Text className="mt-3 text-sm text-text-tertiary">
-                  Loading discover…
-                </Text>
-              </View>
-            ) : Object.keys(discoverSections).length > 0 ? (
-              (["popular", "top_rated", "on_the_air", "netflix", "apple_tv", "max", "disney_plus", "hulu", "prime_video", "genre_drama", "genre_comedy", "genre_sci_fi"] as const)
-                .filter((key) => (discoverSections[key]?.items?.length ?? 0) > 0)
-                .map((key, sectionIndex) => {
-                  const section = discoverSections[key];
-                  if (!section) return null;
-                  return (
-                    <View key={key}>
-                      <View className="px-5">
-                        {section.logoUrl ? (
-                          <View className="flex-row items-center gap-3 mb-4">
-                            <Image
-                              source={{ uri: section.logoUrl }}
-                              style={{ width: 22, height: 22, borderRadius: 5 }}
-                              contentFit="cover"
-                            />
-                            <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary flex-1">
-                              {section.label}
-                            </Text>
-                            <Pressable
-                              onPress={() => {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                router.push(`/provider/${key}`);
-                              }}
-                              className="active:opacity-80"
-                            >
-                              <Text className="text-xs font-semibold text-text-tertiary">See all</Text>
-                            </Pressable>
-                          </View>
-                        ) : (
-                          <SectionLine
-                            label={section.label}
-                            icon={section.icon}
-                            count={section.items.length}
-                          />
-                        )}
-                      </View>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{
-                          paddingHorizontal: 20,
-                          gap: 14,
-                        }}
-                      >
-                        {section.items.map((item: any, index: number) => (
-                          <Animated.View
-                            key={item.externalId}
-                            entering={FadeInRight.delay(
-                              sectionIndex * 80 + index * 40,
-                            ).springify()}
-                          >
-                            <Pressable
-                              onPress={() => handleAddFromCatalog(item)}
-                              className="w-28 active:opacity-80"
-                            >
-                              <Poster uri={item.posterUrl} size="md" />
-                              <Text
-                                className="mt-2 text-sm font-semibold text-text-primary"
-                                numberOfLines={2}
-                              >
-                                {item.title ?? "Unknown"}
-                              </Text>
-                              {item.year ? (
-                                <Text className="text-xs text-text-tertiary">
-                                  {item.year}
-                                </Text>
-                              ) : null}
-                            </Pressable>
-                          </Animated.View>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  );
-                })
+              <SearchDiscoverSkeletons />
+            ) : discoverSections.length > 0 ? (
+              discoverSections.map((section, sectionIndex) => (
+                <SearchDiscoveryRail
+                  key={section.key}
+                  index={sectionIndex + 1}
+                  section={section}
+                  accent={getSearchSectionAccent(section, sectionIndex)}
+                  actionLabel={section.logoUrl ? "All" : undefined}
+                  onAction={
+                    section.logoUrl
+                      ? () => {
+                          Haptics.impactAsync(
+                            Haptics.ImpactFeedbackStyle.Light,
+                          );
+                          router.push(`/provider/${section.key}`);
+                        }
+                      : undefined
+                  }
+                  onPressItem={handleAddFromCatalog}
+                />
+              ))
             ) : (
               <View className="px-5">
                 <EmptyState
@@ -617,46 +721,67 @@ export default function SearchScreen() {
         )}
 
         {/* ── Shows: Search results ───────────────────────────── */}
-        {mode === "shows" && searchReady && hasSearchResults && (
-          <View className="mt-6 px-5">
+        {showCatalogPanel && (
+          <View className="mt-4 px-5">
             <SectionLine
-              label="Best Matches"
+              label={
+                catalogViewState.surface === "loading"
+                  ? "Searching"
+                  : catalogViewState.surface === "results"
+                    ? "Best Matches"
+                    : "Catalog Search"
+              }
               count={
-                catalogResults.length > 0
-                  ? catalogResults.length
+                catalogViewState.surface === "results" &&
+                deferredCatalogResults.length > 0
+                  ? deferredCatalogResults.length
                   : undefined
               }
             />
 
-              {!isAuthenticated ? (
-                <EmptyState
-                  title="Sign in to search the catalog"
-                  description="Create an account to search every TV series."
+            {catalogViewState.surface === "sign-in" ? (
+              <EmptyState
+                title="Sign in to search the catalog"
+                description="Create an account to search every TV series."
+              />
+            ) : catalogViewState.surface === "loading" ? (
+              <SearchLoadingRows />
+            ) : catalogViewState.surface === "error" ? (
+              <SearchErrorCard
+                title="Catalog search stalled"
+                description={
+                  catalogError?.message ??
+                  "The search service did not return a clean response. Retry keeps your query in place."
+                }
+                onRetry={handleRetryCatalogSearch}
+              />
+            ) : catalogViewState.surface === "results" ? (
+              <Animated.View entering={FadeInDown.duration(300)}>
+                <FlashList
+                  data={deferredCatalogResults}
+                  renderItem={renderCatalogItem}
+                  keyExtractor={(item: any) =>
+                    `${item.externalSource ?? "catalog"}:${item.externalId}`
+                  }
+                  estimatedItemSize={132}
+                  contentContainerStyle={listContentStyle}
+                  keyboardShouldPersistTaps="always"
+                  scrollEnabled={false}
                 />
-              ) : catalogResults.length > 0 ? (
-                <Animated.View entering={FadeInDown.duration(300)}>
-                  <FlashList
-                    data={catalogResults}
-                    renderItem={renderCatalogItem}
-                    keyExtractor={(item: any) => item.externalId}
-                    estimatedItemSize={132}
-                    contentContainerStyle={listContentStyle}
-                    keyboardShouldPersistTaps="always"
-                    scrollEnabled={false}
-                  />
-                </Animated.View>
-              ) : (
-                <EmptyState
-                  title="No catalog results"
-                  description="Try a different search term."
-                />
-              )}
+              </Animated.View>
+            ) : (
+              <EmptyState
+                title="No catalog results"
+                description="Try a different search term."
+              />
+            )}
           </View>
         )}
 
         {/* ── People: Searching ──────────────────────────────── */}
-        {mode === "people" && trimmedQuery.length >= 2 && (
-          <View className="mt-6 px-5 gap-8">
+        {mode === "people" &&
+          trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH && (
+          <View className="mt-4 px-5 gap-6">
             <View>
               <SectionLine
                 label="People"
@@ -712,8 +837,8 @@ export default function SearchScreen() {
         )}
 
         {/* ── People: Idle ───────────────────────────────────── */}
-        {mode === "people" && trimmedQuery.length < 2 && (
-          <View className="mt-6 px-5 gap-8">
+        {mode === "people" && trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH && (
+          <View className="mt-4 px-5 gap-6">
             <ContactsSyncCard
               title={
                 contactStatus?.hasSynced
@@ -749,6 +874,7 @@ export default function SearchScreen() {
                       isMutualFollow={item.isMutualFollow}
                       mutualCount={item.mutualCount}
                       inContacts={item.inContacts}
+                      sharedShowCount={item.sharedShowCount}
                     />
                   ))}
                 </View>
@@ -794,13 +920,14 @@ export default function SearchScreen() {
                       isMutualFollow={item.isMutualFollow}
                       mutualCount={item.mutualCount}
                       inContacts={item.inContacts}
+                      sharedShowCount={item.sharedShowCount}
                     />
                   ))}
                 </View>
               ) : (
                 <EmptyState
                   title="No suggestions yet"
-                  description="Sync contacts or type at least 2 characters to search."
+                  description="Sync contacts or search by name or username."
                 />
               )}
             </View>
@@ -810,3 +937,42 @@ export default function SearchScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  discoverSkeletonStack: {
+    marginTop: 2,
+  },
+  errorCard: {
+    alignItems: "center",
+    backgroundColor: "#161A22",
+    borderColor: "rgba(244,114,182,0.28)",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    padding: 14,
+  },
+  errorIcon: {
+    alignItems: "center",
+    backgroundColor: "#F472B6",
+    borderRadius: 8,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  resultSkeleton: {
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    minHeight: 94,
+    overflow: "hidden",
+    paddingVertical: 10,
+  },
+  retryButton: {
+    alignItems: "center",
+    backgroundColor: "#F1F3F7",
+    borderRadius: 8,
+    justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 14,
+  },
+});

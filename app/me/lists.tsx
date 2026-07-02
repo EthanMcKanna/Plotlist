@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -14,7 +14,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "../../components/FlashList";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { Screen } from "../../components/Screen";
 import { EmptyState } from "../../components/EmptyState";
@@ -26,6 +26,8 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 
 export default function ListsScreen() {
   const router = useRouter();
+  const { create } = useLocalSearchParams<{ create?: string }>();
+  const canGoBack = router.canGoBack();
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me);
   const {
@@ -46,6 +48,13 @@ export default function ListsScreen() {
   const [description, setDescription] = useState("");
   const [isPublic, setIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (create === "1") {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setShowForm(true);
+    }
+  }, [create]);
 
   const toggleForm = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -150,12 +159,25 @@ export default function ListsScreen() {
     <Screen scroll>
       <View className="px-6 pt-6 pb-8">
         {/* ── Header ── */}
-        <View className="flex-row items-center justify-between">
-          <View>
-            <Text className="text-2xl font-bold text-text-primary">Lists</Text>
-            <Text className="mt-0.5 text-sm text-text-tertiary">
-              Curate your favorite shows into shareable lists
-            </Text>
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-1 flex-row items-center gap-3">
+            {canGoBack ? (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.back();
+                }}
+                className="h-10 w-10 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+              >
+                <Ionicons name="chevron-back" size={22} color="#E8EAED" />
+              </Pressable>
+            ) : null}
+            <View className="flex-1">
+              <Text className="text-2xl font-bold text-text-primary">Lists</Text>
+              <Text className="mt-0.5 text-sm text-text-tertiary">
+                Curate your favorite shows into shareable lists
+              </Text>
+            </View>
           </View>
           <Pressable
             onPress={() => {
@@ -168,10 +190,7 @@ export default function ListsScreen() {
             style={
               !showForm
                 ? {
-                    shadowColor: "#0ea5e9",
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 8,
+                    boxShadow: "0 0 8px rgba(14,165,233,0.3)",
                   }
                 : undefined
             }

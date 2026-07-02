@@ -12,6 +12,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GlassSurface } from "./NativeGlass";
+
 type WatchStatus = "watchlist" | "watching" | "completed" | "dropped";
 
 type StatusSelectorProps = {
@@ -77,13 +79,20 @@ export function StatusSelector({
   onRemove,
 }: StatusSelectorProps) {
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState<WatchStatus | null | undefined>(
+    currentStatus
+  );
   const buttonScale = useSharedValue(1);
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
   const insets = useSafeAreaInsets();
 
-  const hasStatus = currentStatus != null;
-  const config = hasStatus ? STATUS_CONFIG[currentStatus] : null;
+  useEffect(() => {
+    setSelectedStatus(currentStatus);
+  }, [currentStatus]);
+
+  const hasStatus = selectedStatus != null;
+  const config = hasStatus ? STATUS_CONFIG[selectedStatus] : null;
 
   const openSheet = useCallback(() => {
     setSheetVisible(true);
@@ -143,15 +152,19 @@ export function StatusSelector({
 
   const handleSelectStatus = useCallback(
     (status: WatchStatus) => {
-      if (status === currentStatus) {
+      const nextStatus = status === selectedStatus ? null : status;
+      setSelectedStatus(nextStatus);
+      sheetTranslateY.value = SCREEN_HEIGHT;
+      backdropOpacity.value = 0;
+      setSheetVisible(false);
+      if (status === selectedStatus) {
         onRemove?.();
       } else {
         onSelect(status);
       }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      closeSheet();
     },
-    [currentStatus, onSelect, onRemove, closeSheet]
+    [backdropOpacity, onSelect, onRemove, selectedStatus, sheetTranslateY]
   );
 
   const buttonAnimStyle = useAnimatedStyle(() => ({
@@ -173,39 +186,48 @@ export function StatusSelector({
         style={[
           buttonAnimStyle,
           {
-            backgroundColor: hasStatus ? config!.bg : "#161A22",
-            borderWidth: 1,
-            borderColor: hasStatus ? config!.borderColor : "#2A2E38",
             borderRadius: 16,
             height: 52,
-            paddingHorizontal: 16,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
           },
         ]}
       >
-        <Ionicons
-          name={hasStatus ? config!.icon : "add-circle-outline"}
-          size={20}
-          color={hasStatus ? config!.color : "#9BA1B0"}
-        />
-        <Text
-          numberOfLines={1}
-          style={{
-            fontSize: 15,
-            fontWeight: "600",
-            color: hasStatus ? config!.color : "#F1F3F7",
-            flex: 1,
+        <GlassSurface
+          radius={16}
+          variant={hasStatus ? "prominent" : "control"}
+          borderColor={hasStatus ? config!.borderColor : undefined}
+          fallbackColor={hasStatus ? config!.bg : "#161A22"}
+          tintColor={hasStatus ? `${config!.color}26` : undefined}
+          interactive
+          contentStyle={{
+            alignItems: "center",
+            flexDirection: "row",
+            gap: 10,
+            height: 52,
+            paddingHorizontal: 16,
           }}
         >
-          {hasStatus ? config!.label : "Set Status"}
-        </Text>
-        <Ionicons
-          name="chevron-down"
-          size={16}
-          color={hasStatus ? config!.color : "#5A6070"}
-        />
+          <Ionicons
+            name={hasStatus ? config!.icon : "add-circle-outline"}
+            size={20}
+            color={hasStatus ? config!.color : "#9BA1B0"}
+          />
+          <Text
+            numberOfLines={1}
+            style={{
+              fontSize: 15,
+              fontWeight: "600",
+              color: hasStatus ? config!.color : "#F1F3F7",
+              flex: 1,
+            }}
+          >
+            {hasStatus ? config!.label : "Set Status"}
+          </Text>
+          <Ionicons
+            name="chevron-down"
+            size={16}
+            color={hasStatus ? config!.color : "#5A6070"}
+          />
+        </GlassSurface>
       </AnimatedPressable>
 
       {/* ─── Bottom Sheet ─── */}
@@ -241,11 +263,16 @@ export function StatusSelector({
           <Animated.View style={sheetAnimStyle}>
             <GestureDetector gesture={panGesture}>
               <Animated.View>
-                <View
+                <GlassSurface
+                  radius={28}
+                  variant="sheet"
                   style={{
-                    backgroundColor: "#1C2028",
                     borderTopLeftRadius: 24,
                     borderTopRightRadius: 24,
+                    borderBottomLeftRadius: 0,
+                    borderBottomRightRadius: 0,
+                  }}
+                  contentStyle={{
                     paddingTop: 12,
                     paddingBottom: insets.bottom + 20,
                   }}
@@ -284,7 +311,7 @@ export function StatusSelector({
                   <View style={{ paddingHorizontal: 16 }}>
                     {STATUSES.map((status) => {
                       const cfg = STATUS_CONFIG[status];
-                      const isActive = status === currentStatus;
+                      const isActive = status === selectedStatus;
                       return (
                         <Pressable
                           key={status}
@@ -373,7 +400,7 @@ export function StatusSelector({
                       );
                     })}
                   </View>
-                </View>
+                </GlassSurface>
               </Animated.View>
             </GestureDetector>
           </Animated.View>

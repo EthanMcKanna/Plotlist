@@ -1,43 +1,65 @@
-import { eq } from "drizzle-orm";
+import type { IncomingMessage } from "node:http";
+import { createHmac } from "node:crypto";
+
+import { sql } from "drizzle-orm";
 
 import { rateLimits } from "../../db/schema";
 import { db } from "./db";
+import { getServerEnv } from "./env";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
 
+export function rateLimitKey(scope: string, ...parts: Array<string | number | null | undefined>) {
+  const env = getServerEnv();
+  const digest = createHmac("sha256", env.CONTACT_HASH_SECRET)
+    .update(parts.map((part) => String(part ?? "")).join("\0"))
+    .digest("base64url")
+    .slice(0, 32);
+  return `${scope}:${digest}`;
+}
+
+export function getClientIp(req: IncomingMessage) {
+  const firstForwardedIp = (value: string | string[] | undefined) =>
+    Array.isArray(value) ? value[0] : value?.split(",")[0];
+
+  return (
+    firstForwardedIp(req.headers["x-forwarded-for"]) ??
+    firstForwardedIp(req.headers["x-real-ip"]) ??
+    firstForwardedIp(req.headers["cf-connecting-ip"]) ??
+    req.socket.remoteAddress ??
+    "unknown"
+  )
+    .trim()
+    .replace(/^::ffff:/, "");
+}
+
+export function clientRateLimitKey(req: IncomingMessage, scope: string) {
+  return rateLimitKey(scope, getClientIp(req));
+}
+
 export async function enforceRateLimit(key: string, limit: number, windowMs: number) {
   const now = Date.now();
+  const resetAt = now + windowMs;
   const rows = await db
-    .select()
-    .from(rateLimits)
-    .where(eq(rateLimits.key, key))
-    .limit(1);
-
-  const existing = rows[0];
-  if (!existing) {
-    await db.insert(rateLimits).values({
+    .insert(rateLimits)
+    .values({
       id: createId("rate"),
       key,
       count: 1,
-      resetAt: now + windowMs,
+      resetAt,
+    })
+    .onConflictDoUpdate({
+      target: rateLimits.key,
+      set: {
+        count: sql<number>`case when ${rateLimits.resetAt} <= ${now} then 1 else ${rateLimits.count} + 1 end`,
+        resetAt: sql<number>`case when ${rateLimits.resetAt} <= ${now} then ${resetAt} else ${rateLimits.resetAt} end`,
+      },
+    })
+    .returning({
+      count: rateLimits.count,
     });
-    return;
-  }
 
-  if (existing.resetAt <= now) {
-    await db
-      .update(rateLimits)
-      .set({ count: 1, resetAt: now + windowMs })
-      .where(eq(rateLimits.id, existing.id));
-    return;
-  }
-
-  if (existing.count >= limit) {
+  if ((rows[0]?.count ?? 0) > limit) {
     throw new ApiError(429, "rate_limited", "Too many requests");
   }
-
-  await db
-    .update(rateLimits)
-    .set({ count: existing.count + 1 })
-    .where(eq(rateLimits.id, existing.id));
 }

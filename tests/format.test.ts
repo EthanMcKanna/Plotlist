@@ -8,6 +8,7 @@ import {
 } from "@jest/globals";
 
 import {
+  formatCalendarDay,
   formatDate,
   formatMonth,
   formatRelativeTime,
@@ -35,6 +36,10 @@ describe("format helpers", () => {
     expect(formatTime(referenceTimestamp)).toBe("6:30 PM");
     expect(formatMonth(referenceTimestamp)).toBe("March 2026");
     expect(formatShortDate(referenceTimestamp)).toBe("Mar 10");
+  });
+
+  it("formats date-only calendar labels without UTC day drift", () => {
+    expect(formatCalendarDay("2026-06-02")).toBe("Tuesday, Jun 2");
   });
 
   it("computes relative and month-based helpers from a stable clock", () => {

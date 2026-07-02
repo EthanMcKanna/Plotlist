@@ -1,6 +1,9 @@
 import { count, desc, eq, lte, or } from "drizzle-orm";
 
 import {
+  authSessions,
+  phoneVerificationRequests,
+  rateLimits,
   showEmbeddingJobs,
   shows,
   tmdbDetailsCache,
@@ -11,6 +14,7 @@ import {
 } from "../../db/schema";
 import { db } from "./db";
 import { createId } from "./ids";
+import { getHomeCatalogCacheCleanupCutoff } from "../../lib/homeCatalogCache";
 
 const HOT_SHOW_TARGET_COUNT = 3_000;
 const FULL_SHOW_TARGET_COUNT = 10_000;
@@ -72,12 +76,38 @@ export async function cleanupExpiredTmdbCache() {
       .returning({ id: tmdbSearchCache.id }),
     db
       .delete(tmdbListCache)
-      .where(lte(tmdbListCache.expiresAt, now))
+      .where(lte(tmdbListCache.expiresAt, getHomeCatalogCacheCleanupCutoff(now)))
       .returning({ id: tmdbListCache.id }),
   ]);
 
   return {
     removed: details.length + search.length + list.length,
+  };
+}
+
+// Housekeeping for auth/rate-limit tables that used to grow unbounded on the
+// old backend: expired sessions, stale OTP requests, and settled rate windows.
+export async function cleanupExpiredAuthArtifacts() {
+  const now = Date.now();
+  const [sessions, verifications, limits] = await Promise.all([
+    db
+      .delete(authSessions)
+      .where(lte(authSessions.expiresAt, now - 7 * 24 * 60 * 60 * 1000))
+      .returning({ id: authSessions.id }),
+    db
+      .delete(phoneVerificationRequests)
+      .where(lte(phoneVerificationRequests.expiresAt, now - 24 * 60 * 60 * 1000))
+      .returning({ id: phoneVerificationRequests.id }),
+    db
+      .delete(rateLimits)
+      .where(lte(rateLimits.resetAt, now - 60 * 60 * 1000))
+      .returning({ id: rateLimits.id }),
+  ]);
+
+  return {
+    removedSessions: sessions.length,
+    removedVerificationRequests: verifications.length,
+    removedRateLimits: limits.length,
   };
 }
 

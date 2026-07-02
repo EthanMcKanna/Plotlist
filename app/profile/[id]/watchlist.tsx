@@ -37,6 +37,15 @@ const sortOptions = [
   { value: "year", label: "Year" },
 ];
 
+function normalizeWatchlistItem(item: any): WatchlistItem | null {
+  const state = item?.state ?? item;
+  const show = item?.show;
+  if (!state?._id || !show?._id) {
+    return null;
+  }
+  return { state, show };
+}
+
 export default function PublicWatchlistScreen() {
   const params = useLocalSearchParams();
   const userId = typeof params.id === "string" ? params.id : "";
@@ -62,7 +71,10 @@ export default function PublicWatchlistScreen() {
   );
 
   const items = useMemo(
-    () => rawItems.filter((item): item is WatchlistItem => Boolean(item.show)),
+    () =>
+      rawItems
+        .map(normalizeWatchlistItem)
+        .filter((item): item is WatchlistItem => Boolean(item)),
     [rawItems],
   );
 

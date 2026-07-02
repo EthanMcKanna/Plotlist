@@ -72,6 +72,48 @@ describe("ReleaseCalendarPreview", () => {
     expect(screen.getByText("S01E01")).toBeTruthy();
   });
 
+  it("uses date-only air dates for upcoming labels instead of timezone-sensitive timestamps", () => {
+    jest.useFakeTimers({
+      now: new Date("2026-06-01T12:00:00.000Z"),
+    });
+
+    try {
+      mockUseQuery.mockReturnValue({
+        tonightGroups: [],
+        upcomingGroups: [
+          {
+            items: [
+              {
+                airDate: "2026-06-02",
+                airDateTs: Date.parse("2026-06-01T00:00:00.000Z"),
+                seasonNumber: 7,
+                episodeNumber: 1,
+                episodeTitle: "Season premiere",
+                providers: [{ name: "Peacock" }],
+                show: {
+                  _id: "show-love-island",
+                  title: "Love Island USA",
+                  posterUrl: null,
+                  backdropUrl: null,
+                },
+              },
+            ],
+          },
+        ],
+        totalTonight: 0,
+        totalUpcoming: 1,
+        staleShowIds: [],
+        selectedProviders: [],
+      });
+
+      render(<ReleaseCalendarPreview />);
+
+      expect(screen.getByText("Tuesday, Jun 2")).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("renders nothing when there are no release items", () => {
     mockUseQuery.mockReturnValue({
       tonightGroups: [],

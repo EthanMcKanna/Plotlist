@@ -1,5 +1,7 @@
 import { Text, TextInput, TextInputProps, View } from "react-native";
 
+import { GlassSurface } from "./NativeGlass";
+
 export function TextField({
   label,
   value,
@@ -40,10 +42,15 @@ export function TextField({
       <Text className="mb-2 text-sm font-semibold text-text-secondary">
         {label}
       </Text>
-      <View
-        className={`flex-row items-center rounded-2xl border bg-dark-card ${
-          error ? "border-status-danger" : "border-dark-border"
-        }`}
+      <GlassSurface
+        radius={8}
+        variant="control"
+        borderColor={error ? "#EF4444" : undefined}
+        fallbackColor="rgba(22,26,34,0.84)"
+        contentStyle={{
+          alignItems: "center",
+          flexDirection: "row",
+        }}
       >
         {prefix ? (
           <Text className="pl-4 text-base text-text-tertiary">{prefix}</Text>
@@ -67,7 +74,7 @@ export function TextField({
           } ${multiline ? "min-h-[96px]" : ""}`}
           style={multiline ? { textAlignVertical: "top" } : undefined}
         />
-      </View>
+      </GlassSurface>
       {error ? (
         <Text className="mt-1.5 text-xs text-status-danger">{error}</Text>
       ) : hint ? (

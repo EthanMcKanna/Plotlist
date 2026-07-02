@@ -6,21 +6,24 @@ import {
   it,
   jest,
 } from "@jest/globals";
-import { Text } from "react-native";
-import { render, screen, waitFor } from "@testing-library/react-native";
+import { Platform, Text } from "react-native";
+import { act, render, screen, waitFor } from "@testing-library/react-native";
 
 const mockReplace = jest.fn();
+const mockRouter = { replace: mockReplace };
 const mockEnsureProfile = jest.fn<() => Promise<void>>();
 const mockClearStoredSession = jest.fn<() => Promise<void>>();
 const mockUseAuth = jest.fn();
 const mockUsePathname = jest.fn();
+const mockUseGlobalSearchParams = jest.fn();
 const mockUseQuery = jest.fn();
 const mockUseSegments = jest.fn();
 const mockUseMutation = jest.fn();
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => mockRouter,
   usePathname: () => mockUsePathname(),
+  useGlobalSearchParams: () => mockUseGlobalSearchParams(),
   useSegments: () => mockUseSegments(),
 }));
 
@@ -36,10 +39,35 @@ jest.mock("../../lib/api/session", () => ({
 
 import { AuthGate } from "../../components/AuthGate";
 
+async function flushProfileBootstrap() {
+  await act(async () => {
+    await Promise.resolve();
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  });
+}
+
+function renderAuthGate() {
+  render(
+    <AuthGate>
+      <Text>Protected content</Text>
+    </AuthGate>
+  );
+}
+
+function setPlatformOS(os: typeof Platform.OS) {
+  Object.defineProperty(Platform, "OS", {
+    configurable: true,
+    value: os,
+  });
+}
+
 describe("AuthGate", () => {
   const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
   beforeEach(() => {
+    setPlatformOS("ios");
     mockReplace.mockReset();
     mockEnsureProfile.mockReset().mockResolvedValue(undefined);
     mockClearStoredSession.mockReset().mockResolvedValue(undefined);
@@ -51,19 +79,45 @@ describe("AuthGate", () => {
     });
     mockUseSegments.mockReturnValue(["(tabs)", "home"]);
     mockUsePathname.mockReturnValue("/home");
+    mockUseGlobalSearchParams.mockReturnValue({});
     mockUseQuery.mockReturnValue(undefined);
   });
 
   it("redirects signed-out iOS users away from protected routes", async () => {
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/sign-in");
     });
+    expect(screen.queryByText("Protected content")).toBeTruthy();
+  });
+
+  it("allows the signed-out web dev homepage preview route", async () => {
+    setPlatformOS("web");
+    mockUseSegments.mockReturnValue(["dev", "home-preview"]);
+    mockUsePathname.mockReturnValue("/dev/home-preview");
+
+    renderAuthGate();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.queryByText("Protected content")).toBeTruthy();
+  });
+
+  it("allows the signed-out web home preview query route", async () => {
+    setPlatformOS("web");
+    mockUseSegments.mockReturnValue(["(tabs)", "home"]);
+    mockUsePathname.mockReturnValue("/home");
+    mockUseGlobalSearchParams.mockReturnValue({ preview: "1" });
+
+    renderAuthGate();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockReplace).not.toHaveBeenCalled();
     expect(screen.queryByText("Protected content")).toBeTruthy();
   });
 
@@ -76,11 +130,8 @@ describe("AuthGate", () => {
       onboardingStep: "follow",
     });
 
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
+    await flushProfileBootstrap();
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/onboarding/follow");
@@ -99,11 +150,8 @@ describe("AuthGate", () => {
       onboardingStep: "profile",
     });
 
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
+    await flushProfileBootstrap();
 
     await waitFor(() => {
       expect(mockEnsureProfile).toHaveBeenCalledWith({});
@@ -121,11 +169,8 @@ describe("AuthGate", () => {
       onboardingStep: "complete",
     });
 
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
+    await flushProfileBootstrap();
 
     await waitFor(() => {
       expect(mockClearStoredSession).toHaveBeenCalled();
@@ -147,11 +192,8 @@ describe("AuthGate", () => {
       onboardingStep: "complete",
     });
 
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
+    await flushProfileBootstrap();
 
     await waitFor(() => {
       expect(warnSpy).toHaveBeenCalledWith(
@@ -163,17 +205,13 @@ describe("AuthGate", () => {
     expect(mockReplace).not.toHaveBeenCalledWith("/sign-in");
   });
 
-  it("shows a loading state until auth resolution completes", () => {
+  it("shows a loading state until auth resolution completes", async () => {
     mockUseAuth.mockReturnValue({
       isAuthenticated: false,
       isLoading: true,
     });
 
-    render(
-      <AuthGate>
-        <Text>Protected content</Text>
-      </AuthGate>
-    );
+    renderAuthGate();
 
     expect(screen.queryByText("Protected content")).toBeNull();
   });

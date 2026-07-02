@@ -2,7 +2,6 @@ import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
 import { Poster } from "./Poster";
 import { formatRelativeTime } from "../lib/format";
 import { Avatar } from "./Avatar";
@@ -25,6 +24,10 @@ export type FeedStatusItem = {
 };
 
 export type FeedItemProps = FeedReviewItem | FeedStatusItem;
+
+export function getFeedStatusVerb(type: FeedStatusItem["type"]) {
+  return type === "completed" ? "finished" : "started";
+}
 
 function RatingStars({ rating }: { rating: number }) {
   const fullStars = Math.floor(rating);
@@ -131,10 +134,7 @@ function StatusFeedItem({ item }: { item: FeedStatusItem }) {
   const showTitle = item.show?.title ?? "Unknown show";
   const userId = item.user?._id;
 
-  const isCompleted = item.type === "completed";
-  const verb = isCompleted ? "finished" : "started watching";
-  const iconName = isCompleted ? "checkmark-circle" : "play-circle";
-  const iconColor = isCompleted ? "#22c55e" : "#0ea5e9";
+  const verb = getFeedStatusVerb(item.type);
 
   const handleProfilePress = useCallback(() => {
     if (userId) {
@@ -181,7 +181,6 @@ function StatusFeedItem({ item }: { item: FeedStatusItem }) {
               <Text className="mt-0.5 text-xs text-text-tertiary">{item.show.year}</Text>
             ) : null}
           </View>
-          <Ionicons name={iconName} size={22} color={iconColor} />
         </Pressable>
       </View>
     </View>

@@ -2,16 +2,16 @@
   "expo": {
     "name": "Plotlist",
     "slug": "Showboxd",
-    "scheme": "showboxd",
+    "scheme": "plotlist",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0D0F14"
     },
     "ios": {
       "supportsTablet": true,
@@ -30,8 +30,7 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.READ_CONTACTS",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.WRITE_CONTACTS"
+        "android.permission.READ_MEDIA_IMAGES"
       ],
       "package": "com.emckanna.Plotlist"
     },

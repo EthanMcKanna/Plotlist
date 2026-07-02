@@ -1,979 +1,1536 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Image } from "expo-image";
-import { FlashList } from "../../components/FlashList";
-import { Ionicons } from "@expo/vector-icons";
-import { useAction, useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
-import { router } from "expo-router";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentType,
+} from "react";
+import {
+  Alert,
+  Platform,
+  RefreshControl,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInRight } from "react-native-reanimated";
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { useAction, useMutation } from "../../lib/plotlist/react";
+import { api } from "../../lib/plotlist/api";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
-import { Screen } from "../../components/Screen";
-import { SectionHeader } from "../../components/SectionHeader";
-import { EmptyState } from "../../components/EmptyState";
-import { FeedItem, FeedItemProps } from "../../components/FeedItem";
-import { ListRow } from "../../components/ListRow";
-import { Poster } from "../../components/Poster";
-import { RecommendationRail } from "../../components/RecommendationRail";
-import { ReleaseCalendarPreview } from "../../components/ReleaseCalendarPreview";
-import { UpNextRail } from "../../components/UpNextRail";
-import { SecondaryButton } from "../../components/SecondaryButton";
-import { UserRow } from "../../components/UserRow";
-import { api } from "../../lib/plotlist/api";
+import {
+  ContinueWatchingRail,
+  type ContinueWatchingItem,
+  getActiveContinueWatchingItems,
+  getContinueWatchingPreviewItems,
+  shouldRenderContinueWatchingEmptyState,
+  useContinueWatchingItems,
+} from "../../components/ContinueWatchingRail";
+import {
+  FriendsActivity,
+  getFriendsActivityFeedItems,
+  getFriendsActivityPeople,
+} from "../../components/FriendsActivity";
+import { HomeCuratedEdits } from "../../components/HomeCuratedEdits";
+import {
+  HeroCarousel,
+  type HeroSaveState,
+  type HeroSlide,
+} from "../../components/HeroCarousel";
+import { LoadingScreen } from "../../components/LoadingScreen";
+import { HomeTopBar } from "../../components/HomeTopBar";
+import { RailSkeleton } from "../../components/RailSkeleton";
+import { SignatureRail, type SignatureRailItem } from "../../components/SignatureRail";
+import {
+  getRoomFeaturedItem,
+  getRoomSupportItems,
+  StreamingRooms,
+  type ProviderRoom,
+} from "../../components/StreamingRooms";
+import {
+  type HomeSchedulePreviewState,
+  TonightStrip,
+  useHomeSchedulePreview,
+} from "../../components/TonightStrip";
+
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import {
+  buildHomeCuratedEdits,
+  getHomeCuratedEditLeadPreviewKeys,
+  getHomeCuratedEditPreviewKeys,
+} from "../../lib/homeCuratedEdits";
+import {
+  buildFreshRailRoomTopUpItems,
+  buildVisibleFreshRailItems,
+} from "../../lib/homeFreshRail";
+import {
+  hasChartOnlyHomeSignal,
+  hasReleaseWindowHomeSignal,
+} from "../../lib/homeCurrentSignal";
+import {
+  getHomeRailIdentitySet,
+  filterHomeRoomsWithUnpreviewedFeaturedItems,
+  getHomeDiscoveryPreviewKeys,
+  limitHomeRoomItemsByTitleAppearances,
+  limitHomeRailItemsByTitleAppearances,
+  prioritizeUnpreviewedHomeRailItems,
+  prioritizeHomeRoomsAgainstPreviewKeys,
+  removePreviewedHomeRailItems,
+  topUpHomeRailItemsPreservingSources,
+} from "../../lib/homeRailIdentity";
+import { hasHomePersonalizationSignals } from "../../lib/homePersonalization";
+import {
+  getHomeRoomHeatTopUpItems,
+  getHomeRoomQualityTopUpItems,
+  getHomeRoomQuickTopUpItems,
+  getProviderRoomItemRailKey,
+} from "../../lib/homeRoomRailTopUps";
+import {
+  getHomeDiscoverySectionSignal,
+  getHomeProviderRoomsSectionSignal,
+  getHomeSectionDisplayIndexes,
+  getHomeSectionPlan,
+  getHomeSectionTestID,
+  isNumberedHomeSectionKind,
+  type HomeSection,
+  type HomeSectionKind,
+} from "../../lib/homeSectionPlan";
+import {
+  buildColdStartHomeShelfItems,
+  buildPersonalHomeShelfItems,
+  promoteContextualHomeShelfLead,
+} from "../../lib/homeStarterShelf";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
+import {
+  sortProviderRoomItemsForFreshness,
+  sortProviderRoomsForFreshness,
+  type HomeData,
+  useHomeData,
+} from "../../lib/useHomeData";
+import { useScrollToTopOnTabPress } from "../../lib/useScrollToTopOnTabPress";
 
-type CatalogItem = {
-  externalSource: string;
-  externalId: string;
-  title: string;
-  year?: number;
-  posterUrl?: string;
-  overview?: string;
+const FOR_YOU_ACCENT = "#22C55E";
+const HEAT_ACCENT = "#F59E0B";
+const FRESH_ACCENT = "#38BDF8";
+const CRITICS_ACCENT = "#F472B6";
+const QUICK_ACCENT = "#A3E635";
+const ROOMS_ACCENT = "#F97316";
+const MIN_FEATURE_RAIL_ITEMS = 3;
+const MIN_POSTER_RAIL_ITEMS = 4;
+const MIN_DISTINCT_POSTER_RAIL_ITEMS = 3;
+const MIN_QUICK_RAIL_ITEMS = 2;
+const MIN_PROVIDER_ROOM_ITEMS = 3;
+const MIN_PROVIDER_ROOMS = 4;
+const TARGET_FEATURE_RAIL_ITEMS = 5;
+const TARGET_FRESH_RAIL_ITEMS = 4;
+const TARGET_QUICK_RAIL_ITEMS = 3;
+const FRESH_ROOM_TOP_UP_LIMIT = 8;
+const MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES = 1;
+const MAX_PROVIDER_ROOM_SURFACE_TITLE_APPEARANCES = 1;
+const TARGET_PROVIDER_ROOM_ITEMS = 6;
+export const HOME_NATIVE_INITIAL_RENDER_SECTION_COUNT = 6;
+
+type WebDataSetViewProps = ComponentProps<typeof View> & {
+  dataSet?: Record<string, string>;
 };
+const WebDataSetView = View as ComponentType<WebDataSetViewProps>;
 
-type ProviderSection = {
-  type: "provider";
-  key: string;
-  label: string;
-  logoUrl: string;
-  items: CatalogItem[];
-};
-
-type RankedCarouselItem = {
-  show: (CatalogItem & { _id?: string }) | null | undefined;
-  rank?: number;
-  _id?: string;
-};
-
-type CarouselItem = CatalogItem | RankedCarouselItem;
-
-function isRankedCarouselItem(
-  item: CarouselItem,
-): item is RankedCarouselItem {
-  return "show" in item;
-}
-
-function getCarouselShow(item: CarouselItem) {
-  const show = isRankedCarouselItem(item) ? item.show : item;
-
-  return show;
-}
-
-function getCarouselShowId(item: CarouselItem) {
-  if (isRankedCarouselItem(item)) {
-    return item.show?._id ?? item._id;
-  }
-
-  return (item as CatalogItem & { _id?: string; showId?: string })._id ??
-    (item as CatalogItem & { _id?: string; showId?: string }).showId;
-}
-
-function getRecommendationItemKey(item: {
-  showId?: string;
-  _id?: string;
-  externalId?: string;
-  title?: string;
-}) {
-  return item.showId ?? item._id ?? item.externalId ?? item.title ?? null;
-}
-
-function dedupeRecommendationItems<T extends {
-  showId?: string;
-  _id?: string;
-  externalId?: string;
-  title?: string;
-}>(items: T[]) {
-  const localSeenKeys = new Set<string>();
-
-  return items.filter((item) => {
-    const key = getRecommendationItemKey(item);
-    if (!key) {
-      return true;
-    }
-    if (localSeenKeys.has(key)) {
-      return false;
-    }
-    localSeenKeys.add(key);
-    return true;
-  });
-}
-
-function selectRecommendationRailItems<T extends {
-  showId?: string;
-  _id?: string;
-  externalId?: string;
-  title?: string;
-}>(
-  items: T[],
-  seenKeys: Set<string>,
-  minimumFreshItems: number,
+export function getHomeSectionWebDataSet(
+  kind: HomeSectionKind,
+  sectionTestID: string,
 ) {
-  const uniqueItems = dedupeRecommendationItems(items);
-  const freshItems = uniqueItems.filter((item) => {
-    const key = getRecommendationItemKey(item);
-    return !key || !seenKeys.has(key);
-  });
-  const selectedItems = freshItems.length >= minimumFreshItems ? freshItems : uniqueItems;
-
-  selectedItems.forEach((item) => {
-    const key = getRecommendationItemKey(item);
-    if (key) {
-      seenKeys.add(key);
-    }
-  });
-
-  return selectedItems;
+  return Platform.OS === "web"
+    ? {
+        homeSection: kind,
+        homeSectionId: sectionTestID,
+      }
+    : undefined;
 }
 
-type SectionData =
-  | { type: "header" }
-  | { type: "up-next" }
-  | { type: "release-calendar" }
-  | { type: "contact-sync" }
-  | { type: "contacts"; items: Array<any> }
-  | { type: "for-you"; items: Array<any> }
-  | { type: "taste-rail"; title: string; description?: string; items: Array<any> }
-  | { type: "similar-taste"; items: Array<any> }
-  | { type: "taste-lists"; items: Array<any> }
-  | { type: "trending"; items: Array<{ rank: number; score: number; show: any }> }
-  | { type: "most-reviewed"; items: Array<{ rank: number; reviewCount: number; avgRating: number; show: any }> }
-  | { type: "popular-tmdb"; items: CatalogItem[] }
-  | { type: "on-the-air"; items: CatalogItem[] }
-  | ProviderSection
-  | { type: "suggested"; items: Array<any> }
-  | { type: "feed-header" }
-  | { type: "feed-item"; item: FeedItemProps }
-  | { type: "feed-empty" };
+function withoutChartOnlyShelfItems(items: SignatureRailItem[]) {
+  const filtered = items.filter((item) => !hasChartOnlyHomeSignal(item));
+  return filtered.length >= MIN_FEATURE_RAIL_ITEMS ? filtered : items;
+}
 
-export default function HomeScreen() {
-  const { isAuthenticated } = useAuth();
-  const [refreshing, setRefreshing] = useState(false);
-  const [syncingContacts, setSyncingContacts] = useState(false);
-  const [contactsSyncDismissed, setContactsSyncDismissedState] = useState<boolean | null>(null);
-  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
-  const hasProfile = Boolean(me?._id);
+export function getHomeInitialRenderSectionCount(sectionCount: number) {
+  if (Platform.OS === "web") return sectionCount;
+  return Math.min(sectionCount, HOME_NATIVE_INITIAL_RENDER_SECTION_COUNT);
+}
 
-  const {
-    results: feed,
-    status: feedStatus,
-    loadMore,
-  } = usePaginatedQuery(
-    api.feed.listForUser,
-    hasProfile ? {} : "skip",
-    { initialNumItems: 20 },
+function getShelfTopUpCandidates(items: SignatureRailItem[], minimum: number) {
+  return [...items.slice(minimum), ...items].filter(
+    (item) => !hasChartOnlyHomeSignal(item),
   );
-  const trending = useQuery(api.trending.shows, { windowHours: 96, limit: 10 }) ?? [];
-  const mostReviewed = useQuery(api.trending.mostReviewed, { limit: 10 }) ?? [];
-  const contactStatus =
-    useQuery(api.contacts.getStatus, hasProfile ? {} : "skip") ?? null;
-  const contactMatches =
-    useQuery(
-      api.contacts.getMatches,
-      hasProfile && contactStatus?.hasSynced ? { limit: 3 } : "skip",
-    ) ?? [];
-  const suggested =
-    useQuery(api.users.suggested, hasProfile ? { limit: 3 } : "skip") ?? [];
-  const syncContacts = useAction(api.contacts.syncSnapshot);
-  const getTmdbList = useAction(api.shows.getTmdbList);
-  const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
-  const getPersonalizedRecommendations = useAction(api.embeddings.getPersonalizedRecommendations);
-  const getHomeRecommendationRails = useAction(api.embeddings.getHomeRecommendationRails);
-  const getSimilarTasteUsers = useAction(api.embeddings.getSimilarTasteUsers);
-  const getListsFromSimilarTasteUsers = useAction(api.embeddings.getListsFromSimilarTasteUsers);
-  const getSmartLists = useAction(api.embeddings.getSmartLists);
+}
 
-  const feedIsEmpty = feed.length === 0 && feedStatus !== "LoadingFirstPage";
+function getFreshRoomTopUpItems(data: HomeData): SignatureRailItem[] {
+  const rooms = data.streamingRooms.map((room) => ({
+    items: room.items.flatMap((item) => {
+      const key = String(getProviderRoomItemRailKey(item));
+      const catalog = data.getCatalogForKey(key);
+      const title = catalog?.title ?? item.title;
+      const railItem: SignatureRailItem = {
+        key,
+        title,
+        posterUrl: catalog?.posterUrl ?? item.posterUrl ?? null,
+        backdropUrl: catalog?.backdropUrl ?? item.backdropUrl ?? null,
+        overview: catalog?.overview ?? null,
+        year: catalog?.year ?? null,
+        signal: catalog?.homeSignal ?? item.homeSignal ?? null,
+      };
+      return hasReleaseWindowHomeSignal(railItem) ? [railItem] : [];
+    }),
+  }));
 
-  const [popularShows, setPopularShows] = useState<CatalogItem[]>([]);
-  const [onTheAirShows, setOnTheAirShows] = useState<CatalogItem[]>([]);
-  const [forYouShows, setForYouShows] = useState<any[]>([]);
-  const [tasteRails, setTasteRails] = useState<any[]>([]);
-  const [smartLists, setSmartLists] = useState<any[]>([]);
-  const [similarTasteUsers, setSimilarTasteUsers] = useState<any[]>([]);
-  const [tasteLists, setTasteLists] = useState<any[]>([]);
-  const [providerSections, setProviderSections] = useState<
-    Array<{ key: string; label: string; logoUrl: string; items: CatalogItem[] }>
-  >([]);
+  return buildFreshRailRoomTopUpItems(rooms, FRESH_ROOM_TOP_UP_LIMIT);
+}
 
-  const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
-  const providers = useMemo(() => [
-    { key: "netflix", category: "netflix" as const, label: "Netflix", logoUrl: TMDB_LOGO("/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg") },
-    { key: "apple_tv", category: "apple_tv" as const, label: "Apple TV", logoUrl: TMDB_LOGO("/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg") },
-    { key: "max", category: "max" as const, label: "HBO Max", logoUrl: TMDB_LOGO("/jbe4gVSfRlbPTdESXhEKpornsfu.jpg") },
-    { key: "disney_plus", category: "disney_plus" as const, label: "Disney+", logoUrl: TMDB_LOGO("/97yvRBw1GzX7fXprcF80er19ot.jpg") },
-    { key: "hulu", category: "hulu" as const, label: "Hulu", logoUrl: TMDB_LOGO("/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg") },
-    { key: "prime_video", category: "prime_video" as const, label: "Prime Video", logoUrl: TMDB_LOGO("/pvske1MyAoymrs5bguRfVqYiM9a.jpg") },
-  ], []);
+export type HomeSurfaceProps = {
+  data: HomeData;
+  continueWatchingItems?: ContinueWatchingItem[] | null;
+  reduceMotionEnabled?: boolean;
+  schedulePreview?: HomeSchedulePreviewState;
+};
+
+type PreviewDataModule = typeof import("../../lib/homePreviewData");
+
+export function HomeSurface({
+  data,
+  continueWatchingItems: providedContinueWatchingItems,
+  reduceMotionEnabled,
+  schedulePreview: providedSchedulePreview,
+}: HomeSurfaceProps) {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const surfaceNow = data.generatedAt;
+  const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
+  const roomCardWidth = Math.min(Math.max(width - 96, 240), 320);
+
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  const listRef = useRef<Animated.FlatList<HomeSection>>(null);
+  useScrollToTopOnTabPress(listRef as any);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [contactNudgeDismissed, setContactNudgeDismissed] = useState<boolean | null>(null);
+  const [heroSaveStateByKey, setHeroSaveStateByKey] = useState<
+    Partial<Record<string, HeroSaveState>>
+  >({});
+  const queriedContinueWatchingItems = useContinueWatchingItems(
+    data.hasProfile && providedContinueWatchingItems === undefined,
+  );
+  const continueWatchingItems =
+    providedContinueWatchingItems === undefined
+      ? queriedContinueWatchingItems
+      : providedContinueWatchingItems;
+  const queriedSchedulePreview = useHomeSchedulePreview(
+    data.hasProfile && !providedSchedulePreview,
+  );
+  const schedulePreview = providedSchedulePreview ?? queriedSchedulePreview;
+  const activeContinueWatchingItems = useMemo(
+    () => getActiveContinueWatchingItems(continueWatchingItems),
+    [continueWatchingItems],
+  );
+  const hasPersonalTasteSignals = hasHomePersonalizationSignals(data.me, {
+    activeShowCount: activeContinueWatchingItems.length,
+  });
+
+  const continueWatchingPreviewKeys = useMemo(
+    () => getHomeRailIdentitySet(
+      getContinueWatchingPreviewItems(activeContinueWatchingItems),
+    ),
+    [activeContinueWatchingItems],
+  );
+  const heroPreviewKeys = useMemo(
+    () => getHomeRailIdentitySet(data.heroSlides),
+    [data.heroSlides],
+  );
+  const personalPreviewKeys = useMemo(
+    () => new Set([...continueWatchingPreviewKeys]),
+    [continueWatchingPreviewKeys],
+  );
+  const curatedBlockedKeys = useMemo(
+    () => new Set([...heroPreviewKeys, ...personalPreviewKeys]),
+    [heroPreviewKeys, personalPreviewKeys],
+  );
+  const curatedHeatItems = useMemo(
+    () => prioritizeUnpreviewedHomeRailItems(data.heat, personalPreviewKeys),
+    [data.heat, personalPreviewKeys],
+  );
+  const curatedFreshItems = useMemo(
+    () => prioritizeUnpreviewedHomeRailItems(data.fresh, personalPreviewKeys),
+    [data.fresh, personalPreviewKeys],
+  );
+  const curatedEdits = useMemo(
+    () =>
+      buildHomeCuratedEdits({
+        heat: curatedHeatItems,
+        fresh: curatedFreshItems,
+        critics: data.critics,
+        quick: data.quick,
+        blockedKeys: curatedBlockedKeys,
+        now: surfaceNow,
+      }),
+    [
+      curatedBlockedKeys,
+      curatedHeatItems,
+      curatedFreshItems,
+      data.critics,
+      data.quick,
+      surfaceNow,
+    ],
+  );
+  const curatedLeadPreviewKeys = useMemo(
+    () => getHomeCuratedEditLeadPreviewKeys(curatedEdits),
+    [curatedEdits],
+  );
+  const curatedVisiblePreviewKeys = useMemo(
+    () => getHomeCuratedEditPreviewKeys(curatedEdits),
+    [curatedEdits],
+  );
+  const curatedLeadItems = useMemo(
+    () =>
+      curatedEdits
+        .map((edit) => edit.items[0])
+        .filter((item): item is SignatureRailItem => Boolean(item)),
+    [curatedEdits],
+  );
+  const curatedVisibleItems = useMemo(
+    () => curatedEdits.flatMap((edit) => edit.items.slice(0, 4)),
+    [curatedEdits],
+  );
+  const curatedSupportItems = useMemo(
+    () => curatedEdits.flatMap((edit) => edit.items.slice(1, 4)),
+    [curatedEdits],
+  );
+  const visibleHeroSurfaceItems = useMemo(
+    () => data.heroSlides.slice(0, 1),
+    [data.heroSlides],
+  );
+  const visibleOpeningSurfaceItems = useMemo(
+    () => [
+      ...getContinueWatchingPreviewItems(activeContinueWatchingItems),
+      ...visibleHeroSurfaceItems,
+      ...curatedLeadItems,
+    ],
+    [
+      activeContinueWatchingItems,
+      visibleHeroSurfaceItems,
+      curatedLeadItems,
+    ],
+  );
+  const visibleEditorialSurfaceItems = useMemo(
+    () => [...visibleOpeningSurfaceItems, ...curatedSupportItems],
+    [visibleOpeningSurfaceItems, curatedSupportItems],
+  );
+  const railPreviewKeys = useMemo(
+    () => new Set([...heroPreviewKeys, ...personalPreviewKeys, ...curatedLeadPreviewKeys]),
+    [heroPreviewKeys, personalPreviewKeys, curatedLeadPreviewKeys],
+  );
+  const visibleEditorialPreviewKeys = useMemo(
+    () => new Set([...railPreviewKeys, ...curatedVisiblePreviewKeys]),
+    [railPreviewKeys, curatedVisiblePreviewKeys],
+  );
+  const roomHardPreviewKeys = useMemo(
+    () => new Set([...railPreviewKeys]),
+    [railPreviewKeys],
+  );
+  const streamingRoomLeadPreviewItems = useMemo(() => {
+    const rooms = prioritizeHomeRoomsAgainstPreviewKeys<
+      ProviderRoom["items"][number],
+      ProviderRoom
+    >(
+      data.streamingRooms,
+      roomHardPreviewKeys,
+      MIN_PROVIDER_ROOM_ITEMS,
+    ).map((room) => ({
+      ...room,
+      items: sortProviderRoomItemsForFreshness(room.items, surfaceNow),
+    }));
+    return sortProviderRoomsForFreshness(rooms, surfaceNow)
+      .map((room) => getRoomFeaturedItem(room.items, roomHardPreviewKeys, false))
+      .filter((item): item is ProviderRoom["items"][number] => Boolean(item));
+  }, [data.streamingRooms, roomHardPreviewKeys, surfaceNow]);
+  const streamingRoomLeadSurfaceItems = useMemo(
+    () =>
+      streamingRoomLeadPreviewItems.map((item) => ({
+        key: String(getProviderRoomItemRailKey(item)),
+        title: item.title,
+      })),
+    [streamingRoomLeadPreviewItems],
+  );
+  const streamingRoomLeadPreviewKeys = useMemo(
+    () => getHomeRailIdentitySet(streamingRoomLeadSurfaceItems),
+    [streamingRoomLeadSurfaceItems],
+  );
+  const forYouPreviewKeys = useMemo(
+    () => new Set([...visibleEditorialPreviewKeys, ...streamingRoomLeadPreviewKeys]),
+    [streamingRoomLeadPreviewKeys, visibleEditorialPreviewKeys],
+  );
+  const forYouPrecedingSurfaceItems = useMemo(
+    () => [...visibleOpeningSurfaceItems, ...streamingRoomLeadSurfaceItems],
+    [streamingRoomLeadSurfaceItems, visibleOpeningSurfaceItems],
+  );
+  const primaryShelfItems = useMemo(
+    () =>
+      hasPersonalTasteSignals
+        ? buildPersonalHomeShelfItems({
+            forYou: withoutChartOnlyShelfItems(data.forYou),
+            heat: data.heat,
+            fresh: data.fresh,
+            critics: data.critics,
+            quick: data.quick,
+            now: surfaceNow,
+          })
+        : buildColdStartHomeShelfItems({
+            forYou: data.forYou,
+            heat: data.heat,
+            fresh: data.fresh,
+            critics: data.critics,
+            quick: data.quick,
+            now: surfaceNow,
+          }),
+    [
+      data.critics,
+      data.forYou,
+      data.fresh,
+      data.heat,
+      data.quick,
+      hasPersonalTasteSignals,
+      surfaceNow,
+    ],
+  );
+  const forYouTopUpSources = useMemo(
+    () => [
+      {
+        items: data.critics,
+        candidates: getShelfTopUpCandidates(data.critics, MIN_POSTER_RAIL_ITEMS),
+        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+      },
+      {
+        items: data.quick,
+        candidates: getShelfTopUpCandidates(data.quick, MIN_POSTER_RAIL_ITEMS),
+        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+      },
+      {
+        items: data.heat,
+        candidates: getShelfTopUpCandidates(data.heat, MIN_FEATURE_RAIL_ITEMS),
+        minimumRemaining: MIN_FEATURE_RAIL_ITEMS,
+      },
+      {
+        items: data.fresh,
+        candidates: getShelfTopUpCandidates(data.fresh, MIN_POSTER_RAIL_ITEMS),
+        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+      },
+    ],
+    [data.critics, data.fresh, data.quick, data.heat],
+  );
+  const softShelfItems = useMemo(
+    () =>
+      prioritizeUnpreviewedHomeRailItems(
+        primaryShelfItems,
+        curatedVisiblePreviewKeys,
+      ),
+    [primaryShelfItems, curatedVisiblePreviewKeys],
+  );
+  const forYouItems = useMemo(
+    () => {
+      const candidates = topUpHomeRailItemsPreservingSources(
+        softShelfItems,
+        forYouTopUpSources,
+        forYouPreviewKeys,
+        MIN_FEATURE_RAIL_ITEMS,
+        TARGET_FEATURE_RAIL_ITEMS,
+      );
+      const contextualLeadCandidates = hasPersonalTasteSignals
+        ? promoteContextualHomeShelfLead(candidates, { now: surfaceNow })
+        : candidates;
+      return limitHomeRailItemsByTitleAppearances(
+        contextualLeadCandidates,
+        forYouPrecedingSurfaceItems,
+        MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        MIN_FEATURE_RAIL_ITEMS,
+        TARGET_FEATURE_RAIL_ITEMS,
+      );
+    },
+    [
+      softShelfItems,
+      forYouTopUpSources,
+      hasPersonalTasteSignals,
+      surfaceNow,
+      forYouPreviewKeys,
+      forYouPrecedingSurfaceItems,
+    ],
+  );
+  const discoveryPreviewKeys = useMemo(
+    () => getHomeDiscoveryPreviewKeys(visibleEditorialPreviewKeys, forYouItems),
+    [visibleEditorialPreviewKeys, forYouItems],
+  );
+  const heatPreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...visibleEditorialPreviewKeys,
+        ...getHomeRailIdentitySet(forYouItems),
+      ]),
+    [forYouItems, visibleEditorialPreviewKeys],
+  );
+  const heatRoomTopUpItems = useMemo(
+    () => getHomeRoomHeatTopUpItems(data),
+    [data],
+  );
+  const qualityRoomTopUpItems = useMemo(
+    () => getHomeRoomQualityTopUpItems(data),
+    [data],
+  );
+  const quickRoomTopUpItems = useMemo(
+    () => getHomeRoomQuickTopUpItems(data),
+    [data],
+  );
+  const heatItems = useMemo(
+    () => {
+      const candidates = removePreviewedHomeRailItems(
+        [...data.heat, ...heatRoomTopUpItems],
+        heatPreviewKeys,
+        MIN_FEATURE_RAIL_ITEMS,
+      );
+      return limitHomeRailItemsByTitleAppearances(
+        candidates,
+        [...visibleEditorialSurfaceItems, ...forYouItems],
+        MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        MIN_FEATURE_RAIL_ITEMS,
+        TARGET_FEATURE_RAIL_ITEMS,
+      );
+    },
+    [
+      data.heat,
+      heatRoomTopUpItems,
+      heatPreviewKeys,
+      forYouItems,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const pulseHeatItems = useMemo(
+    () => heatItems.map((railItem) => ({ ...railItem, rank: null })),
+    [heatItems],
+  );
+  const freshRoomTopUpItems = useMemo(
+    () => getFreshRoomTopUpItems(data),
+    [data],
+  );
+  const freshReservePreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...visibleEditorialPreviewKeys,
+        ...getHomeRailIdentitySet(forYouItems),
+        ...getHomeRailIdentitySet(heatItems),
+      ]),
+    [forYouItems, heatItems, visibleEditorialPreviewKeys],
+  );
+  const freshReserveCandidateItems = useMemo(
+    () =>
+      removePreviewedHomeRailItems(
+        [...data.fresh, ...freshRoomTopUpItems],
+        freshReservePreviewKeys,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+      ),
+    [data.fresh, freshRoomTopUpItems, freshReservePreviewKeys],
+  );
+  const freshReserveItems = useMemo(
+    () =>
+      buildVisibleFreshRailItems({
+        items: freshReserveCandidateItems,
+        previewKeys: freshReservePreviewKeys,
+        precedingItems: [
+          ...visibleEditorialSurfaceItems,
+          ...forYouItems,
+          ...heatItems,
+        ],
+        maxTitleAppearances: MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        minimumRemaining: MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        limit: MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        now: surfaceNow,
+      }),
+    [
+      freshReserveCandidateItems,
+      freshReservePreviewKeys,
+      forYouItems,
+      heatItems,
+      surfaceNow,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const criticsReservePreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...discoveryPreviewKeys,
+        ...getHomeRailIdentitySet(heatItems),
+        ...getHomeRailIdentitySet(freshReserveItems),
+      ]),
+    [discoveryPreviewKeys, heatItems, freshReserveItems],
+  );
+  const criticsReserveCandidateItems = useMemo(
+    () =>
+      removePreviewedHomeRailItems(
+        [...data.critics, ...qualityRoomTopUpItems],
+        criticsReservePreviewKeys,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+      ),
+    [data.critics, qualityRoomTopUpItems, criticsReservePreviewKeys],
+  );
+  const criticsReserveItems = useMemo(
+    () =>
+      limitHomeRailItemsByTitleAppearances(
+        criticsReserveCandidateItems,
+        [
+          ...visibleEditorialSurfaceItems,
+          ...forYouItems,
+          ...heatItems,
+          ...freshReserveItems,
+        ],
+        MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+      ),
+    [
+      criticsReserveCandidateItems,
+      forYouItems,
+      heatItems,
+      freshReserveItems,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const quickPreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...discoveryPreviewKeys,
+        ...getHomeRailIdentitySet(heatItems),
+        ...getHomeRailIdentitySet(freshReserveItems),
+        ...getHomeRailIdentitySet(criticsReserveItems),
+      ]),
+    [criticsReserveItems, discoveryPreviewKeys, freshReserveItems, heatItems],
+  );
+  const quickItems = useMemo(
+    () => {
+      const candidates = removePreviewedHomeRailItems(
+        [...data.quick, ...quickRoomTopUpItems],
+        quickPreviewKeys,
+        MIN_QUICK_RAIL_ITEMS,
+      );
+      return limitHomeRailItemsByTitleAppearances(
+        candidates,
+        [
+          ...visibleEditorialSurfaceItems,
+          ...forYouItems,
+          ...heatItems,
+        ],
+        MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        MIN_QUICK_RAIL_ITEMS,
+        TARGET_QUICK_RAIL_ITEMS,
+      );
+    },
+    [
+      data.quick,
+      quickRoomTopUpItems,
+      quickPreviewKeys,
+      forYouItems,
+      heatItems,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const freshPreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...visibleEditorialPreviewKeys,
+        ...getHomeRailIdentitySet(forYouItems),
+        ...getHomeRailIdentitySet(heatItems),
+        ...getHomeRailIdentitySet(quickItems),
+      ]),
+    [forYouItems, heatItems, quickItems, visibleEditorialPreviewKeys],
+  );
+  const freshCandidateItems = useMemo(
+    () =>
+      removePreviewedHomeRailItems(
+        [...data.fresh, ...freshRoomTopUpItems],
+        freshPreviewKeys,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+      ),
+    [data.fresh, freshRoomTopUpItems, freshPreviewKeys],
+  );
+  const freshItems = useMemo(
+    () => {
+      return buildVisibleFreshRailItems({
+        items: freshCandidateItems,
+        previewKeys: freshPreviewKeys,
+        precedingItems: [
+          ...visibleEditorialSurfaceItems,
+          ...forYouItems,
+          ...heatItems,
+          ...quickItems,
+        ],
+        maxTitleAppearances: MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        minimumRemaining: MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        limit: TARGET_FRESH_RAIL_ITEMS,
+        now: surfaceNow,
+      });
+    },
+    [
+      freshCandidateItems,
+      freshPreviewKeys,
+      forYouItems,
+      heatItems,
+      quickItems,
+      surfaceNow,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const criticsPreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...discoveryPreviewKeys,
+        ...getHomeRailIdentitySet(heatItems),
+        ...getHomeRailIdentitySet(quickItems),
+        ...getHomeRailIdentitySet(freshItems),
+      ]),
+    [discoveryPreviewKeys, heatItems, quickItems, freshItems],
+  );
+  const criticsItems = useMemo(
+    () => {
+      const candidates = removePreviewedHomeRailItems(
+        [...data.critics, ...qualityRoomTopUpItems],
+        criticsPreviewKeys,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+      );
+      return limitHomeRailItemsByTitleAppearances(
+        candidates,
+        [
+          ...visibleEditorialSurfaceItems,
+          ...forYouItems,
+          ...heatItems,
+          ...freshItems,
+          ...quickItems,
+        ],
+        MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
+        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        MIN_POSTER_RAIL_ITEMS,
+      );
+    },
+    [
+      data.critics,
+      qualityRoomTopUpItems,
+      criticsPreviewKeys,
+      forYouItems,
+      heatItems,
+      freshItems,
+      quickItems,
+      visibleEditorialSurfaceItems,
+    ],
+  );
+  const roomSoftPreviewKeys = useMemo(
+    () =>
+      new Set([
+        ...curatedVisiblePreviewKeys,
+        ...getHomeRailIdentitySet(heatItems),
+        ...getHomeRailIdentitySet(freshItems),
+        ...getHomeRailIdentitySet(criticsItems),
+        ...getHomeRailIdentitySet(quickItems),
+      ]),
+    [
+      curatedVisiblePreviewKeys,
+      heatItems,
+      freshItems,
+      criticsItems,
+      quickItems,
+    ],
+  );
+  const roomSurfaceItems = useMemo(
+    () => [
+      ...data.heroSlides,
+      ...visibleOpeningSurfaceItems,
+      ...forYouItems,
+      ...heatItems,
+      ...freshItems,
+      ...criticsItems,
+      ...quickItems,
+      ...curatedVisibleItems,
+    ],
+    [
+      data.heroSlides,
+      visibleOpeningSurfaceItems,
+      forYouItems,
+      heatItems,
+      freshItems,
+      criticsItems,
+      quickItems,
+      curatedVisibleItems,
+    ],
+  );
+  const roomSurfacePreviewKeys = useMemo(
+    () => getHomeRailIdentitySet(roomSurfaceItems),
+    [roomSurfaceItems],
+  );
+  const streamingRooms = useMemo(
+    (): ProviderRoom[] => {
+      const rooms = prioritizeHomeRoomsAgainstPreviewKeys<
+        ProviderRoom["items"][number],
+        ProviderRoom
+      >(
+        data.streamingRooms,
+        roomHardPreviewKeys,
+        MIN_PROVIDER_ROOM_ITEMS,
+        roomSoftPreviewKeys,
+      );
+      const visibleRooms = rooms.flatMap((room) => {
+        const items = limitHomeRoomItemsByTitleAppearances<
+          ProviderRoom["items"][number]
+        >(
+          room.items,
+          roomSurfaceItems,
+          MAX_PROVIDER_ROOM_SURFACE_TITLE_APPEARANCES,
+          MIN_PROVIDER_ROOM_ITEMS,
+          TARGET_PROVIDER_ROOM_ITEMS,
+        );
+        const sortedItems = sortProviderRoomItemsForFreshness(items, surfaceNow);
+        return sortedItems.length >= MIN_PROVIDER_ROOM_ITEMS
+          ? [{ ...room, items: sortedItems }]
+          : [];
+      });
+      const sortedRooms = sortProviderRoomsForFreshness(visibleRooms, surfaceNow);
+      return filterHomeRoomsWithUnpreviewedFeaturedItems<
+        ProviderRoom["items"][number],
+        ProviderRoom
+      >(
+        sortedRooms,
+        roomSurfacePreviewKeys,
+        (items, mutedTitleKeys) =>
+          getRoomFeaturedItem(items, mutedTitleKeys, false),
+        MIN_PROVIDER_ROOMS,
+      );
+    },
+    [
+      data.streamingRooms,
+      roomHardPreviewKeys,
+      roomSoftPreviewKeys,
+      roomSurfaceItems,
+      roomSurfacePreviewKeys,
+      surfaceNow,
+    ],
+  );
+  const streamingRoomSignalRooms = useMemo(
+    () =>
+      streamingRooms.map((room) => {
+        const featured = getRoomFeaturedItem(
+          room.items,
+          roomSurfacePreviewKeys,
+          false,
+        );
+        const supportItems = getRoomSupportItems({
+          items: room.items,
+          featured,
+          mutedSupportTitleKeys: roomSurfacePreviewKeys,
+          softMutedSupportTitleKeys: roomSurfacePreviewKeys,
+        });
+        return {
+          items: [featured, ...supportItems].filter(
+            (item): item is ProviderRoom["items"][number] => Boolean(item),
+          ),
+        };
+      }),
+    [roomSurfacePreviewKeys, streamingRooms],
+  );
+  const discoverySectionSignals = useMemo(
+    () => ({
+      heat: getHomeDiscoverySectionSignal(heatItems, surfaceNow),
+      fresh: getHomeDiscoverySectionSignal(freshItems, surfaceNow),
+      critics: getHomeDiscoverySectionSignal(criticsItems, surfaceNow),
+      quick: getHomeDiscoverySectionSignal(quickItems, surfaceNow),
+      rooms: getHomeProviderRoomsSectionSignal(
+        streamingRoomSignalRooms,
+        surfaceNow,
+      ),
+    }),
+    [
+      heatItems,
+      freshItems,
+      criticsItems,
+      quickItems,
+      surfaceNow,
+      streamingRoomSignalRooms,
+    ],
+  );
+  const socialSectionSignal = useMemo(
+    () => {
+      const viewerId = data.me?._id ?? null;
+      const displayablePeople = getFriendsActivityPeople(
+        [
+          { source: "contacts", people: data.contactMatches },
+          { source: "taste", people: data.similarTaste },
+          { source: "suggested", people: data.suggested },
+        ],
+        viewerId,
+      );
+      return {
+        feedItemCount: getFriendsActivityFeedItems(data.feedItems, viewerId).length,
+        peopleSuggestionCount: displayablePeople.length,
+        hasSyncedContacts: data.hasSyncedContacts,
+        contactStatusKnown: data.contactStatusKnown,
+      };
+    },
+    [
+      data.contactMatches,
+      data.contactMatches.length,
+      data.contactStatusKnown,
+      data.feedItems,
+      data.feedItems.length,
+      data.hasSyncedContacts,
+      data.me?._id,
+      data.similarTaste,
+      data.similarTaste.length,
+      data.suggested,
+      data.suggested.length,
+    ],
+  );
 
   useEffect(() => {
-    if (!hasProfile) return;
-    getContactsSyncDismissed().then(setContactsSyncDismissedState);
-  }, [hasProfile]);
-
-  useEffect(() => {
-    if (!hasProfile) {
-      setForYouShows([]);
-      setTasteRails([]);
-      setSmartLists([]);
-      setSimilarTasteUsers([]);
-      setTasteLists([]);
-      return;
-    }
-
-    setForYouShows([]);
-    setTasteRails([]);
-    setSmartLists([]);
-    setSimilarTasteUsers([]);
-    setTasteLists([]);
-
     let cancelled = false;
-    const runLoader = async <T,>(
-      loader: () => Promise<T>,
-      onSuccess: (value: T) => void,
-    ) => {
-      try {
-        const value = await loader();
-        if (!cancelled) {
-          onSuccess(value);
-        }
-      } catch {
-        // Keep the rest of the home screen rendering even if one rail fails.
+    void getContactsSyncDismissed().then((value) => {
+      if (!cancelled) {
+        setContactNudgeDismissed(Boolean(value));
       }
-    };
-
-    void runLoader(
-      () => getPersonalizedRecommendations({ limit: 12 }),
-      (personalized) => setForYouShows(personalized),
-    );
-    void runLoader(
-      () => getHomeRecommendationRails({ limitPerRail: 10 }),
-      (rails) => setTasteRails(rails),
-    );
-    void runLoader(
-      () => getSimilarTasteUsers({ limit: 4 }),
-      (similarUsers) => setSimilarTasteUsers(similarUsers),
-    );
-    void runLoader(
-      () => getListsFromSimilarTasteUsers({ limit: 4 }),
-      (lists) => setTasteLists(lists),
-    );
-    void runLoader(
-      () => getSmartLists({ limitPerList: 10 }),
-      (smart) => setSmartLists(smart),
-    );
-
+    });
     return () => {
       cancelled = true;
     };
-  }, [
-    getHomeRecommendationRails,
-    getListsFromSimilarTasteUsers,
-    getPersonalizedRecommendations,
-    getSimilarTasteUsers,
-    getSmartLists,
-    hasProfile,
-  ]);
+  }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated || !feedIsEmpty) return;
+  const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
+  const setStatus = useMutation(api.watchStates.setStatus);
+  const syncContacts = useAction(api.contacts.syncSnapshot);
 
-    setPopularShows([]);
-    setOnTheAirShows([]);
-    setProviderSections([]);
-
-    let cancelled = false;
-    const providerOrder = new Map(
-      providers.map((provider, index) => [provider.key, index]),
-    );
-    const runLoader = async <T,>(
-      loader: () => Promise<T>,
-      onSuccess: (value: T) => void,
-    ) => {
-      try {
-        const value = await loader();
-        if (!cancelled) {
-          onSuccess(value);
-        }
-      } catch {
-        // Ignore individual discovery rail failures so the rest can render.
-      }
-    };
-
-    void runLoader(
-      () => getTmdbList({ category: "popular", limit: 12 }),
-      (results) => setPopularShows(results),
-    );
-    void runLoader(
-      () => getTmdbList({ category: "on_the_air", limit: 12 }),
-      (results) => setOnTheAirShows(results),
-    );
-
-    providers.forEach((provider) => {
-      void runLoader(
-        () => getTmdbList({ category: provider.category, limit: 12 }),
-        (items) => {
-          setProviderSections((current) => {
-            const next = current.filter((section) => section.key !== provider.key);
-            if (items.length > 0) {
-              next.push({
-                key: provider.key,
-                label: provider.label,
-                logoUrl: provider.logoUrl,
-                items,
-              });
-            }
-
-            next.sort(
-              (left, right) =>
-                (providerOrder.get(left.key) ?? 0) - (providerOrder.get(right.key) ?? 0),
-            );
-
-            return next;
-          });
-        },
-      );
-    });
-
-    return () => { cancelled = true; };
-  }, [isAuthenticated, feedIsEmpty, getTmdbList, providers]);
-
-  const onRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setRefreshing(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setRefreshing(false);
-  }, []);
+    try {
+      await Promise.all([data.refresh(), schedulePreview.refresh()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [data, schedulePreview]);
+
+  const openShowFromKey = useCallback(
+    async (key: string, fallbackTitle: string) => {
+      const catalog = data.getCatalogForKey(key);
+      if (!catalog) {
+        Alert.alert("Could not open show", `Missing catalog data for ${fallbackTitle}.`);
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const knownId = catalog._id ?? catalog.showId;
+      if (knownId) {
+        router.push({ pathname: "/show/[id]", params: { id: knownId } });
+        return;
+      }
+      if (!catalog.externalId) {
+        Alert.alert("Could not open show", "This catalog item is missing an id.");
+        return;
+      }
+      try {
+        const nextShowId = await ingestFromCatalog({
+          externalSource: catalog.externalSource ?? "tmdb",
+          externalId: catalog.externalId,
+          title: catalog.title,
+          year: catalog.year,
+          overview: catalog.overview,
+          posterUrl: catalog.posterUrl,
+          backdropUrl: catalog.backdropUrl,
+          genreIds: catalog.genreIds,
+          tmdbPopularity: catalog.tmdbPopularity,
+          tmdbVoteAverage: catalog.tmdbVoteAverage,
+          tmdbVoteCount: catalog.tmdbVoteCount,
+        });
+        router.push(`/show/${nextShowId}`);
+      } catch (error) {
+        Alert.alert("Could not add show", String(error));
+      }
+    },
+    [data, ingestFromCatalog],
+  );
+
+  const handlePressRailItem = useCallback(
+    (item: SignatureRailItem) => {
+      void openShowFromKey(item.key, item.title);
+    },
+    [openShowFromKey],
+  );
+
+  const handlePressHero = useCallback(
+    (slide: HeroSlide) => {
+      void openShowFromKey(slide.key, slide.title);
+    },
+    [openShowFromKey],
+  );
+
+  const handleSaveHero = useCallback(
+    async (slide: HeroSlide) => {
+      const existingState = heroSaveStateByKey[slide.key];
+      if (existingState === "saving" || existingState === "saved") {
+        return;
+      }
+      const catalog = data.getCatalogForKey(slide.key);
+      if (!catalog) return;
+      let showId = catalog._id ?? catalog.showId;
+      setHeroSaveStateByKey((current) => ({ ...current, [slide.key]: "saving" }));
+      try {
+        if (!showId && catalog.externalId) {
+          showId = await ingestFromCatalog({
+            externalSource: catalog.externalSource ?? "tmdb",
+            externalId: catalog.externalId,
+            title: catalog.title,
+            year: catalog.year,
+            overview: catalog.overview,
+            posterUrl: catalog.posterUrl,
+            backdropUrl: catalog.backdropUrl,
+            genreIds: catalog.genreIds,
+            tmdbPopularity: catalog.tmdbPopularity,
+            tmdbVoteAverage: catalog.tmdbVoteAverage,
+            tmdbVoteCount: catalog.tmdbVoteCount,
+          });
+        }
+        if (!showId) {
+          setHeroSaveStateByKey((current) => {
+            const next = { ...current };
+            delete next[slide.key];
+            return next;
+          });
+          Alert.alert("Could not save", "Missing show id.");
+          return;
+        }
+        await setStatus({ showId, status: "watchlist" });
+        setHeroSaveStateByKey((current) => ({ ...current, [slide.key]: "saved" }));
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        setHeroSaveStateByKey((current) => {
+          const next = { ...current };
+          delete next[slide.key];
+          return next;
+        });
+        Alert.alert("Could not save", String(error));
+      }
+    },
+    [data, heroSaveStateByKey, ingestFromCatalog, setStatus],
+  );
 
   const handleSyncContacts = useCallback(async () => {
     try {
-      setSyncingContacts(true);
+      setSyncing(true);
       const entries = await loadDeviceContacts();
       const result = await syncContacts({ entries });
       await setContactsSyncDismissed(false);
-      setContactsSyncDismissedState(false);
+      setContactNudgeDismissed(false);
       const copy = getContactSyncAlertCopy(result);
       Alert.alert(copy.title, copy.message);
     } catch (error) {
       Alert.alert("Could not sync contacts", String(error));
     } finally {
-      setSyncingContacts(false);
+      setSyncing(false);
     }
   }, [syncContacts]);
 
-  const handleAddFromCatalog = useCallback(
-    async (item: CatalogItem) => {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        const showId = await ingestFromCatalog({
-          externalSource: item.externalSource,
-          externalId: item.externalId,
-          title: item.title,
-          year: item.year,
-          overview: item.overview,
-          posterUrl: item.posterUrl,
-        });
-        router.push(`/show/${showId}`);
-      } catch (error) {
-        Alert.alert("Could not add show", String(error));
-      }
-    },
-    [ingestFromCatalog],
+  const handleDismissNudge = useCallback(async () => {
+    await setContactsSyncDismissed(true);
+    setContactNudgeDismissed(true);
+  }, []);
+
+  const sections = useMemo(
+    () =>
+      getHomeSectionPlan({
+        hasProfile: data.hasProfile,
+        showContactSyncNudge: data.showContactSyncNudge,
+        contactNudgeDismissed,
+        sectionSignals: discoverySectionSignals,
+        socialSignal: socialSectionSignal,
+        scheduleSignal: {
+          known: Boolean(schedulePreview.preview),
+          tonightCount: schedulePreview.tonightCount,
+          upcomingCount: schedulePreview.weekCount,
+        },
+        now: surfaceNow,
+      }),
+    [
+      data.hasProfile,
+      data.showContactSyncNudge,
+      contactNudgeDismissed,
+      discoverySectionSignals,
+      schedulePreview.preview,
+      schedulePreview.tonightCount,
+      schedulePreview.weekCount,
+      socialSectionSignal,
+      surfaceNow,
+    ],
   );
+  const initialRenderSectionCount = getHomeInitialRenderSectionCount(
+    sections.length,
+  );
+  const visibleNumberedSectionKinds = useMemo(() => {
+    const plannedKinds = new Set(sections.map((section) => section.kind));
+    const visible = new Set<HomeSectionKind>();
+    const add = (kind: HomeSectionKind, condition: boolean) => {
+      if (condition && plannedKinds.has(kind)) {
+        visible.add(kind);
+      }
+    };
 
-  const sections: SectionData[] = useMemo(() => {
-    const result: SectionData[] = [{ type: "header" }];
-    const seenRecommendationKeys = new Set<string>();
-
-    if (
-      hasProfile &&
-      !contactStatus?.hasSynced &&
-      contactsSyncDismissed === false
-    ) {
-      result.push({ type: "contact-sync" });
-    }
-
-    if (contactMatches.length > 0) {
-      result.push({ type: "contacts", items: contactMatches });
-    }
-
-    if (hasProfile) {
-      result.push({ type: "up-next" });
-      result.push({ type: "release-calendar" });
-    }
-
-    if (trending.length >= 5) {
-      result.push({ type: "trending", items: trending });
-    }
-
-    const uniqueForYouShows = selectRecommendationRailItems(
-      forYouShows,
-      seenRecommendationKeys,
-      1,
+    add(
+      "continue-watching",
+      data.hasProfile &&
+        Array.isArray(continueWatchingItems) &&
+        (continueWatchingItems.length > 0 ||
+          shouldRenderContinueWatchingEmptyState(continueWatchingItems, true)),
     );
-    if (uniqueForYouShows.length > 0) {
-      result.push({ type: "for-you", items: uniqueForYouShows });
-    }
+    add(
+      "tonight",
+      data.hasProfile &&
+        Boolean(schedulePreview.preview) &&
+        schedulePreview.hasScheduleItems,
+    );
+    add("curated", data.hasProfile && curatedEdits.length > 0);
+    add(
+      "for-you",
+      data.hasProfile && (data.loading.forYou || forYouItems.length > 0),
+    );
+    add("heat", data.loading.heat || heatItems.length > 0);
+    add("fresh", data.loading.fresh || freshItems.length > 0);
+    add("critics", data.loading.critics || criticsItems.length > 0);
+    add("quick", data.loading.quick || quickItems.length > 0);
+    add("rooms", data.loading.rooms || streamingRooms.length > 0);
+    add("friends", data.hasProfile && plannedKinds.has("friends"));
 
-    tasteRails.forEach((rail) => {
-      const uniqueItems = selectRecommendationRailItems(
-        rail.items ?? [],
-        seenRecommendationKeys,
-        5,
-      );
-      if (uniqueItems.length > 0) {
-        result.push({
-          type: "taste-rail",
-          title: rail.title,
-          description: rail.description,
-          items: uniqueItems,
-        });
-      }
-    });
-
-    if (similarTasteUsers.length > 0) {
-      result.push({ type: "similar-taste", items: similarTasteUsers });
-    }
-
-    if (tasteLists.length > 0) {
-      result.push({ type: "taste-lists", items: tasteLists });
-    }
-
-    smartLists.forEach((rail) => {
-      const uniqueItems = selectRecommendationRailItems(
-        rail.items ?? [],
-        seenRecommendationKeys,
-        5,
-      );
-      if (uniqueItems.length > 0) {
-        result.push({
-          type: "taste-rail",
-          title: rail.title,
-          description: rail.description,
-          items: uniqueItems,
-        });
-      }
-    });
-
-    if (feedIsEmpty && mostReviewed.length > 0) {
-      const trendingShowIds = new Set(
-        trending
-          .map((t: { show?: { _id?: string } | null }) => t.show?._id)
-          .filter((id: string | undefined): id is string => Boolean(id)),
-      );
-      const dedupedReviewed = mostReviewed.filter(
-        (item: { show?: { _id?: string } | null }) =>
-          !trendingShowIds.has(item.show?._id ?? ""),
-      );
-      if (dedupedReviewed.length > 0) {
-        result.push({ type: "most-reviewed", items: dedupedReviewed });
-      }
-    }
-
-    if (feedIsEmpty && popularShows.length > 0) {
-      result.push({ type: "popular-tmdb", items: popularShows });
-    }
-
-    if (feedIsEmpty && onTheAirShows.length > 0) {
-      result.push({ type: "on-the-air", items: onTheAirShows });
-    }
-
-    for (const section of providerSections) {
-      if (feedIsEmpty && section.items.length > 0) {
-        result.push({
-          type: "provider",
-          key: section.key,
-          label: section.label,
-          logoUrl: section.logoUrl,
-          items: section.items,
-        });
-      }
-    }
-
-    if (suggested.length > 0) {
-      result.push({ type: "suggested", items: suggested });
-    }
-
-    result.push({ type: "feed-header" });
-
-    if (feed.length > 0) {
-      feed.forEach((item) => {
-        result.push({ type: "feed-item", item });
-      });
-    } else {
-      result.push({ type: "feed-empty" });
-    }
-
-    return result;
+    return visible;
   }, [
-    contactMatches,
-    contactStatus?.hasSynced,
-    contactsSyncDismissed,
-    feed,
-    feedIsEmpty,
-    hasProfile,
-    mostReviewed,
-    onTheAirShows,
-    popularShows,
-    providerSections,
-    forYouShows,
-    smartLists,
-    suggested,
-    similarTasteUsers,
-    tasteLists,
-    tasteRails,
-    trending,
+    continueWatchingItems,
+    criticsItems.length,
+    curatedEdits.length,
+    data.hasProfile,
+    data.loading.critics,
+    data.loading.forYou,
+    data.loading.fresh,
+    data.loading.heat,
+    data.loading.quick,
+    data.loading.rooms,
+    forYouItems.length,
+    freshItems.length,
+    heatItems.length,
+    quickItems.length,
+    schedulePreview.hasScheduleItems,
+    schedulePreview.preview,
+    sections,
+    streamingRooms.length,
   ]);
-
-  const renderShowCarousel = useCallback(
-    (items: CarouselItem[], onPress: (item: CarouselItem) => void) => (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 24, gap: 14 }}
-      >
-        {items.map((item, index) => {
-          const show = getCarouselShow(item);
-          const showId = getCarouselShowId(item);
-          const key = isRankedCarouselItem(item)
-            ? item.show?._id ?? item._id ?? `${show?.title ?? "ranked"}-${index}`
-            : (item as CatalogItem & { _id?: string })._id ??
-              item.externalId ??
-              `${show?.title ?? "catalog"}-${index}`;
-          const cardContent = (
-            <>
-              <Poster uri={show?.posterUrl} size="md" />
-              <Text className="mt-2 text-sm font-semibold text-text-primary" numberOfLines={2}>
-                {show?.title ?? "Unknown"}
-              </Text>
-              {show?.year ? (
-                <Text className="text-xs text-text-tertiary">{show.year}</Text>
-              ) : null}
-            </>
-          );
-          const card = Platform.OS === "web" && showId ? (
-            <a
-              href={`/show/${showId}`}
-              aria-label={show?.title ? `Open ${show.title}` : "Open show"}
-              style={{
-                cursor: "pointer",
-                display: "block",
-                textDecoration: "none",
-                width: 112,
-              }}
-            >
-              {cardContent}
-            </a>
-          ) : (
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                if (showId) {
-                  router.push({ pathname: "/show/[id]", params: { id: showId } });
-                  return;
-                }
-                onPress(item);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={show?.title ? `Open ${show.title}` : "Open show"}
-              className="w-28 active:opacity-80"
-            >
-              {cardContent}
-            </Pressable>
-          );
-
-          return (
-            <Animated.View key={key} entering={FadeInRight.delay(index * 50)}>
-              {card}
-            </Animated.View>
-          );
-        })}
-      </ScrollView>
-    ),
-    [],
+  const sectionDisplayIndexByKind = useMemo(
+    () => getHomeSectionDisplayIndexes(sections, visibleNumberedSectionKinds),
+    [sections, visibleNumberedSectionKinds],
+  );
+  const getSectionDisplayIndex = useCallback(
+    (kind: HomeSectionKind) =>
+      isNumberedHomeSectionKind(kind)
+        ? sectionDisplayIndexByKind.get(kind)
+        : undefined,
+    [sectionDisplayIndexByKind],
   );
 
-  const renderSection = useCallback(
-    ({ item }: { item: SectionData }) => {
-      switch (item.type) {
-        case "header":
+  const renderSectionContent = (item: HomeSection) => {
+    switch (item.kind) {
+      case "hero":
+        return (
+          <HeroCarousel
+            slides={data.heroSlides}
+            scrollY={scrollY}
+            onPressSlide={handlePressHero}
+            onSavePress={data.hasProfile ? handleSaveHero : undefined}
+            saveStateByKey={heroSaveStateByKey}
+            topInset={insets.top}
+            now={surfaceNow}
+            reduceMotionEnabled={reduceMotionEnabled}
+          />
+        );
+      case "curated":
+        if (!data.hasProfile || curatedEdits.length === 0) return null;
+        return (
+          <HomeCuratedEdits
+            edits={curatedEdits}
+            index={getSectionDisplayIndex(item.kind)}
+            onPressItem={handlePressRailItem}
+          />
+        );
+      case "continue-watching":
+        if (!data.hasProfile) return null;
+        return (
+          <ContinueWatchingRail
+            items={continueWatchingItems ?? null}
+            hideWhenEmpty
+            index={getSectionDisplayIndex(item.kind)}
+          />
+        );
+      case "tonight":
+        if (!data.hasProfile) return null;
+        return (
+          <TonightStrip
+            schedule={schedulePreview}
+            index={getSectionDisplayIndex(item.kind)}
+          />
+        );
+      case "for-you": {
+        if (data.loading.forYou && forYouItems.length === 0) {
           return (
-            <View className="px-6 pt-6">
-              <Text className="text-3xl font-bold tracking-tight text-text-primary">Home</Text>
-              <Text className="mt-1 text-sm text-text-tertiary">
-                {feedIsEmpty
-                  ? "Discover shows and follow friends to build your feed."
-                  : "Updates from people you follow and what's trending now."}
-              </Text>
-            </View>
-          );
-
-        case "up-next":
-          return <UpNextRail />;
-
-        case "release-calendar":
-          return <ReleaseCalendarPreview />;
-
-        case "trending":
-          return (
-            <View className="mt-6">
-              <View className="px-6">
-                <SectionHeader title="Trending Now" />
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(item.items, (trendingItem) => {
-                  if (isRankedCarouselItem(trendingItem) && trendingItem.show?._id) {
-                    router.push(`/show/${trendingItem.show._id}`);
-                  }
-                })}
-              </View>
-            </View>
-          );
-
-        case "for-you":
-          return (
-            <View className="mt-6">
-              <View className="px-6 flex-row items-center gap-2">
-                <Ionicons name="sparkles" size={16} color="#22c55e" />
-                <Text className="text-lg font-semibold text-text-primary">
-                  Picked for You
-                </Text>
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(
-                  item.items,
-                  (recommendedItem) => {
-                    if (isRankedCarouselItem(recommendedItem) && recommendedItem.show?._id) {
-                      router.push(`/show/${recommendedItem.show._id}`);
-                    }
-                  },
-                )}
-              </View>
-            </View>
-          );
-
-        case "taste-rail":
-          return (
-            <RecommendationRail
-              title={item.title}
-              description={item.description}
-              items={item.items}
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker={hasPersonalTasteSignals ? "Personal" : "Start"}
+              title={hasPersonalTasteSignals ? "For you" : "Start here"}
+              accent={FOR_YOU_ACCENT}
+              icon="sparkles"
+              variant="feature"
             />
           );
-
-        case "similar-taste":
-          return (
-            <View className="mt-8 px-6">
-              <View className="flex-row items-center justify-between">
-                <Text className="text-lg font-semibold text-text-primary">People with similar taste</Text>
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/search?mode=people");
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Text className="text-sm font-semibold text-text-tertiary">See more</Text>
-                </Pressable>
-              </View>
-              <View className="mt-4 gap-3">
-                {item.items.map((candidate) => (
-                  <UserRow
-                    key={candidate.user._id}
-                    userId={candidate.user._id}
-                    displayName={candidate.user.displayName ?? candidate.user.name}
-                    username={candidate.user.username}
-                    avatarUrl={candidate.avatarUrl}
-                    isFollowing={candidate.isFollowing}
-                    followsYou={candidate.followsYou}
-                    isMutualFollow={candidate.isMutualFollow}
-                    mutualCount={candidate.mutualCount}
-                    inContacts={candidate.inContacts}
-                    subtitle={candidate.subtitle}
-                    taste={candidate.taste}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-
-        case "taste-lists":
-          return (
-            <View className="mt-8 px-6">
-              <View className="flex-row items-center justify-between">
-                <Text className="text-lg font-semibold text-text-primary">Lists from people like you</Text>
-              </View>
-              <View className="mt-4 gap-3">
-                {item.items.map((listItem) => (
-                  <ListRow
-                    key={listItem._id}
-                    id={listItem._id}
-                    title={listItem.title}
-                    description={listItem.description ?? `By ${listItem.ownerName}`}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-
-        case "most-reviewed":
-          return (
-            <View className="mt-6">
-              <View className="px-6 flex-row items-center justify-between">
-                <View className="flex-row items-center gap-2">
-                  <Ionicons name="star" size={16} color="#f59e0b" />
-                  <Text className="text-lg font-semibold text-text-primary">
-                    Popular on Plotlist
-                  </Text>
-                </View>
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(item.items, (reviewedItem) => {
-                  if (isRankedCarouselItem(reviewedItem) && reviewedItem.show?._id) {
-                    router.push(`/show/${reviewedItem.show._id}`);
-                  }
-                })}
-              </View>
-            </View>
-          );
-
-        case "popular-tmdb":
-          return (
-            <View className="mt-6">
-              <View className="px-6 flex-row items-center gap-2">
-                <Ionicons name="flame" size={16} color="#ef4444" />
-                <Text className="text-lg font-semibold text-text-primary">
-                  Popular Right Now
-                </Text>
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(item.items, (catalogItem) => {
-                  if (!isRankedCarouselItem(catalogItem)) {
-                    handleAddFromCatalog(catalogItem as CatalogItem);
-                  }
-                })}
-              </View>
-            </View>
-          );
-
-        case "on-the-air":
-          return (
-            <View className="mt-6">
-              <View className="px-6 flex-row items-center gap-2">
-                <Ionicons name="tv" size={16} color="#0ea5e9" />
-                <Text className="text-lg font-semibold text-text-primary">
-                  Airing This Week
-                </Text>
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(item.items, (catalogItem) => {
-                  if (!isRankedCarouselItem(catalogItem)) {
-                    handleAddFromCatalog(catalogItem as CatalogItem);
-                  }
-                })}
-              </View>
-            </View>
-          );
-
-        case "provider":
-          return (
-            <View className="mt-6">
-              <View className="px-6 flex-row items-center justify-between">
-                <View className="flex-row items-center gap-2.5">
-                  <Image
-                    source={{ uri: item.logoUrl }}
-                    style={{ width: 24, height: 24, borderRadius: 6 }}
-                    contentFit="cover"
-                  />
-                  <Text className="text-lg font-semibold text-text-primary">
-                    {item.label}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push(`/provider/${item.key}`);
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Text className="text-sm font-semibold text-text-tertiary">See all</Text>
-                </Pressable>
-              </View>
-              <View className="mt-4 h-56">
-                {renderShowCarousel(item.items, (catalogItem) => {
-                  if (!isRankedCarouselItem(catalogItem)) {
-                    handleAddFromCatalog(catalogItem as CatalogItem);
-                  }
-                })}
-              </View>
-            </View>
-          );
-
-        case "contact-sync":
-          return (
-            <View className="mt-8 px-6">
-              <ContactsSyncCard
-                title="Find friends from your contacts"
-                description="Sync your address book to surface people you already know on Plotlist."
-                buttonLabel="Sync contacts"
-                onPress={handleSyncContacts}
-                onDismiss={async () => {
-                  await setContactsSyncDismissed(true);
-                  setContactsSyncDismissedState(true);
-                }}
-                loading={syncingContacts}
-              />
-            </View>
-          );
-
-        case "contacts":
-          return (
-            <View className="mt-8 px-6">
-              <View className="flex-row items-center justify-between">
-                <Text className="text-lg font-semibold text-text-primary">From your contacts</Text>
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/search?mode=people");
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Text className="text-sm font-semibold text-text-tertiary">View all</Text>
-                </Pressable>
-              </View>
-              <View className="mt-4 gap-3">
-                {item.items.map((contactItem) => (
-                  <UserRow
-                    key={contactItem.user._id}
-                    userId={contactItem.user._id}
-                    displayName={contactItem.user.displayName ?? contactItem.user.name}
-                    username={contactItem.user.username}
-                    avatarUrl={contactItem.avatarUrl}
-                    isFollowing={contactItem.isFollowing}
-                    followsYou={contactItem.followsYou}
-                    isMutualFollow={contactItem.isMutualFollow}
-                    mutualCount={contactItem.mutualCount}
-                    inContacts={contactItem.inContacts}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-
-        case "suggested":
-          return (
-            <View className="mt-8 px-6">
-              <View className="flex-row items-center justify-between">
-                <Text className="text-lg font-semibold text-text-primary">People you may know</Text>
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/search?mode=people");
-                  }}
-                  className="active:opacity-80"
-                >
-                  <Text className="text-sm font-semibold text-text-tertiary">Find friends</Text>
-                </Pressable>
-              </View>
-              <View className="mt-4 gap-3">
-                {item.items.map((suggestedItem) => (
-                  <UserRow
-                    key={suggestedItem.user._id}
-                    userId={suggestedItem.user._id}
-                    displayName={suggestedItem.user.displayName ?? suggestedItem.user.name}
-                    username={suggestedItem.user.username}
-                    avatarUrl={suggestedItem.avatarUrl}
-                    isFollowing={suggestedItem.isFollowing}
-                    followsYou={suggestedItem.followsYou}
-                    isMutualFollow={suggestedItem.isMutualFollow}
-                    mutualCount={suggestedItem.mutualCount}
-                    inContacts={suggestedItem.inContacts}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-
-        case "feed-header":
-          return (
-            <View className="mt-8 px-6">
-              <SectionHeader title="Your feed" />
-            </View>
-          );
-
-        case "feed-item":
-          return (
-            <View className="px-6 pt-4">
-              <FeedItem item={item.item} />
-            </View>
-          );
-
-        case "feed-empty":
-          return (
-            <View className="px-6 pt-4">
-              <EmptyState
-                title="Your feed is quiet"
-                description="Follow friends and review shows — their activity will appear here."
-              />
-              <View className="mt-4 flex-row gap-3">
-                <SecondaryButton
-                  label="Find friends"
-                  onPress={() => router.push("/search?mode=people")}
-                  className="flex-1"
-                />
-                <SecondaryButton
-                  label="Browse shows"
-                  onPress={() => router.push("/search?mode=shows")}
-                  className="flex-1"
-                />
-              </View>
-            </View>
-          );
-
-        default:
-          return null;
+        }
+        if (forYouItems.length === 0) return null;
+        return (
+          <SignatureRail
+            index={getSectionDisplayIndex(item.kind)}
+            kicker={hasPersonalTasteSignals ? "Personal" : "Start"}
+            title={hasPersonalTasteSignals ? "For you" : "Start here"}
+            accent={FOR_YOU_ACCENT}
+            icon="sparkles"
+            layout="feature"
+            items={forYouItems}
+            featureCardWidth={featureCardWidth}
+            onPressItem={handlePressRailItem}
+          />
+        );
       }
-    },
-    [feedIsEmpty, handleAddFromCatalog, handleSyncContacts, renderShowCarousel, syncingContacts],
-  );
+      case "heat": {
+        if (data.loading.heat && heatItems.length === 0) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Now"
+              title="Trending"
+              accent={HEAT_ACCENT}
+              icon="flame"
+              variant="feature"
+            />
+          );
+        }
+        if (heatItems.length === 0) return null;
+        return (
+          <SignatureRail
+            index={getSectionDisplayIndex(item.kind)}
+            kicker="Now"
+            title="Trending"
+            accent={HEAT_ACCENT}
+            icon="flame"
+            layout="feature"
+            items={pulseHeatItems}
+            featureCardWidth={featureCardWidth}
+            onPressItem={handlePressRailItem}
+          />
+        );
+      }
+      case "fresh": {
+        if (data.loading.fresh && freshItems.length === 0) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Fresh"
+              title="New"
+              accent={FRESH_ACCENT}
+              icon="sparkles"
+              variant="poster"
+            />
+          );
+        }
+        if (freshItems.length === 0) return null;
+        return (
+          <SignatureRail
+            index={getSectionDisplayIndex(item.kind)}
+            kicker="Fresh"
+            title="New"
+            accent={FRESH_ACCENT}
+            icon="sparkles"
+            layout="poster"
+            items={freshItems}
+            featureCardWidth={featureCardWidth}
+            onPressItem={handlePressRailItem}
+          />
+        );
+      }
+      case "critics": {
+        if (data.loading.critics && criticsItems.length === 0) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Quality"
+              title="Acclaimed"
+              accent={CRITICS_ACCENT}
+              icon="star"
+              variant="poster"
+            />
+          );
+        }
+        if (criticsItems.length === 0) return null;
+        return (
+          <SignatureRail
+            index={getSectionDisplayIndex(item.kind)}
+            kicker="Quality"
+            title="Acclaimed"
+            accent={CRITICS_ACCENT}
+            icon="star"
+            layout="poster"
+            items={criticsItems}
+            featureCardWidth={featureCardWidth}
+            onPressItem={handlePressRailItem}
+          />
+        );
+      }
+      case "quick": {
+        if (data.loading.quick && quickItems.length === 0) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Short"
+              title="Quick"
+              accent={QUICK_ACCENT}
+              icon="timer"
+              variant="poster"
+            />
+          );
+        }
+        if (quickItems.length === 0) return null;
+        return (
+          <SignatureRail
+            index={getSectionDisplayIndex(item.kind)}
+            kicker="Short"
+            title="Quick"
+            accent={QUICK_ACCENT}
+            icon="timer"
+            layout="poster"
+            items={quickItems}
+            featureCardWidth={featureCardWidth}
+            onPressItem={handlePressRailItem}
+          />
+        );
+      }
+      case "rooms": {
+        if (data.loading.rooms && streamingRooms.length === 0) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Watch"
+              title="Streaming"
+              accent={ROOMS_ACCENT}
+              icon="tv"
+              variant="ribbon"
+            />
+          );
+        }
+        if (streamingRooms.length === 0) return null;
+        return (
+          <StreamingRooms
+            rooms={streamingRooms}
+            index={getSectionDisplayIndex(item.kind)}
+            cardWidth={roomCardWidth}
+            mutedHeroTitleKeys={roomHardPreviewKeys}
+            mutedSupportTitleKeys={roomSurfacePreviewKeys}
+            softMutedSupportTitleKeys={roomSurfacePreviewKeys}
+            allowMutedFeaturedFallback={false}
+          />
+        );
+      }
+      case "contact-sync":
+        return (
+          <View className="mt-6 px-6">
+            <ContactsSyncCard
+              title="Find friends"
+              description="Contacts stay private."
+              buttonLabel="Sync contacts"
+              variant="compact"
+              onPress={handleSyncContacts}
+              onDismiss={handleDismissNudge}
+              loading={syncing}
+            />
+          </View>
+        );
+      case "friends":
+        if (!data.hasProfile) return null;
+        return (
+          <FriendsActivity
+            index={getSectionDisplayIndex(item.kind)}
+            viewerId={data.me?._id ?? null}
+            contactMatches={data.contactMatches}
+            similarTaste={data.similarTaste}
+            suggested={data.suggested}
+            feedItems={data.feedItems}
+            feedEmpty={data.feedEmpty}
+            onSyncContacts={handleSyncContacts}
+            syncingContacts={syncing}
+            hasSyncedContacts={data.hasSyncedContacts}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderItem = ({ item }: { item: HomeSection }) => {
+    const content = renderSectionContent(item);
+    if (!content) return null;
+    const sectionTestID = getHomeSectionTestID(item.kind);
+    const sectionDataSet = getHomeSectionWebDataSet(item.kind, sectionTestID);
+
+    return (
+      <WebDataSetView
+        testID={sectionTestID}
+        {...(sectionDataSet ? { dataSet: sectionDataSet } : {})}
+      >
+        {content}
+      </WebDataSetView>
+    );
+  };
 
   return (
-    <Screen hasTabBar>
-      <FlashList
+    <View testID="home-surface" style={styles.root}>
+      <Animated.FlatList
+        testID="home-surface-list"
+        ref={listRef}
         data={sections}
-        renderItem={renderSection}
-        keyExtractor={(item: SectionData, index: number) =>
-          item.type === "provider" ? `provider-${item.key}` : `${item.type}-${index}`
-        }
-        estimatedItemSize={200}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        onEndReached={() => {
-          if (feedStatus === "CanLoadMore") {
-            loadMore(20);
-          }
-        }}
-        onEndReachedThreshold={0.5}
+        keyExtractor={(item) => item.kind}
+        renderItem={renderItem}
+        initialNumToRender={initialRenderSectionCount}
+        maxToRenderPerBatch={initialRenderSectionCount}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#0ea5e9"
+            onRefresh={handleRefresh}
+            tintColor="#38bdf8"
+            progressViewOffset={insets.top + 8}
           />
         }
-        ListFooterComponent={
-          feedStatus === "LoadingMore" ? (
-            <View className="px-6 py-4">
-              <Text className="text-sm text-text-tertiary">Loading more…</Text>
-            </View>
-          ) : feedStatus === "LoadingFirstPage" ? (
-            <View className="items-center justify-center py-16">
-              <ActivityIndicator size="small" color="#0ea5e9" />
-            </View>
-          ) : null
-        }
       />
-    </Screen>
+
+      <HomeTopBar
+        scrollY={scrollY}
+        displayName={data.me?.displayName ?? data.me?.name ?? null}
+        username={data.me?.username ?? null}
+        avatarUrl={data.me?.avatarUrl ?? null}
+        notificationCount={schedulePreview.tonightCount + schedulePreview.weekCount}
+      />
+    </View>
   );
 }
+
+function isHomeTabPreviewEnabled(previewParam: unknown) {
+  return (
+    typeof __DEV__ !== "undefined" &&
+    __DEV__ &&
+    previewParam === "1"
+  );
+}
+
+function loadHomePreviewData() {
+  if (typeof __DEV__ === "undefined" || !__DEV__) {
+    return Promise.resolve<PreviewDataModule | null>(null);
+  }
+
+  return Promise.resolve(
+    (require as (id: string) => PreviewDataModule)("../../lib/homePreviewData"),
+  );
+}
+
+function LiveHomeScreen() {
+  const data = useHomeData();
+  return <HomeSurface data={data} />;
+}
+
+function HomeTabPreviewScreen() {
+  const [previewData, setPreviewData] = useState<PreviewDataModule | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    void loadHomePreviewData().then((module) => {
+      if (mounted && module) setPreviewData(module);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const props = useMemo<HomeSurfaceProps | null>(() => {
+    if (!previewData) return null;
+    const buildData = previewData[
+      ["build", "Home", "Preview", "Data"].join("") as "buildHomePreviewData"
+    ];
+    const buildContinueWatching = previewData[
+      [
+        "build",
+        "Home",
+        "Preview",
+        "Continue",
+        "Watching",
+        "Items",
+      ].join("") as "buildHomePreviewContinueWatchingItems"
+    ];
+    const buildSchedule = previewData[
+      ["build", "Home", "Preview", "Schedule"].join("") as "buildHomePreviewSchedule"
+    ];
+    return {
+      data: buildData(previewData.HOME_PREVIEW_NOW),
+      continueWatchingItems: buildContinueWatching(),
+      schedulePreview: buildSchedule(),
+    };
+  }, [previewData]);
+
+  if (!props) return <LoadingScreen />;
+
+  return <HomeSurface {...props} />;
+}
+
+export default function HomeScreen() {
+  const params = useLocalSearchParams();
+  const previewParam = Array.isArray(params.preview)
+    ? params.preview[0]
+    : params.preview;
+
+  if (isHomeTabPreviewEnabled(previewParam)) {
+    return <HomeTabPreviewScreen />;
+  }
+
+  return <LiveHomeScreen />;
+}
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: "#0D0F14",
+    flex: 1,
+  },
+  listContent: {
+    paddingBottom: 110,
+  },
+});

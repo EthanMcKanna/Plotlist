@@ -163,7 +163,7 @@ export async function clearAuthTokens() {
   for (const key of keys) {
     try {
       await authStorage.removeItem(key);
-    } catch (e) {
+    } catch {
       // Ignore errors
     }
   }

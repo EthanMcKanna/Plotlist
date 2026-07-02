@@ -4,27 +4,36 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "main": "index.ts",
   "scripts": {
+    "postinstall": "node scripts/patch-react-native-hermes-startup.mjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "build": "expo export --platform web",
-    "api:dev": "npx vercel dev",
+    "api:dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply plotlist --local",
+    "db:migrate:remote": "wrangler d1 migrations apply plotlist --remote",
     "typecheck": "npm run typecheck:app && npm run typecheck:api",
     "typecheck:app": "tsc --noEmit",
     "typecheck:api": "tsc -p tsconfig.api.json --noEmit",
     "db:generate": "drizzle-kit generate",
     "lint": "eslint .",
+    "audit:prod": "npm audit --omit=dev",
+    "audit:home-current-demand": "node scripts/audit-home-current-demand.mjs",
+    "audit:homepage-freshness-summary": "tsx scripts/audit-homepage-freshness-summary.mjs",
+    "audit:home-preview-bundle": "node scripts/audit-home-preview-bundle.mjs",
+    "check:homepage": "npm run build && npm run audit:home-preview-bundle && npm run audit:homepage-freshness-summary && npm run audit:home-current-demand",
     "test": "TZ=UTC jest --runInBand",
     "test:watch": "TZ=UTC jest --watch",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "check:release": "npm run check && npm run audit:prod && npm run check:homepage"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-community/datetimepicker": "8.4.4",
     "@shopify/flash-list": "2.0.2",
     "@tanstack/react-query": "^5.95.2",
-    "@vercel/blob": "^2.3.1",
     "date-fns": "^4.1.0",
     "drizzle-orm": "^0.45.1",
     "expo": "~54.0.33",
@@ -35,7 +44,7 @@
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-manipulator": "~14.0.8",
-    "expo-image-picker": "~17.0.10",
+    "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",
@@ -43,7 +52,6 @@
     "expo-sharing": "~14.0.8",
     "expo-status-bar": "~3.0.9",
     "nativewind": "^4.2.1",
-    "postgres": "^3.4.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -58,6 +66,11 @@
     "zod": "^4.3.6"
   },
   "overrides": {
+    "postcss": "8.5.10",
+    "uuid": "11.1.1",
+    "@esbuild-kit/core-utils": {
+      "esbuild": "0.25.12"
+    },
     "react-native-worklets": {
       ".": "0.5.1",
       "@babel/plugin-transform-optional-chaining": "^7.24.0",
@@ -86,7 +99,8 @@
     "react-test-renderer": "^19.1.0",
     "tsx": "^4.21.0",
     "typescript": "~5.9.2",
-    "typescript-eslint": "^8.57.0"
+    "typescript-eslint": "^8.57.0",
+    "wrangler": "^4.106.0"
   },
   "private": true
 }

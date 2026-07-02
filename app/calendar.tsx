@@ -14,17 +14,21 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { EmptyState } from "../components/EmptyState";
+import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import {
   getLocalDateString,
+  RELEASE_CALENDAR_MAX_ITEMS,
   type ReleaseCalendarView,
 } from "../lib/releaseCalendar";
 
 const FILTER_OPTIONS: { value: ReleaseCalendarView; label: string }[] = [
+  { value: "tonight", label: "Tonight" },
   { value: "upcoming", label: "All Upcoming" },
   { value: "premieres", label: "Premieres" },
+  { value: "returning", label: "New Seasons" },
   { value: "finales", label: "Finales" },
 ];
 
@@ -38,17 +42,18 @@ function FilterPill({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <GlassPressable
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress();
       }}
-      className="rounded-full px-4 py-2 active:opacity-80"
-      style={{
-        backgroundColor: isActive ? "rgba(14, 165, 233, 0.15)" : "rgba(90, 96, 112, 0.1)",
-        borderWidth: 1,
-        borderColor: isActive ? "rgba(14, 165, 233, 0.3)" : "transparent",
-      }}
+      radius={999}
+      variant={isActive ? "prominent" : "control"}
+      fallbackColor={
+        isActive ? "rgba(14, 165, 233, 0.15)" : "rgba(90, 96, 112, 0.1)"
+      }
+      borderColor={isActive ? "rgba(14, 165, 233, 0.3)" : "transparent"}
+      contentStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
     >
       <Text
         className="text-sm font-semibold"
@@ -56,7 +61,7 @@ function FilterPill({
       >
         {label}
       </Text>
-    </Pressable>
+    </GlassPressable>
   );
 }
 
@@ -95,11 +100,23 @@ function EventBadge({
 
 function getEmptyCopy(view: ReleaseCalendarView) {
   switch (view) {
+    case "tonight":
+      return {
+        title: "Nothing airing tonight",
+        description:
+          "New episodes from your saved shows will appear here when they drop today.",
+      };
     case "premieres":
       return {
         title: "No premieres on deck",
         description:
           "New series premieres from your saved shows will appear here.",
+      };
+    case "returning":
+      return {
+        title: "No new seasons scheduled",
+        description:
+          "Returning seasons from your saved shows will appear here when dates are available.",
       };
     case "finales":
       return {
@@ -133,6 +150,16 @@ function ReleaseCard({
     item.isReturningSeason ||
     item.isSeasonFinale ||
     item.isSeriesFinale;
+  const providers = Array.isArray(item.providers) ? item.providers : [];
+  const providerLogos = providers.filter(
+    (provider: any) =>
+      typeof provider?.logoUrl === "string" && provider.logoUrl.trim().length > 0,
+  );
+  const providerLabel =
+    providers.find(
+      (provider: any) =>
+        typeof provider?.name === "string" && provider.name.trim().length > 0,
+    )?.name ?? null;
 
   return (
     <Pressable
@@ -206,7 +233,7 @@ function ReleaseCard({
             <Text className="text-[10px] font-bold text-white">
               {item.airDate === today
                 ? "Tonight"
-                : formatCalendarDay(item.airDateTs)}
+                : formatCalendarDay(item.airDate ?? item.airDateTs)}
             </Text>
           </View>
         </View>
@@ -239,23 +266,26 @@ function ReleaseCard({
             <EventBadge label="New season" tone="neutral" />
           ) : null}
 
-          {(item.providers ?? [])
+          {providerLogos
             .slice(0, 3)
             .map((provider: any) =>
-              provider.logoUrl ? (
-                <Image
-                  key={provider.name}
-                  source={{ uri: provider.logoUrl }}
-                  style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: 5,
-                  }}
-                  contentFit="cover"
-                />
-              ) : null,
+              <Image
+                key={provider.name}
+                source={{ uri: provider.logoUrl }}
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                }}
+                contentFit="cover"
+              />,
             )}
-          {!hasBadge && (item.providers ?? []).length === 0 && (
+          {providerLogos.length === 0 && providerLabel ? (
+            <Text className="text-xs font-semibold text-text-tertiary">
+              {providerLabel}
+            </Text>
+          ) : null}
+          {!hasBadge && providers.length === 0 && (
             <Text className="text-xs text-text-tertiary">
               Service info pending
             </Text>
@@ -268,28 +298,24 @@ function ReleaseCard({
 
 /* ─── Main screen ─────────────────────────────────────────────────── */
 
-export default function CalendarScreen() {
-  const { isAuthenticated } = useAuth();
-  const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
-  const [view, setView] = useState<ReleaseCalendarView>("upcoming");
-  const today = useMemo(() => getLocalDateString(), []);
-  const data = useQuery(
-    api.releaseCalendar.listForMe,
-    isAuthenticated
-      ? { view, today, limit: 100 }
-      : "skip",
-  );
+export type CalendarSurfaceData = {
+  groups: Array<{ airDate: string; airDateTs: number; items: any[] }>;
+  staleShowIds: string[];
+};
 
-  useEffect(() => {
-    if (!isAuthenticated || !data || data.staleShowIds.length === 0) {
-      return;
-    }
-
-    void refreshForMe({}).catch(() => {
-      // Render cached data even if refresh fails.
-    });
-  }, [data, isAuthenticated, refreshForMe]);
-
+export function CalendarSurface({
+  data,
+  isAuthenticated,
+  onViewChange,
+  today,
+  view,
+}: {
+  data: CalendarSurfaceData | undefined;
+  isAuthenticated: boolean;
+  onViewChange: (view: ReleaseCalendarView) => void;
+  today: string;
+  view: ReleaseCalendarView;
+}) {
   if (!isAuthenticated) {
     return (
       <Screen>
@@ -337,7 +363,7 @@ export default function CalendarScreen() {
               key={option.value}
               label={option.label}
               isActive={view === option.value}
-              onPress={() => setView(option.value)}
+              onPress={() => onViewChange(option.value)}
             />
           ))}
         </ScrollView>
@@ -347,49 +373,95 @@ export default function CalendarScreen() {
           <View className="items-center justify-center py-16">
             <ActivityIndicator size="small" color="#0ea5e9" />
           </View>
-        ) : data.groups.length === 0 ? (
-          <View className="pt-10">
-            <EmptyState
-              title={emptyCopy.title}
-              description={emptyCopy.description}
-            />
-          </View>
         ) : (
-          <View className="mt-8 gap-10">
-            {data.groups.map((group: any) => {
-              const isToday = group.airDate === today;
+          <>
+            {data.staleShowIds.length > 0 ? (
+              <View className="mt-5 flex-row items-center gap-2 rounded-2xl border border-dark-border bg-dark-card px-3 py-2">
+                <ActivityIndicator size="small" color="#38bdf8" />
+                <Text className="text-xs font-semibold text-text-secondary">
+                  Checking latest episode dates
+                </Text>
+              </View>
+            ) : null}
 
-              return (
-                <View key={group.airDate}>
-                  {/* Date label */}
-                  <Text
-                    className="font-bold uppercase"
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 1.8,
-                      color: isToday ? "#38bdf8" : "#9BA1B0",
-                    }}
-                  >
-                    {isToday ? "Tonight" : formatCalendarDay(group.airDateTs)}
-                  </Text>
+            {data.groups.length === 0 ? (
+              <View className="pt-10">
+                <EmptyState
+                  title={emptyCopy.title}
+                  description={emptyCopy.description}
+                />
+              </View>
+            ) : (
+              <View className="mt-8 gap-10">
+                {data.groups.map((group: any) => {
+                  const isToday = group.airDate === today;
 
-                  {/* Cards */}
-                  <View className="mt-3 gap-3">
-                    {group.items.map((item: any) => (
-                      <ReleaseCard
-                        key={`${item.show._id}-${item.seasonNumber}-${item.episodeNumber}`}
-                        item={item}
-                        isToday={isToday}
-                        today={today}
-                      />
-                    ))}
-                  </View>
-                </View>
-              );
-            })}
-          </View>
+                  return (
+                    <View key={group.airDate}>
+                      {/* Date label */}
+                      <Text
+                        className="font-bold uppercase"
+                        style={{
+                          fontSize: 11,
+                          letterSpacing: 1.8,
+                          color: isToday ? "#38bdf8" : "#9BA1B0",
+                        }}
+                      >
+                        {isToday ? "Tonight" : formatCalendarDay(group.airDate ?? group.airDateTs)}
+                      </Text>
+
+                      {/* Cards */}
+                      <View className="mt-3 gap-3">
+                        {group.items.map((item: any) => (
+                          <ReleaseCard
+                            key={`${item.show._id}-${item.seasonNumber}-${item.episodeNumber}`}
+                            item={item}
+                            isToday={isToday}
+                            today={today}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </>
         )}
       </View>
     </Screen>
+  );
+}
+
+export default function CalendarScreen() {
+  const { isAuthenticated } = useAuth();
+  const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
+  const [view, setView] = useState<ReleaseCalendarView>("upcoming");
+  const today = useMemo(() => getLocalDateString(), []);
+  const data = useQuery(
+    api.releaseCalendar.listForMe,
+    isAuthenticated
+      ? { view, today, limit: RELEASE_CALENDAR_MAX_ITEMS }
+      : "skip",
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || !data || data.staleShowIds.length === 0) {
+      return;
+    }
+
+    void refreshForMe({ today }).catch(() => {
+      // Render cached data even if refresh fails.
+    });
+  }, [data, isAuthenticated, refreshForMe, today]);
+
+  return (
+    <CalendarSurface
+      data={data}
+      isAuthenticated={isAuthenticated}
+      onViewChange={setView}
+      today={today}
+      view={view}
+    />
   );
 }

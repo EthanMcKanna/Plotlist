@@ -21,6 +21,18 @@ const ITEM_WIDTH =
 
 type StatusFilter = "all" | "watchlist" | "watching" | "completed" | "dropped";
 type SortOption = "date" | "title" | "year";
+type WatchlistItem = {
+  state: {
+    _id: string;
+    status: StatusFilter;
+  };
+  show: {
+    _id: string;
+    title?: string | null;
+    posterUrl?: string | null;
+    year?: number | null;
+  };
+};
 
 const VALID_FILTERS = new Set<string>(["all", "watchlist", "watching", "completed", "dropped"]);
 
@@ -41,6 +53,15 @@ const statusLabels: Record<string, string> = {
   dropped: "Dropped",
 };
 
+function normalizeWatchlistItem(item: any): WatchlistItem | null {
+  const state = item?.state ?? item;
+  const show = item?.show;
+  if (!state?._id || !state?.status || !show?._id) {
+    return null;
+  }
+  return { state, show };
+}
+
 export default function WatchlistScreen() {
   const { isAuthenticated } = useAuth();
   const params = useLocalSearchParams<{ filter?: string }>();
@@ -55,16 +76,43 @@ export default function WatchlistScreen() {
     api.watchStates.getCounts,
     isAuthenticated ? {} : "skip"
   );
+  const watchStateItems = useQuery(
+    api.watchStates.listForUser,
+    isAuthenticated ? {} : "skip",
+  );
+  const effectiveCounts = useMemo(() => {
+    if (!Array.isArray(watchStateItems)) {
+      return {
+        watchlist: counts?.watchlist ?? 0,
+        watching: counts?.watching ?? 0,
+        completed: counts?.completed ?? 0,
+        dropped: counts?.dropped ?? 0,
+        total: counts?.total ?? 0,
+      };
+    }
+
+    return watchStateItems.reduce(
+      (acc, item: any) => {
+        const status = item.status as keyof typeof acc;
+        if (status in acc) {
+          acc[status] += 1;
+        }
+        acc.total += 1;
+        return acc;
+      },
+      { watchlist: 0, watching: 0, completed: 0, dropped: 0, total: 0 },
+    );
+  }, [counts, watchStateItems]);
 
   const filterOptions = useMemo(
     () => [
-      { value: "all", label: "All", count: counts?.total ?? 0 },
-      { value: "watchlist", label: "Watchlist", count: counts?.watchlist ?? 0 },
-      { value: "watching", label: "Watching", count: counts?.watching ?? 0 },
-      { value: "completed", label: "Completed", count: counts?.completed ?? 0 },
-      { value: "dropped", label: "Dropped", count: counts?.dropped ?? 0 },
+      { value: "all", label: "All", count: effectiveCounts.total },
+      { value: "watchlist", label: "Watchlist", count: effectiveCounts.watchlist },
+      { value: "watching", label: "Watching", count: effectiveCounts.watching },
+      { value: "completed", label: "Completed", count: effectiveCounts.completed },
+      { value: "dropped", label: "Dropped", count: effectiveCounts.dropped },
     ],
-    [counts]
+    [effectiveCounts],
   );
 
   const {
@@ -83,7 +131,9 @@ export default function WatchlistScreen() {
   );
 
   const items = useMemo(() => {
-    const validItems = rawItems.filter((item) => item.show);
+    const validItems = rawItems
+      .map(normalizeWatchlistItem)
+      .filter((item): item is WatchlistItem => Boolean(item));
     if (validItems.length <= 1) return validItems;
     const sorted = [...validItems];
 
@@ -105,7 +155,7 @@ export default function WatchlistScreen() {
   }, [rawItems, sortBy]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: any; index: number }) => {
+    ({ item, index }: { item: WatchlistItem; index: number }) => {
       const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
       return (
         <View
@@ -123,14 +173,14 @@ export default function WatchlistScreen() {
             className="active:opacity-80"
           >
             <Poster
-              uri={item.show?.posterUrl}
+              uri={item.show.posterUrl}
               width={ITEM_WIDTH}
             />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
             >
-              {item.show?.title ?? "Unknown"}
+              {item.show.title ?? "Unknown"}
             </Text>
             <Text className="mt-0.5 text-xs text-text-tertiary">
               {statusLabels[item.state.status]}
@@ -205,7 +255,7 @@ export default function WatchlistScreen() {
             <FlashList
               data={items}
               renderItem={renderItem}
-              keyExtractor={(item: any) => item.state._id}
+              keyExtractor={(item: WatchlistItem) => item.state._id}
               numColumns={NUM_COLS}
               estimatedItemSize={ITEM_WIDTH * 1.5 + 48}
               contentContainerStyle={{ paddingBottom: 40 }}

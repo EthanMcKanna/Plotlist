@@ -1,9 +1,10 @@
-import { put } from "@vercel/blob";
-
 import { ApiError } from "../_lib/errors";
 import { json, methodNotAllowed } from "../_lib/http";
 import { createId } from "../_lib/ids";
-import { getFileExtension, verifyUploadToken } from "../_lib/uploads";
+import { getFileExtension, getRequestOrigin, verifyUploadToken } from "../_lib/uploads";
+import { getUploadsBucket } from "../../worker/storage";
+
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 async function readBody(req: AsyncIterable<Buffer | string>) {
   const chunks: Buffer[] = [];
@@ -37,17 +38,23 @@ export default async function handler(req: any, res: any) {
     if (body.length === 0) {
       throw new ApiError(400, "empty_upload", "Upload body was empty");
     }
+    if (body.length > MAX_UPLOAD_BYTES) {
+      throw new ApiError(413, "upload_too_large", "Upload exceeds the 8MB limit");
+    }
 
     const extension = getFileExtension(contentType);
-    const blob = await put(`uploads/${payload.userId}/${createId("blob")}.${extension}`, body, {
-      access: "public",
-      addRandomSuffix: false,
-      contentType,
+    const key = `uploads/${payload.userId}/${createId("blob")}.${extension}`;
+    await getUploadsBucket().put(key, body, {
+      httpMetadata: {
+        contentType,
+        cacheControl: "public, max-age=31536000, immutable",
+      },
     });
 
+    const url = `${getRequestOrigin(req)}/files/${key}`;
     return json(res, 200, {
-      storageId: blob.url,
-      url: blob.url,
+      storageId: url,
+      url,
     });
   } catch (error) {
     const apiError =

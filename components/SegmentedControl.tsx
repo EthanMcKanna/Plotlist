@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { LayoutChangeEvent, Pressable, Text, View } from "react-native";
+import {
+  LayoutChangeEvent,
+  Platform,
+  Pressable,
+  Text,
+  type ViewStyle,
+} from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
+
+import { GlassSurface } from "./NativeGlass";
 
 type SegmentedControlProps = {
   options: { value: string; label: string }[];
@@ -14,6 +22,19 @@ type SegmentedControlProps = {
 };
 
 const PADDING = 4;
+
+const indicatorShadow =
+  Platform.OS === "web"
+    ? ({
+        boxShadow: "0 2px 8px rgba(0,0,0,0.28)",
+      } as ViewStyle)
+    : {
+        elevation: 4,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.28,
+        shadowRadius: 4,
+      };
 
 export function SegmentedControl({
   options,
@@ -46,23 +67,18 @@ export function SegmentedControl({
   }, []);
 
   return (
-    <View
-      className="flex-row rounded-2xl p-1"
-      style={{ backgroundColor: "#111318" }}
+    <GlassSurface
+      radius={8}
+      variant="control"
+      fallbackColor="rgba(17,19,24,0.92)"
+      contentStyle={styles.segmentContent}
       onLayout={handleLayout}
     >
       {segmentWidth > 0 && (
         <Animated.View
-          className="absolute top-1 bottom-1 left-1 rounded-xl bg-dark-card"
           style={[
             indicatorStyle,
-            {
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.3,
-              shadowRadius: 4,
-              elevation: 4,
-            },
+            styles.indicator,
           ]}
         />
       )}
@@ -87,6 +103,24 @@ export function SegmentedControl({
           </Pressable>
         );
       })}
-    </View>
+    </GlassSurface>
   );
 }
+
+const styles = {
+  indicator: {
+    backgroundColor: "rgba(241,243,247,0.10)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 6,
+    borderWidth: 1,
+    bottom: 4,
+    left: 4,
+    position: "absolute" as const,
+    top: 4,
+    ...indicatorShadow,
+  },
+  segmentContent: {
+    flexDirection: "row" as const,
+    padding: PADDING,
+  },
+};

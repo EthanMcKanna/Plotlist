@@ -15,6 +15,7 @@ import {
   getSeasonToggleLabel,
   type SeasonLoadState,
 } from "../lib/seasonGuide";
+import { GlassPressable, GlassSurface } from "./NativeGlass";
 
 type EpisodeGuideEpisode = {
   id: number | string;
@@ -239,13 +240,20 @@ function EpisodeGuideComponent({
 
                   <View className="mt-2 flex-row flex-wrap items-center gap-2">
                     {episodes.length > 0 && isAuthenticated ? (
-                      <View
-                        className="rounded-full px-2 py-0.5"
-                        style={{
-                          backgroundColor: allWatched
-                            ? "rgba(14, 165, 233, 0.15)"
-                            : "#1E2028",
-                        }}
+                      <GlassSurface
+                        radius={999}
+                        variant={allWatched ? "prominent" : "control"}
+                        fallbackColor={
+                          allWatched
+                            ? "rgba(14,165,233,0.14)"
+                            : "rgba(255,255,255,0.04)"
+                        }
+                        borderColor={
+                          allWatched
+                            ? "rgba(14,165,233,0.24)"
+                            : "rgba(255,255,255,0.07)"
+                        }
+                        contentStyle={{ paddingHorizontal: 8, paddingVertical: 2 }}
                       >
                         <Text
                           className="text-xs font-medium"
@@ -259,13 +267,19 @@ function EpisodeGuideComponent({
                               ? `${watchedInSeason}/${totalEpisodeCount}`
                               : "Upcoming"}
                         </Text>
-                      </View>
+                      </GlassSurface>
                     ) : (
-                      <View className="rounded-full bg-dark-elevated px-2 py-0.5">
+                      <GlassSurface
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(255,255,255,0.04)"
+                        borderColor="rgba(255,255,255,0.07)"
+                        contentStyle={{ paddingHorizontal: 8, paddingVertical: 2 }}
+                      >
                         <Text className="text-xs font-medium text-text-tertiary">
                           {totalEpisodeCount} eps
                         </Text>
-                      </View>
+                      </GlassSurface>
                     )}
                     {seasonYear ? (
                       <Text className="text-xs text-text-tertiary">
@@ -313,15 +327,18 @@ function EpisodeGuideComponent({
                     {seasonLoadErrorByNumber[season.season_number] ??
                       "Couldn't load episodes for this season."}
                   </Text>
-                  <Pressable
-                    className="mt-4 rounded-lg border border-dark-border bg-dark-elevated px-4 py-2 active:opacity-80"
+                  <GlassPressable
+                    radius={10}
+                    variant="control"
+                    style={{ marginTop: 16 }}
+                    contentStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
                     onPress={() => {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       onRetrySeason(season.season_number);
                     }}
                   >
                     <Text className="text-sm font-semibold text-text-secondary">Retry</Text>
-                  </Pressable>
+                  </GlassPressable>
                 </View>
               ) : episodes.length > 0 ? (
                 <ScrollView
@@ -386,16 +403,26 @@ function EpisodeGuideComponent({
                               </View>
                             )}
                             {isAuthenticated && isAvailable ? (
-                              <Pressable
-                                className="absolute right-1 top-1 rounded-full active:opacity-60"
+                              <GlassPressable
+                                radius={11}
+                                variant={isWatched ? "prominent" : "control"}
+                                fallbackColor={
+                                  isWatched
+                                    ? "rgba(14,165,233,0.82)"
+                                    : "rgba(0,0,0,0.44)"
+                                }
+                                tintColor={isWatched ? "rgba(14,165,233,0.18)" : "rgba(255,255,255,0.08)"}
                                 style={{
-                                  backgroundColor: isWatched
-                                    ? "rgba(14, 165, 233, 0.9)"
-                                    : "rgba(0,0,0,0.6)",
-                                  width: 22,
-                                  height: 22,
+                                  position: "absolute",
+                                  right: 4,
+                                  top: 4,
+                                }}
+                                surfaceStyle={{ height: 22, width: 22 }}
+                                contentStyle={{
                                   alignItems: "center",
+                                  height: 22,
                                   justifyContent: "center",
+                                  width: 22,
                                 }}
                                 onPress={(event) => {
                                   event.stopPropagation();
@@ -408,7 +435,7 @@ function EpisodeGuideComponent({
                                   size={12}
                                   color="white"
                                 />
-                              </Pressable>
+                              </GlassPressable>
                             ) : null}
                           </View>
                           <View className="w-full flex-1 p-2">
@@ -467,12 +494,21 @@ function EpisodeGuideComponent({
         })}
 
         {hasMore ? (
-          <Pressable
+          <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               onLoadMoreSeasons();
             }}
-            className="mx-6 flex-row items-center justify-center gap-2 rounded-xl border border-dark-border bg-dark-elevated py-3 active:opacity-80"
+            radius={12}
+            variant="control"
+            style={{ marginHorizontal: 24 }}
+            contentStyle={{
+              alignItems: "center",
+              flexDirection: "row",
+              gap: 8,
+              justifyContent: "center",
+              paddingVertical: 12,
+            }}
           >
             <Text className="text-sm font-semibold text-text-secondary">
               {getSeasonToggleLabel(visibleSeasonCount, seasons.length)}
@@ -482,7 +518,7 @@ function EpisodeGuideComponent({
               size={18}
               color="#5A6070"
             />
-          </Pressable>
+          </GlassPressable>
         ) : null}
       </View>
     </View>

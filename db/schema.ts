@@ -1,53 +1,47 @@
 import {
-  bigint,
-  boolean,
-  doublePrecision,
   index,
   integer,
-  jsonb,
-  pgEnum,
-  pgTable,
+  real,
+  sqliteTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 
 import { vector } from "./vector";
 
-const timestampMs = (name: string) => bigint(name, { mode: "number" });
+const timestampMs = (name: string) => integer(name, { mode: "number" });
+const boolean = (name: string) => integer(name, { mode: "boolean" });
+const doublePrecision = (name: string) => real(name);
+const jsonb = (name: string) => text(name, { mode: "json" });
 
-export const onboardingStepEnum = pgEnum("onboarding_step", [
+export const onboardingStepValues = [
   "profile",
   "follow",
   "shows",
   "complete",
-]);
+] as const;
 
-export const watchStatusEnum = pgEnum("watch_status", [
+export const watchStatusValues = [
   "watchlist",
   "watching",
   "completed",
   "dropped",
-]);
+] as const;
 
-export const targetTypeEnum = pgEnum("target_type", ["review", "log", "list"]);
-export const feedItemTypeEnum = pgEnum("feed_item_type", ["review", "log"]);
-export const reportStatusEnum = pgEnum("report_status", ["open", "resolved"]);
-export const reportActionEnum = pgEnum("report_action", ["dismiss", "delete"]);
-export const jobStatusEnum = pgEnum("job_status", [
-  "queued",
-  "running",
-  "completed",
-  "failed",
-]);
-export const releaseSyncStatusEnum = pgEnum("release_sync_status", [
+export const targetTypeValues = ["review", "log", "list"] as const;
+export const feedItemTypeValues = ["review", "log"] as const;
+export const reportStatusValues = ["open", "resolved"] as const;
+export const reportActionValues = ["dismiss", "delete"] as const;
+export const jobStatusValues = ["queued", "running", "completed", "failed"] as const;
+export const releaseSyncStatusValues = [
   "idle",
   "scheduled",
   "running",
   "ready",
   "failed",
-]);
+] as const;
 
-export const users = pgTable(
+export const users = sqliteTable(
   "users",
   {
     id: text("id").primaryKey(),
@@ -77,7 +71,7 @@ export const users = pgTable(
     countsCompleted: integer("counts_completed").default(0).notNull(),
     countsDropped: integer("counts_dropped").default(0).notNull(),
     countsTotalShows: integer("counts_total_shows").default(0).notNull(),
-    onboardingStep: onboardingStepEnum("onboarding_step").default("profile"),
+    onboardingStep: text("onboarding_step", { enum: onboardingStepValues }).default("profile"),
     onboardingCompletedAt: timestampMs("onboarding_completed_at"),
     favoriteShowIds: jsonb("favorite_show_ids").$type<string[]>(),
     favoriteGenres: jsonb("favorite_genres").$type<string[]>(),
@@ -93,14 +87,11 @@ export const users = pgTable(
     usernameIdx: uniqueIndex("users_username_idx").on(table.username),
     createdAtIdx: index("users_created_at_idx").on(table.createdAt),
     lastSeenAtIdx: index("users_last_seen_at_idx").on(table.lastSeenAt),
-    searchIdx: index("users_search_text_idx").using(
-      "gin",
-      table.searchText.op("gin_trgm_ops"),
-    ),
+    searchIdx: index("users_search_text_idx").on(table.searchText),
   }),
 );
 
-export const userIdentities = pgTable(
+export const userIdentities = sqliteTable(
   "user_identities",
   {
     id: text("id").primaryKey(),
@@ -121,7 +112,7 @@ export const userIdentities = pgTable(
   }),
 );
 
-export const authSessions = pgTable(
+export const authSessions = sqliteTable(
   "auth_sessions",
   {
     id: text("id").primaryKey(),
@@ -141,7 +132,7 @@ export const authSessions = pgTable(
   }),
 );
 
-export const phoneVerificationRequests = pgTable(
+export const phoneVerificationRequests = sqliteTable(
   "phone_verification_requests",
   {
     id: text("id").primaryKey(),
@@ -156,7 +147,7 @@ export const phoneVerificationRequests = pgTable(
   }),
 );
 
-export const shows = pgTable(
+export const shows = sqliteTable(
   "shows",
   {
     id: text("id").primaryKey(),
@@ -183,15 +174,12 @@ export const shows = pgTable(
       table.externalSource,
       table.externalId,
     ),
-    searchIdx: index("shows_search_text_idx").using(
-      "gin",
-      table.searchText.op("gin_trgm_ops"),
-    ),
+    searchIdx: index("shows_search_text_idx").on(table.searchText),
     updatedAtIdx: index("shows_updated_at_idx").on(table.updatedAt),
   }),
 );
 
-export const watchStates = pgTable(
+export const watchStates = sqliteTable(
   "watch_states",
   {
     id: text("id").primaryKey(),
@@ -201,7 +189,7 @@ export const watchStates = pgTable(
     showId: text("show_id")
       .notNull()
       .references(() => shows.id, { onDelete: "cascade" }),
-    status: watchStatusEnum("status").notNull(),
+    status: text("status", { enum: watchStatusValues }).notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
@@ -210,7 +198,7 @@ export const watchStates = pgTable(
   }),
 );
 
-export const watchLogs = pgTable(
+export const watchLogs = sqliteTable(
   "watch_logs",
   {
     id: text("id").primaryKey(),
@@ -233,7 +221,7 @@ export const watchLogs = pgTable(
   }),
 );
 
-export const episodeProgress = pgTable(
+export const episodeProgress = sqliteTable(
   "episode_progress",
   {
     id: text("id").primaryKey(),
@@ -259,7 +247,7 @@ export const episodeProgress = pgTable(
   }),
 );
 
-export const reviews = pgTable(
+export const reviews = sqliteTable(
   "reviews",
   {
     id: text("id").primaryKey(),
@@ -291,7 +279,7 @@ export const reviews = pgTable(
   }),
 );
 
-export const follows = pgTable(
+export const follows = sqliteTable(
   "follows",
   {
     id: text("id").primaryKey(),
@@ -310,7 +298,7 @@ export const follows = pgTable(
   }),
 );
 
-export const contactSyncEntries = pgTable(
+export const contactSyncEntries = sqliteTable(
   "contact_sync_entries",
   {
     id: text("id").primaryKey(),
@@ -340,14 +328,14 @@ export const contactSyncEntries = pgTable(
   }),
 );
 
-export const likes = pgTable(
+export const likes = sqliteTable(
   "likes",
   {
     id: text("id").primaryKey(),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    targetType: targetTypeEnum("target_type").notNull(),
+    targetType: text("target_type", { enum: targetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },
@@ -366,14 +354,14 @@ export const likes = pgTable(
   }),
 );
 
-export const comments = pgTable(
+export const comments = sqliteTable(
   "comments",
   {
     id: text("id").primaryKey(),
     authorId: text("author_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    targetType: targetTypeEnum("target_type").notNull(),
+    targetType: text("target_type", { enum: targetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     text: text("text").notNull(),
     createdAt: timestampMs("created_at").notNull(),
@@ -388,7 +376,7 @@ export const comments = pgTable(
   }),
 );
 
-export const lists = pgTable(
+export const lists = sqliteTable(
   "lists",
   {
     id: text("id").primaryKey(),
@@ -407,7 +395,7 @@ export const lists = pgTable(
   }),
 );
 
-export const listItems = pgTable(
+export const listItems = sqliteTable(
   "list_items",
   {
     id: text("id").primaryKey(),
@@ -426,7 +414,7 @@ export const listItems = pgTable(
   }),
 );
 
-export const feedItems = pgTable(
+export const feedItems = sqliteTable(
   "feed_items",
   {
     id: text("id").primaryKey(),
@@ -436,7 +424,7 @@ export const feedItems = pgTable(
     actorId: text("actor_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: feedItemTypeEnum("type").notNull(),
+    type: text("type", { enum: feedItemTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     showId: text("show_id")
       .notNull()
@@ -450,7 +438,7 @@ export const feedItems = pgTable(
   }),
 );
 
-export const tmdbDetailsCache = pgTable(
+export const tmdbDetailsCache = sqliteTable(
   "tmdb_details_cache",
   {
     id: text("id").primaryKey(),
@@ -469,7 +457,7 @@ export const tmdbDetailsCache = pgTable(
   }),
 );
 
-export const tmdbSearchCache = pgTable(
+export const tmdbSearchCache = sqliteTable(
   "tmdb_search_cache",
   {
     id: text("id").primaryKey(),
@@ -484,7 +472,7 @@ export const tmdbSearchCache = pgTable(
   }),
 );
 
-export const tmdbListCache = pgTable(
+export const tmdbListCache = sqliteTable(
   "tmdb_list_cache",
   {
     id: text("id").primaryKey(),
@@ -499,12 +487,12 @@ export const tmdbListCache = pgTable(
   }),
 );
 
-export const tmdbImportJobs = pgTable(
+export const tmdbImportJobs = sqliteTable(
   "tmdb_import_jobs",
   {
     id: text("id").primaryKey(),
     kind: text("kind").notNull(),
-    status: jobStatusEnum("status").notNull(),
+    status: text("status", { enum: jobStatusValues }).notNull(),
     requestedBy: text("requested_by").references(() => users.id, { onDelete: "set null" }),
     targetCount: integer("target_count").notNull(),
     pageSize: integer("page_size").notNull(),
@@ -529,12 +517,12 @@ export const tmdbImportJobs = pgTable(
   }),
 );
 
-export const tmdbEpisodeCacheJobs = pgTable(
+export const tmdbEpisodeCacheJobs = sqliteTable(
   "tmdb_episode_cache_jobs",
   {
     id: text("id").primaryKey(),
     kind: text("kind").notNull(),
-    status: jobStatusEnum("status").notNull(),
+    status: text("status", { enum: jobStatusValues }).notNull(),
     requestedBy: text("requested_by").references(() => users.id, { onDelete: "set null" }),
     targetShowCount: integer("target_show_count").notNull(),
     batchSize: integer("batch_size").notNull(),
@@ -560,7 +548,7 @@ export const tmdbEpisodeCacheJobs = pgTable(
   }),
 );
 
-export const showReleaseSyncState = pgTable(
+export const showReleaseSyncState = sqliteTable(
   "show_release_sync_state",
   {
     id: text("id").primaryKey(),
@@ -569,7 +557,7 @@ export const showReleaseSyncState = pgTable(
       .references(() => shows.id, { onDelete: "cascade" }),
     syncedAt: timestampMs("synced_at"),
     expiresAt: timestampMs("expires_at"),
-    status: releaseSyncStatusEnum("status").notNull(),
+    status: text("status", { enum: releaseSyncStatusValues }).notNull(),
     lastError: text("last_error"),
     updatedAt: timestampMs("updated_at").notNull(),
   },
@@ -583,7 +571,7 @@ export const showReleaseSyncState = pgTable(
   }),
 );
 
-export const releaseEvents = pgTable(
+export const releaseEvents = sqliteTable(
   "release_events",
   {
     id: text("id").primaryKey(),
@@ -606,7 +594,7 @@ export const releaseEvents = pgTable(
   }),
 );
 
-export const showEmbeddings = pgTable(
+export const showEmbeddings = sqliteTable(
   "show_embeddings",
   {
     id: text("id").primaryKey(),
@@ -620,8 +608,8 @@ export const showEmbeddings = pgTable(
     dimensions: integer("dimensions").notNull(),
     inputText: text("input_text").notNull(),
     inputHash: text("input_hash").notNull(),
-    similarityEmbedding: vector("similarity_embedding", { dimensions: 1536 }).notNull(),
-    retrievalEmbedding: vector("retrieval_embedding", { dimensions: 1536 }).notNull(),
+    similarityEmbedding: vector("similarity_embedding").notNull(),
+    retrievalEmbedding: vector("retrieval_embedding").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
@@ -637,12 +625,12 @@ export const showEmbeddings = pgTable(
   }),
 );
 
-export const showEmbeddingJobs = pgTable(
+export const showEmbeddingJobs = sqliteTable(
   "show_embedding_jobs",
   {
     id: text("id").primaryKey(),
     kind: text("kind").notNull(),
-    status: jobStatusEnum("status").notNull(),
+    status: text("status", { enum: jobStatusValues }).notNull(),
     embeddingVersion: text("embedding_version").notNull(),
     model: text("model").notNull(),
     dimensions: integer("dimensions").notNull(),
@@ -668,7 +656,7 @@ export const showEmbeddingJobs = pgTable(
   }),
 );
 
-export const userTasteCaches = pgTable(
+export const userTasteCaches = sqliteTable(
   "user_taste_caches",
   {
     id: text("id").primaryKey(),
@@ -691,7 +679,7 @@ export const userTasteCaches = pgTable(
   }),
 );
 
-export const userTastePreferences = pgTable(
+export const userTastePreferences = sqliteTable(
   "user_taste_preferences",
   {
     id: text("id").primaryKey(),
@@ -708,7 +696,7 @@ export const userTastePreferences = pgTable(
   }),
 );
 
-export const userTasteProfiles = pgTable(
+export const userTasteProfiles = sqliteTable(
   "user_taste_profiles",
   {
     id: text("id").primaryKey(),
@@ -721,7 +709,7 @@ export const userTasteProfiles = pgTable(
     favoriteThemes: jsonb("favorite_themes").$type<string[]>().notNull(),
     positiveShowIds: jsonb("positive_show_ids").$type<string[]>().notNull(),
     negativeShowIds: jsonb("negative_show_ids").$type<string[]>().notNull(),
-    similarityEmbedding: vector("similarity_embedding", { dimensions: 1536 }).notNull(),
+    similarityEmbedding: vector("similarity_embedding").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },
@@ -731,21 +719,21 @@ export const userTasteProfiles = pgTable(
   }),
 );
 
-export const reports = pgTable(
+export const reports = sqliteTable(
   "reports",
   {
     id: text("id").primaryKey(),
     reporterId: text("reporter_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    targetType: targetTypeEnum("target_type").notNull(),
+    targetType: text("target_type", { enum: targetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     reason: text("reason"),
     createdAt: timestampMs("created_at").notNull(),
-    status: reportStatusEnum("status").notNull(),
+    status: text("status", { enum: reportStatusValues }).notNull(),
     resolvedAt: timestampMs("resolved_at"),
     resolvedBy: text("resolved_by").references(() => users.id, { onDelete: "set null" }),
-    action: reportActionEnum("action"),
+    action: text("action", { enum: reportActionValues }),
   },
   (table) => ({
     reporterCreatedIdx: index("reports_reporter_created_idx").on(
@@ -755,7 +743,7 @@ export const reports = pgTable(
   }),
 );
 
-export const rateLimits = pgTable(
+export const rateLimits = sqliteTable(
   "rate_limits",
   {
     id: text("id").primaryKey(),

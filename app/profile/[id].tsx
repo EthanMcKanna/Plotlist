@@ -17,6 +17,7 @@ import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Avatar } from "../../components/Avatar";
+import { GlassSurface } from "../../components/NativeGlass";
 import { TasteMatchSummary } from "../../components/TasteMatchSummary";
 
 const GENRE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -367,7 +368,11 @@ export default function ProfileScreen() {
 
         <View className="px-6">
           {/* ── Stats Bar ── */}
-          <View className="flex-row items-center rounded-2xl border border-dark-border bg-dark-card">
+          <GlassSurface
+            radius={8}
+            variant="surface"
+            contentStyle={{ alignItems: "center", flexDirection: "row" }}
+          >
             <MiniStat
               label="Followers"
               value={profile?.counts.followers ?? 0}
@@ -395,7 +400,7 @@ export default function ProfileScreen() {
             ) : (
               <MiniStat label="Reviews" value={profile?.counts.reviews ?? 0} />
             )}
-          </View>
+          </GlassSurface>
 
           {/* ── Follow / Edit Button ── */}
           {me && !isOwnProfile ? (
@@ -555,9 +560,12 @@ export default function ProfileScreen() {
               <SectionHeader title="Watch Activity" />
               <View className="mt-3 flex-row gap-2.5">
                 {watchActivityCards.map((card) => (
-                  <View
+                  <GlassSurface
                     key={card.key}
-                    className="flex-1 rounded-2xl border border-dark-border bg-dark-card p-3.5"
+                    radius={8}
+                    variant="control"
+                    style={{ flex: 1 }}
+                    contentStyle={{ padding: 14 }}
                   >
                     <View className="flex-row items-center gap-2">
                       <View
@@ -570,7 +578,7 @@ export default function ProfileScreen() {
                       </Text>
                     </View>
                     <Text className="mt-1.5 text-xs text-text-tertiary">{card.label}</Text>
-                  </View>
+                  </GlassSurface>
                 ))}
               </View>
             </View>

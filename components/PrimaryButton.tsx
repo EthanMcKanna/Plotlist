@@ -1,5 +1,31 @@
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import * as Haptics from "expo-haptics";
+
+import { GlassPressable } from "./NativeGlass";
+
+export function getPrimaryButtonSurfaceShadowStyle(
+  platform: typeof Platform.OS = Platform.OS,
+): ViewStyle {
+  if (platform === "web") {
+    return {
+      boxShadow: "0 0 14px rgba(56,189,248,0.20)",
+    } as ViewStyle;
+  }
+
+  return {
+    shadowColor: "#38BDF8",
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+  };
+}
 
 export function PrimaryButton({
   label,
@@ -22,25 +48,43 @@ export function PrimaryButton({
   };
 
   return (
-    <Pressable
+    <GlassPressable
       onPress={handlePress}
       disabled={disabled || loading}
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
-      className={`items-center justify-center rounded-full bg-brand-500 px-5 py-3.5 active:bg-brand-600 ${
-        disabled || loading ? "opacity-50" : ""
-      } ${className ?? ""}`}
-      style={{
-        shadowColor: "#0ea5e9",
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.3,
-        shadowRadius: 12,
-      }}
+      className={className}
+      radius={999}
+      variant="prominent"
+      fallbackColor={
+        disabled || loading ? "rgba(14,165,233,0.12)" : "rgba(14,165,233,0.88)"
+      }
+      surfaceStyle={styles.surface}
+      contentStyle={styles.content}
     >
       <View className="flex-row items-center gap-2">
         {loading ? <ActivityIndicator color="#fff" /> : null}
-        <Text className="text-base font-semibold text-white">{label}</Text>
+        <Text
+          className="text-base font-semibold text-white"
+          style={disabled || loading ? styles.disabledText : null}
+        >
+          {label}
+        </Text>
       </View>
-    </Pressable>
+    </GlassPressable>
   );
 }
+
+const styles = StyleSheet.create({
+  content: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 50,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  disabledText: {
+    color: "rgba(255,255,255,0.62)",
+  },
+  surface: getPrimaryButtonSurfaceShadowStyle(),
+});

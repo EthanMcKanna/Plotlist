@@ -19,6 +19,16 @@ function notifyError(title: string, message: string) {
   Alert.alert(title, message);
 }
 
+function replaceHome(router: ReturnType<typeof useRouter>) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (window.location.pathname !== "/home") {
+      window.location.replace("/home");
+    }
+    return;
+  }
+  router.replace("/home");
+}
+
 function readErrorMessage(error: unknown): string {
   if (error instanceof PlotlistApiError && error.code === "internal_error") {
     return "Something went wrong on our side. Please try again in a moment.";
@@ -283,8 +293,8 @@ function PosterWall() {
             left: 0,
             right: 0,
             height: 50,
+            pointerEvents: "none",
           }}
-          pointerEvents="none"
         />
         {/* Vignette: bottom */}
         <LinearGradient
@@ -295,8 +305,8 @@ function PosterWall() {
             left: 0,
             right: 0,
             height: 140,
+            pointerEvents: "none",
           }}
-          pointerEvents="none"
         />
         {/* Vignette: left */}
         <LinearGradient
@@ -309,8 +319,8 @@ function PosterWall() {
             left: 0,
             bottom: 0,
             width: SCREEN_W * 0.2,
+            pointerEvents: "none",
           }}
-          pointerEvents="none"
         />
         {/* Vignette: right */}
         <LinearGradient
@@ -323,8 +333,8 @@ function PosterWall() {
             right: 0,
             bottom: 0,
             width: SCREEN_W * 0.2,
+            pointerEvents: "none",
           }}
-          pointerEvents="none"
         />
       </Animated.View>
     </GestureDetector>
@@ -341,7 +351,11 @@ function CodeCells({
 }) {
   const ref = useRef<TextInput>(null);
   return (
-    <Pressable onPress={() => ref.current?.focus()} style={{ width: "100%" }}>
+    <Pressable
+      onPress={() => ref.current?.focus()}
+      style={{ width: "100%" }}
+      accessible={false}
+    >
       <View className="flex-row gap-2.5" style={{ width: "100%" }}>
         {Array.from({ length: CODE_LEN }).map((_, i) => {
           const ch = value[i];
@@ -396,6 +410,7 @@ export default function SignInScreen() {
   const DismissContainer = Platform.OS === "web" ? View : Pressable;
   const dismissContainerProps =
     Platform.OS === "web" ? {} : { onPress: Keyboard.dismiss };
+  const animateOnMount = Platform.OS !== "web";
 
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
@@ -406,7 +421,7 @@ export default function SignInScreen() {
   const verifyingRef = useRef(false);
 
   useEffect(() => {
-    if (isAuthenticated) router.replace("/home");
+    if (isAuthenticated) replaceHome(router);
   }, [isAuthenticated, router]);
 
   useEffect(() => {
@@ -467,7 +482,7 @@ export default function SignInScreen() {
         setErrorMessage(message);
         notifyError("Verification failed", message);
       } else {
-        router.replace("/home");
+        replaceHome(router);
       }
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -518,10 +533,10 @@ export default function SignInScreen() {
     <View className="flex-1 bg-dark-bg">
       <PosterWall />
 
-      <View className="flex-1" pointerEvents="box-none">
+      <View className="flex-1" style={{ pointerEvents: "box-none" }}>
         <View
           className="flex-1 justify-end"
-          pointerEvents="box-none"
+          style={{ pointerEvents: "box-none" }}
         >
           <DismissContainer {...dismissContainerProps}>
             <View
@@ -530,7 +545,11 @@ export default function SignInScreen() {
             >
               {/* ── Brand ── */}
               <Animated.View
-                entering={FadeInDown.delay(100).duration(700).springify()}
+                entering={
+                  animateOnMount
+                    ? FadeInDown.delay(100).duration(700).springify()
+                    : undefined
+                }
               >
                 <Text className="mt-2 text-[44px] font-black tracking-tighter text-text-primary">
                   Plotlist
@@ -538,11 +557,13 @@ export default function SignInScreen() {
               </Animated.View>
 
               <Animated.View
-                entering={FadeIn.delay(350).duration(500)}
+                entering={animateOnMount ? FadeIn.delay(350).duration(500) : undefined}
                 className="my-3 h-[1.5px] w-14 rounded-full bg-brand-500"
               />
 
-              <Animated.View entering={FadeInDown.delay(450).duration(600)}>
+              <Animated.View
+                entering={animateOnMount ? FadeInDown.delay(450).duration(600) : undefined}
+              >
                 <Text className="mb-5 text-[15px] leading-6 text-text-secondary">
                   Track every show you watch.{"\n"}Review, rate, and share with friends.
                 </Text>
@@ -563,8 +584,12 @@ export default function SignInScreen() {
               {step === "phone" ? (
                 <Animated.View
                   key="step-phone"
-                  entering={FadeInUp.delay(550).duration(500).springify()}
-                  exiting={FadeOutLeft.duration(200)}
+                  entering={
+                    animateOnMount
+                      ? FadeInUp.delay(550).duration(500).springify()
+                      : undefined
+                  }
+                  exiting={animateOnMount ? FadeOutLeft.duration(200) : undefined}
                 >
                   <Text className="mb-3 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
                     Sign in or create account
@@ -583,6 +608,7 @@ export default function SignInScreen() {
                           setPhone(formatPhoneNumber(t));
                           if (errorMessage) setErrorMessage(null);
                         }}
+                        accessibilityLabel="Phone number"
                         placeholder="(555) 123-4567"
                         placeholderTextColor="#3A3F4D"
                         keyboardType="phone-pad"
@@ -597,14 +623,14 @@ export default function SignInScreen() {
                   <Pressable
                     onPress={loading ? undefined : handleSend}
                     disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel="Continue with phone number"
+                    accessibilityState={{ disabled: loading, busy: loading }}
                     className={`mt-5 flex-row items-center justify-center rounded-2xl bg-brand-500 py-4 active:bg-brand-600 ${
                       loading ? "opacity-60" : ""
                     }`}
                     style={{
-                      shadowColor: "#0ea5e9",
-                      shadowOffset: { width: 0, height: 6 },
-                      shadowOpacity: 0.35,
-                      shadowRadius: 20,
+                      boxShadow: "0 6px 20px rgba(14,165,233,0.35)",
                     }}
                   >
                     {loading && (
@@ -619,7 +645,7 @@ export default function SignInScreen() {
                   </Pressable>
 
                   <Animated.Text
-                    entering={FadeIn.delay(850).duration(400)}
+                    entering={animateOnMount ? FadeIn.delay(850).duration(400) : undefined}
                     className="mt-5 text-center text-[13px] leading-5 text-text-tertiary"
                   >
                     We'll text you a one-time code.
@@ -628,7 +654,9 @@ export default function SignInScreen() {
               ) : (
                 <Animated.View
                   key="step-code"
-                  entering={SlideInRight.duration(350).springify()}
+                  entering={
+                    animateOnMount ? SlideInRight.duration(350).springify() : undefined
+                  }
                 >
                   <Text className="mb-1 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
                     Verification
@@ -645,14 +673,20 @@ export default function SignInScreen() {
                   <Pressable
                     onPress={loading ? undefined : () => handleVerify()}
                     disabled={loading || code.length < CODE_LEN}
+                    accessibilityRole="button"
+                    accessibilityLabel="Verify phone number"
+                    accessibilityState={{
+                      disabled: loading || code.length < CODE_LEN,
+                      busy: loading,
+                    }}
                     className={`mt-5 flex-row items-center justify-center rounded-2xl bg-brand-500 py-4 active:bg-brand-600 ${
                       loading || code.length < CODE_LEN ? "opacity-40" : ""
                     }`}
                     style={{
-                      shadowColor: "#0ea5e9",
-                      shadowOffset: { width: 0, height: 6 },
-                      shadowOpacity: code.length === CODE_LEN ? 0.35 : 0,
-                      shadowRadius: 20,
+                      boxShadow:
+                        code.length === CODE_LEN
+                          ? "0 6px 20px rgba(14,165,233,0.35)"
+                          : "0 6px 20px rgba(14,165,233,0)",
                     }}
                   >
                     {loading && (
@@ -676,6 +710,8 @@ export default function SignInScreen() {
                         setCode("");
                         setErrorMessage(null);
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Use a different phone number"
                       className="py-2 pr-4 active:opacity-70"
                     >
                       <Text className="text-sm font-semibold text-text-secondary">
@@ -687,6 +723,14 @@ export default function SignInScreen() {
                       onPress={
                         secondsRemaining > 0 ? undefined : handleSend
                       }
+                      disabled={secondsRemaining > 0}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        secondsRemaining > 0
+                          ? `Resend code available in ${secondsRemaining} seconds`
+                          : "Resend verification code"
+                      }
+                      accessibilityState={{ disabled: secondsRemaining > 0 }}
                       className="py-2 pl-4 active:opacity-70"
                     >
                       <Text
@@ -708,7 +752,9 @@ export default function SignInScreen() {
           </DismissContainer>
         </View>
 
-        <Animated.View style={keyboardSpacerStyle} pointerEvents="none" />
+        <Animated.View
+          style={[keyboardSpacerStyle, { pointerEvents: "none" }]}
+        />
       </View>
     </View>
   );

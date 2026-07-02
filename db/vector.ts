@@ -1,22 +1,27 @@
-import { customType } from "drizzle-orm/pg-core";
+import { customType } from "drizzle-orm/sqlite-core";
 
+// Embeddings are stored as JSON-encoded float arrays in SQLite/D1. Similarity
+// math happens in application code (see lib/plotlist/embeddingUtils.ts), so no
+// vector-native column type is required.
 export const vector = customType<{
   data: number[];
   driverData: string;
-  config: { dimensions: number };
 }>({
-  dataType(config) {
-    return `vector(${config?.dimensions ?? 1536})`;
+  dataType() {
+    return "text";
   },
   toDriver(value) {
-    return `[${value.join(",")}]`;
+    return JSON.stringify(value);
   },
   fromDriver(value) {
-    const normalized = value.replace(/^\[|\]$/g, "");
-    if (!normalized.trim()) {
+    if (typeof value !== "string" || !value.trim()) {
       return [];
     }
-
-    return normalized.split(",").map((part) => Number(part.trim()));
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map((part) => Number(part)) : [];
+    } catch {
+      return [];
+    }
   },
 });

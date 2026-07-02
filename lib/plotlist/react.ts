@@ -8,9 +8,93 @@ import { queryClient } from "../queryClient";
 import type { PaginatedResult, PlotlistFunctionReference } from "./types";
 
 type ArgsOrSkip = [] | [Record<string, any> | "skip"];
-type MutationFn = ((args?: any) => Promise<any>) & {
-  withOptimisticUpdate: (handler?: (...args: any[]) => unknown) => MutationFn;
+export type LocalStore = {
+  getQuery: <Query extends PlotlistFunctionReference<"query">>(
+    query: Query,
+    args?: Record<string, any>,
+  ) => any;
+  setQuery: <Query extends PlotlistFunctionReference<"query">>(
+    query: Query,
+    args: Record<string, any> | undefined,
+    data: any,
+  ) => void;
+  setPaginatedQuery: <Query extends PlotlistFunctionReference<"query">>(
+    query: Query,
+    args: Record<string, any>,
+    updater: (current: PaginatedResult | undefined) => PaginatedResult | undefined,
+  ) => void;
 };
+type MutationFn = ((args?: any) => Promise<any>) & {
+  withOptimisticUpdate: (handler?: (localStore: LocalStore, args: any) => unknown) => MutationFn;
+};
+
+function queryKeyFor<Query extends PlotlistFunctionReference<"query">>(
+  query: Query,
+  args?: Record<string, any>,
+) {
+  return ["plotlist-rpc", "query", getFunctionName(query as any), args] as const;
+}
+
+function paginatedQueryMatches(
+  key: readonly unknown[],
+  name: string,
+  args: Record<string, any>,
+) {
+  if (key[0] !== "plotlist-rpc" || key[1] !== "paginated" || key[2] !== name) {
+    return false;
+  }
+  const queryArgs = key[3];
+  if (!queryArgs || typeof queryArgs !== "object") {
+    return false;
+  }
+  return Object.entries(args).every(([argKey, argValue]) => {
+    return (queryArgs as Record<string, any>)[argKey] === argValue;
+  });
+}
+
+function createLocalStore() {
+  const rollback = new Map<string, { key: readonly unknown[]; data: unknown }>();
+
+  const remember = (key: readonly unknown[]) => {
+    const serialized = JSON.stringify(key);
+    if (!rollback.has(serialized)) {
+      rollback.set(serialized, { key, data: queryClient.getQueryData(key as any) });
+    }
+  };
+
+  const localStore: LocalStore = {
+    getQuery: (query, args) => queryClient.getQueryData(queryKeyFor(query, args)),
+    setQuery: (query, args, data) => {
+      const key = queryKeyFor(query, args);
+      remember(key);
+      queryClient.setQueryData(key, data);
+    },
+    setPaginatedQuery: (query, args, updater) => {
+      const name = getFunctionName(query as any);
+      const queries = queryClient.getQueryCache().findAll({
+        queryKey: ["plotlist-rpc", "paginated", name],
+      });
+      for (const queryRecord of queries) {
+        if (!paginatedQueryMatches(queryRecord.queryKey, name, args)) {
+          continue;
+        }
+        remember(queryRecord.queryKey);
+        queryClient.setQueryData(queryRecord.queryKey, (current: PaginatedResult | undefined) =>
+          updater(current),
+        );
+      }
+    },
+  };
+
+  return {
+    localStore,
+    rollback: () => {
+      for (const snapshot of rollback.values()) {
+        queryClient.setQueryData(snapshot.key as any, snapshot.data);
+      }
+    },
+  };
+}
 
 export function useAuth() {
   return useWrappedAuth();
@@ -44,17 +128,37 @@ export function useMutation<Mutation extends PlotlistFunctionReference<"mutation
   const rpcMutation = useTanstackMutation(
     {
       mutationFn: (args: any) => callMutation(mutation, args),
-      onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
-      },
     },
     queryClient,
   );
 
   return useMemo(() => {
-    const wrapped = (async (args?: any) => await rpcMutation.mutateAsync(args)) as MutationFn;
-    wrapped.withOptimisticUpdate = () => wrapped;
-    return wrapped;
+    const buildMutation = (
+      optimisticHandler?: (localStore: LocalStore, args: any) => unknown,
+    ) => {
+      const wrapped = (async (args?: any) => {
+        const optimistic = optimisticHandler ? createLocalStore() : null;
+        try {
+          if (optimisticHandler) {
+            await queryClient.cancelQueries({ queryKey: ["plotlist-rpc"] });
+          }
+          optimisticHandler?.(optimistic!.localStore, args);
+          const result = await rpcMutation.mutateAsync(args);
+          void queryClient.invalidateQueries({
+            queryKey: ["plotlist-rpc"],
+            refetchType: "active",
+          });
+          return result;
+        } catch (error) {
+          optimistic?.rollback();
+          throw error;
+        }
+      }) as MutationFn;
+      wrapped.withOptimisticUpdate = (handler) => buildMutation(handler);
+      return wrapped;
+    };
+
+    return buildMutation();
   }, [rpcMutation.mutateAsync]);
 }
 

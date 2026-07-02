@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 
+import { GlassSurface } from "./NativeGlass";
+import { PrimaryButton } from "./PrimaryButton";
+import { SecondaryButton } from "./SecondaryButton";
+
 export function ReportModal({
   visible,
   onClose,
@@ -32,10 +36,8 @@ export function ReportModal({
       onRequestClose={onClose}
     >
       <Pressable onPress={onClose} className="flex-1 bg-black/50 px-6 py-16">
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          className="rounded-2xl bg-dark-elevated p-4"
-        >
+        <Pressable onPress={(e) => e.stopPropagation()}>
+          <GlassSurface radius={8} variant="sheet" contentStyle={{ padding: 16 }}>
           <Text className="text-lg font-semibold text-text-primary">
             Report content
           </Text>
@@ -51,21 +53,10 @@ export function ReportModal({
             className="mt-3 min-h-[100px] rounded-xl border border-dark-border bg-dark-card px-4 py-3 text-[16px] text-text-primary"
           />
           <View className="mt-4 flex-row gap-3">
-            <Pressable
-              onPress={onClose}
-              className="flex-1 items-center rounded-full border border-dark-border py-3"
-            >
-              <Text className="text-sm font-semibold text-text-primary">
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handleSubmit}
-              className="flex-1 items-center rounded-full bg-brand-500 py-3"
-            >
-              <Text className="text-sm font-semibold text-white">Submit</Text>
-            </Pressable>
+            <SecondaryButton label="Cancel" onPress={onClose} className="flex-1" />
+            <PrimaryButton label="Submit" onPress={handleSubmit} className="flex-1" />
           </View>
+          </GlassSurface>
         </Pressable>
       </Pressable>
     </Modal>

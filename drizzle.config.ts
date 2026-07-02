@@ -1,22 +1,10 @@
 import { defineConfig } from "drizzle-kit";
 
-const databaseUrl =
-  process.env.PLANETSCALE_DATABASE_URL ??
-  "postgres://postgres:postgres@127.0.0.1:5432/plotlist";
-
-function getPostgresJsUrl(value: string) {
-  const url = new URL(value);
-  url.searchParams.delete("sslrootcert");
-  return url.toString();
-}
-
+// Migrations are applied to Cloudflare D1 via `wrangler d1 migrations apply`.
 export default defineConfig({
   schema: "./db/schema.ts",
   out: "./drizzle",
-  dialect: "postgresql",
-  dbCredentials: {
-    url: getPostgresJsUrl(databaseUrl),
-  },
+  dialect: "sqlite",
   strict: true,
   verbose: true,
 });

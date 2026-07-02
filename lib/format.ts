@@ -16,8 +16,20 @@ export function formatShortDate(value: number) {
   return format(new Date(value), "MMM d");
 }
 
-export function formatCalendarDay(value: number) {
-  return format(new Date(value), "EEEE, MMM d");
+function parseDateOnlyString(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0);
+}
+
+export function formatCalendarDay(value: number | string) {
+  const date =
+    typeof value === "string"
+      ? parseDateOnlyString(value) ?? new Date(value)
+      : new Date(value);
+  return format(date, "EEEE, MMM d");
 }
 
 export function formatEpisodeCode(seasonNumber: number, episodeNumber: number) {

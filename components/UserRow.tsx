@@ -29,6 +29,7 @@ type UserRowProps = {
   isMutualFollow?: boolean;
   mutualCount?: number;
   inContacts?: boolean;
+  sharedShowCount?: number;
   showFollowButton?: boolean;
   taste?: TasteMatchData | null;
 };
@@ -39,9 +40,15 @@ function buildRelationshipSubtitle({
   followsYou,
   isMutualFollow,
   mutualCount,
+  sharedShowCount,
 }: Pick<
   UserRowProps,
-  "subtitle" | "inContacts" | "followsYou" | "isMutualFollow" | "mutualCount"
+  | "subtitle"
+  | "inContacts"
+  | "followsYou"
+  | "isMutualFollow"
+  | "mutualCount"
+  | "sharedShowCount"
 >) {
   if (subtitle) {
     return subtitle;
@@ -59,6 +66,9 @@ function buildRelationshipSubtitle({
   if ((mutualCount ?? 0) > 0) {
     parts.push(`${mutualCount} mutual friend${mutualCount === 1 ? "" : "s"}`);
   }
+  if ((sharedShowCount ?? 0) > 0) {
+    parts.push(`${sharedShowCount} shared show${sharedShowCount === 1 ? "" : "s"}`);
+  }
 
   return parts.join(" · ") || null;
 }
@@ -74,6 +84,7 @@ export const UserRow = memo(function UserRow({
   isMutualFollow = false,
   mutualCount = 0,
   inContacts = false,
+  sharedShowCount = 0,
   showFollowButton = true,
   taste = null,
 }: UserRowProps) {
@@ -121,6 +132,7 @@ export const UserRow = memo(function UserRow({
     followsYou,
     isMutualFollow,
     mutualCount,
+    sharedShowCount,
   });
 
   return (

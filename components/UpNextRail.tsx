@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "../lib/plotlist/react";
 import type { Id } from "../lib/plotlist/types";
 import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
+import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 
 type UpNextItem = {
   showId: Id<"shows">;
@@ -39,20 +40,23 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
   ) as
     | UpNextItem[]
     | undefined;
-  const toggleEpisode = useMutation(api.episodeProgress.toggleEpisode);
+  const markEpisodeWatched = useMutation(
+    api.episodeProgress.markEpisodeWatched,
+  ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
 
   const handleMarkWatched = useCallback(
     (item: UpNextItem) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const nextSeason = item.nextSeasonNumber || 1;
       const nextEpisode = item.nextEpisodeNumber || 1;
-      toggleEpisode({
+      void markEpisodeWatched({
         showId: item.showId,
         seasonNumber: nextSeason,
         episodeNumber: nextEpisode,
+        createLog: true,
       });
     },
-    [toggleEpisode],
+    [markEpisodeWatched],
   );
 
   if (!upNextItems || upNextItems.length === 0) return null;
@@ -120,7 +124,13 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
                     transition={200}
                   />
                 ) : (
-                  <View className="h-full w-full items-center justify-center bg-surface-secondary">
+                  <View
+                    className="h-full w-full items-center justify-center bg-surface-secondary"
+                    accessible={false}
+                    accessibilityElementsHidden
+                    aria-hidden={true}
+                    importantForAccessibility="no-hide-descendants"
+                  >
                     <Ionicons name="tv-outline" size={28} color="#4b5563" />
                   </View>
                 )}
@@ -166,10 +176,7 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
                       backgroundColor: "rgba(14, 165, 233, 0.95)",
                       width: 34,
                       height: 34,
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.5,
-                      shadowRadius: 6,
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
                       elevation: 6,
                     }}
                     onPress={(e) => {
@@ -177,8 +184,18 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
                       handleMarkWatched(item);
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Mark watched"
                   >
-                    <Ionicons name="checkmark" size={18} color="white" />
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color="white"
+                      accessible={false}
+                      accessibilityElementsHidden
+                      aria-hidden={true}
+                      importantForAccessibility="no"
+                    />
                   </Pressable>
                 )}
               </View>

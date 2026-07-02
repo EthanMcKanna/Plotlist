@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
-import { ScrollView, ScrollViewProps, View } from "react-native";
+import { ScrollView, ScrollViewProps, StyleSheet, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export function Screen({
@@ -19,24 +20,47 @@ export function Screen({
 
   if (scroll) {
     return (
-      <SafeAreaView edges={safeAreaEdges} className="flex-1 bg-dark-bg">
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          keyboardShouldPersistTaps={keyboardShouldPersistTaps}
-          className={className}
-        >
-          {children}
-        </ScrollView>
-      </SafeAreaView>
+      <View style={styles.root}>
+        <LinearGradient
+          pointerEvents="none"
+          colors={["#10141B", "#0D0F14", "#090B10"]}
+          locations={[0, 0.46, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+        <SafeAreaView edges={safeAreaEdges} className="flex-1">
+          <ScrollView
+            contentInsetAdjustmentBehavior="automatic"
+            keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+            className={className}
+          >
+            {children}
+          </ScrollView>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView
-      edges={safeAreaEdges}
-      className={`flex-1 bg-dark-bg ${className ?? ""}`}
-    >
-      <View className="flex-1">{children}</View>
-    </SafeAreaView>
+    <View style={styles.root}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={["#10141B", "#0D0F14", "#090B10"]}
+        locations={[0, 0.46, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView
+        edges={safeAreaEdges}
+        className={`flex-1 ${className ?? ""}`}
+      >
+        <View className="flex-1">{children}</View>
+      </SafeAreaView>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: "#0D0F14",
+    flex: 1,
+  },
+});

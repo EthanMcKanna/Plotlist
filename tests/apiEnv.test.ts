@@ -45,6 +45,36 @@ describe("getApiBaseUrl", () => {
     expect(getApiBaseUrl()).toBe("http://localhost:3001");
   });
 
+  it("uses the local API during Expo web development", () => {
+    delete process.env.EXPO_PUBLIC_API_URL;
+    Object.defineProperty(globalThis, "__DEV__", {
+      value: true,
+      configurable: true,
+    });
+    setGlobalWindow({
+      location: {
+        origin: "http://127.0.0.1:3000",
+      },
+    });
+
+    expect(getApiBaseUrl()).toBe("http://localhost:3001");
+  });
+
+  it("uses the current browser origin for exported local web builds", () => {
+    delete process.env.EXPO_PUBLIC_API_URL;
+    Object.defineProperty(globalThis, "__DEV__", {
+      value: false,
+      configurable: true,
+    });
+    setGlobalWindow({
+      location: {
+        origin: "http://127.0.0.1:3000",
+      },
+    });
+
+    expect(getApiBaseUrl()).toBe("http://127.0.0.1:3000");
+  });
+
   it("uses production API as the release fallback", () => {
     delete process.env.EXPO_PUBLIC_API_URL;
     Object.defineProperty(globalThis, "__DEV__", {

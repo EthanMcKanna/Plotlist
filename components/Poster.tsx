@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
+import { View, StyleSheet } from "react-native";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 
 export function Poster({
   uri,
@@ -11,17 +14,52 @@ export function Poster({
   width?: number;
   className?: string;
 }) {
+  const [failed, setFailed] = useState(false);
   const dimension =
     width ?? (size === "sm" ? 60 : size === "lg" ? 140 : 90);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+
   return (
-    <Image
-      source={uri ? { uri } : undefined}
-      style={{ width: dimension, height: dimension * 1.5, borderRadius: 12 }}
-      contentFit="cover"
-      cachePolicy="memory-disk"
-      priority="low"
-      transition={200}
+    <View
+      testID="poster-frame"
+      style={[
+        styles.frame,
+        { width: dimension, height: dimension * 1.5, borderRadius: 12 },
+      ]}
       className={className}
-    />
+    >
+      <View
+        testID="poster-fallback"
+        style={StyleSheet.absoluteFill}
+        className="items-center justify-center"
+      >
+        <Ionicons name="film-outline" size={Math.max(18, dimension * 0.24)} color="#5E6575" />
+      </View>
+      {uri && !failed ? (
+        <Image
+          testID="poster-image"
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          priority="low"
+          transition={200}
+          onError={() => setFailed(true)}
+          className={className}
+        />
+      ) : null}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  frame: {
+    backgroundColor: "#1A1F29",
+    borderColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+});

@@ -25,7 +25,7 @@ export async function readJsonBody(req: IncomingMessage) {
 
 function setCorsHeaders(res: ServerResponse) {
   res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
   res.setHeader("access-control-allow-headers", "authorization, content-type");
 }
 
@@ -33,6 +33,7 @@ export function json(res: ServerResponse, status: number, body: unknown) {
   setCorsHeaders(res);
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("cache-control", "no-store, max-age=0");
   res.end(JSON.stringify(body));
 }
 
@@ -48,7 +49,10 @@ export function methodNotAllowed(res: ServerResponse) {
 export function withJsonRoute<TBody>(
   schema: ZodType<TBody>,
   handler: Handler<TBody>,
+  options: { methods?: string[] } = {},
 ) {
+  const allowedMethods = new Set(options.methods ?? ["POST"]);
+
   return async function route(req: IncomingMessage, res: ServerResponse) {
     setCorsHeaders(res);
 
@@ -58,12 +62,12 @@ export function withJsonRoute<TBody>(
       return;
     }
 
-    if (req.method !== "POST") {
+    if (!req.method || !allowedMethods.has(req.method)) {
       return methodNotAllowed(res);
     }
 
     try {
-      const parsedBody = schema.parse(await readJsonBody(req));
+      const parsedBody = schema.parse(req.method === "GET" ? {} : await readJsonBody(req));
       await handler({ req, res, body: parsedBody });
     } catch (error) {
       const apiError = asApiError(error);

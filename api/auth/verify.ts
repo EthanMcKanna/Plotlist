@@ -1,10 +1,13 @@
 import { z } from "zod";
+import { and, eq, gte, isNull } from "drizzle-orm";
 
+import { phoneVerificationRequests } from "../../db/schema";
+import { db } from "../_lib/db";
 import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { ensurePhoneIdentity, createSession } from "../_lib/auth";
 import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
-import { enforceRateLimit } from "../_lib/rate-limit";
+import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "../_lib/rate-limit";
 import { setSessionCookies } from "../_lib/session-cookies";
 import { verifyPhoneVerificationCode } from "../_lib/twilio";
 import { upsertPhoneUser } from "../_lib/users";
@@ -14,7 +17,7 @@ const requestSchema = z.object({
   code: z.string().min(1),
 });
 
-export default withJsonRoute(requestSchema, async ({ body, res }) => {
+export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
   const normalizedPhone = normalizePhoneNumber(body.phone);
   if (!normalizedPhone) {
     throw new ApiError(400, "invalid_phone", "Enter a valid phone number");
@@ -26,7 +29,8 @@ export default withJsonRoute(requestSchema, async ({ body, res }) => {
   );
 
   if (!usingAppReviewBypass) {
-    await enforceRateLimit(`phone-verify:${normalizedPhone}`, 10, 10 * 60 * 1000);
+    await enforceRateLimit(rateLimitKey("phone-verify", normalizedPhone), 10, 10 * 60 * 1000);
+    await enforceRateLimit(clientRateLimitKey(req, "phone-verify-ip"), 30, 10 * 60 * 1000);
   }
 
   const verified =
@@ -39,6 +43,18 @@ export default withJsonRoute(requestSchema, async ({ body, res }) => {
       "That code was invalid or expired. Request a new code and try again.",
     );
   }
+
+  const now = Date.now();
+  await db
+    .update(phoneVerificationRequests)
+    .set({ completedAt: now })
+    .where(
+      and(
+        eq(phoneVerificationRequests.phone, normalizedPhone),
+        isNull(phoneVerificationRequests.completedAt),
+        gte(phoneVerificationRequests.expiresAt, now),
+      ),
+    );
 
   const user = await upsertPhoneUser(normalizedPhone);
   await ensurePhoneIdentity(user.id, normalizedPhone);

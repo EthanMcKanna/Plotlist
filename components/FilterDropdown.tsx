@@ -11,6 +11,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GlassSurface } from "./NativeGlass";
+
 export type FilterOption = {
   value: string;
   label: string;
@@ -92,24 +94,33 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
   return (
     <>
-      <Pressable
-        onPress={handleOpen}
-        className="flex-row items-center justify-between rounded-2xl px-4 py-3 active:opacity-80"
-        style={{ backgroundColor: "#111318" }}
-      >
-        <View className="flex-row items-center gap-2">
-          <Text className="text-sm font-semibold text-text-primary">
-            {selectedOption.label}
-          </Text>
-          {selectedOption.count !== undefined && (
-            <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-              <Text className="text-xs font-medium text-text-tertiary">
-                {selectedOption.count}
-              </Text>
-            </View>
-          )}
-        </View>
-        <Ionicons name="chevron-down" size={18} color="#9BA1B0" />
+      <Pressable onPress={handleOpen}>
+        <GlassSurface
+          radius={8}
+          variant="control"
+          fallbackColor="rgba(17,19,24,0.92)"
+          contentStyle={{
+            alignItems: "center",
+            flexDirection: "row",
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+          }}
+        >
+          <View className="flex-row items-center gap-2">
+            <Text className="text-sm font-semibold text-text-primary">
+              {selectedOption.label}
+            </Text>
+            {selectedOption.count !== undefined && (
+              <View className="rounded-full bg-dark-elevated px-2 py-0.5">
+                <Text className="text-xs font-medium text-text-tertiary">
+                  {selectedOption.count}
+                </Text>
+              </View>
+            )}
+          </View>
+          <Ionicons name="chevron-down" size={18} color="#9BA1B0" />
+        </GlassSurface>
       </Pressable>
 
       <Modal
@@ -141,11 +152,16 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
           <Animated.View style={sheetAnimStyle}>
             <GestureDetector gesture={panGesture}>
               <Animated.View>
-                <View
+                <GlassSurface
+                  radius={28}
+                  variant="sheet"
                   style={{
-                    backgroundColor: "#1C2028",
                     borderTopLeftRadius: 24,
                     borderTopRightRadius: 24,
+                    borderBottomLeftRadius: 0,
+                    borderBottomRightRadius: 0,
+                  }}
+                  contentStyle={{
                     paddingTop: 12,
                     paddingBottom: insets.bottom + 20,
                   }}
@@ -250,7 +266,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
                       );
                     })}
                   </View>
-                </View>
+                </GlassSurface>
               </Animated.View>
             </GestureDetector>
           </Animated.View>

@@ -459,10 +459,7 @@ export default function FavoritesScreen() {
           style={
             isDirty
               ? {
-                  shadowColor: "#0ea5e9",
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 12,
+                  boxShadow: "0 0 12px rgba(14,165,233,0.3)",
                 }
               : undefined
           }

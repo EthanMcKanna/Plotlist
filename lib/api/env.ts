@@ -6,11 +6,12 @@ export function getApiBaseUrl() {
     return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, "");
   }
 
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    return localApiUrl;
+  }
+
   if (typeof window !== "undefined" && window.location) {
-    const { hostname, origin } = window.location;
-    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
-      return origin;
-    }
+    return window.location.origin;
   }
 
   if (typeof __DEV__ !== "undefined" && !__DEV__) {

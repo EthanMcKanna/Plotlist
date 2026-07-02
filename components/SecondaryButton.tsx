@@ -1,5 +1,7 @@
-import { Pressable, Text } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import * as Haptics from "expo-haptics";
+
+import { GlassPressable } from "./NativeGlass";
 
 export function SecondaryButton({
   label,
@@ -16,13 +18,28 @@ export function SecondaryButton({
   };
 
   return (
-    <Pressable
+    <GlassPressable
       onPress={handlePress}
-      className={`items-center justify-center rounded-full border border-dark-border px-5 py-3 active:bg-dark-hover ${
-        className ?? ""
-      }`}
+      className={className}
+      radius={999}
+      variant="control"
+      surfaceStyle={styles.surface}
+      contentStyle={styles.content}
     >
       <Text className="text-base font-semibold text-text-secondary">{label}</Text>
-    </Pressable>
+    </GlassPressable>
   );
 }
+
+const styles = StyleSheet.create({
+  content: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 46,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  surface: {
+    minHeight: 46,
+  },
+});

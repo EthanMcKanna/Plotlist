@@ -1,4 +1,6 @@
-import { Pressable, ScrollView, Text } from "react-native";
+import { ScrollView, Text } from "react-native";
+
+import { GlassPressable } from "./NativeGlass";
 
 export type FilterOption = {
   value: string;
@@ -22,14 +24,18 @@ export function FilterChips({ options, value, onChange }: FilterChipsProps) {
       {options.map((option) => {
         const isSelected = option.value === value;
         return (
-          <Pressable
+          <GlassPressable
             key={option.value}
             onPress={() => onChange(option.value)}
-            className={`flex-row items-center rounded-full px-4 py-2 ${
-              isSelected
-                ? "bg-brand-500"
-                : "border border-dark-border bg-dark-card"
-            }`}
+            radius={999}
+            variant={isSelected ? "prominent" : "control"}
+            fallbackColor={isSelected ? "rgba(14,165,233,0.86)" : undefined}
+            contentStyle={{
+              alignItems: "center",
+              flexDirection: "row",
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+            }}
           >
             <Text
               className={`text-sm font-medium ${
@@ -47,7 +53,7 @@ export function FilterChips({ options, value, onChange }: FilterChipsProps) {
                 {option.count}
               </Text>
             )}
-          </Pressable>
+          </GlassPressable>
         );
       })}
     </ScrollView>

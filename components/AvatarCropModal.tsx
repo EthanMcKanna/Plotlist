@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -230,7 +229,7 @@ export function AvatarCropModal({
           </GestureDetector>
 
           {/* Circular mask overlay */}
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <View style={[StyleSheet.absoluteFill, styles.pointerNone]}>
             <View
               style={[
                 styles.maskOverlay,
@@ -322,5 +321,8 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 14,
     color: "#5A6070",
+  },
+  pointerNone: {
+    pointerEvents: "none",
   },
 });

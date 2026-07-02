@@ -1,22 +1,25 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 
-import { getServerEnv } from "./env";
+let activeDb: DrizzleD1Database | null = null;
 
-const env = getServerEnv();
-
-function getPostgresJsUrl(value: string) {
-  const url = new URL(value);
-  url.searchParams.delete("sslrootcert");
-  return url.toString();
+export function initDb(d1: unknown) {
+  activeDb = drizzle(d1 as Parameters<typeof drizzle>[0]);
+  return activeDb;
 }
 
-const queryClient = postgres(getPostgresJsUrl(env.PLANETSCALE_DATABASE_URL), {
-  max: env.NODE_ENV === "development" ? 5 : 1,
-  idle_timeout: 5,
-  connect_timeout: 10,
-  prepare: false,
-});
+function requireDb() {
+  if (!activeDb) {
+    throw new Error("Database is not initialized. Call initDb(env.DB) first.");
+  }
+  return activeDb;
+}
 
-export const db = drizzle(queryClient);
-export { queryClient };
+// Call-time proxy so modules can keep `import { db } from "./db"` while the
+// underlying D1 binding is only available once the Worker receives a request.
+export const db = new Proxy({} as DrizzleD1Database, {
+  get(_target, prop) {
+    const database = requireDb();
+    const value = Reflect.get(database, prop, database);
+    return typeof value === "function" ? value.bind(database) : value;
+  },
+}) as DrizzleD1Database;

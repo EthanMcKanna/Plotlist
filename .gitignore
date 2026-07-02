@@ -5,8 +5,11 @@ node_modules/
 
 # Expo
 .expo/
+.asc/
+.playwright-cli/
 .vercel/
 dist/
+output/
 web-build/
 expo-env.d.ts
 
@@ -42,3 +45,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+.dev.vars
+
+# Cloudflare
+.wrangler/

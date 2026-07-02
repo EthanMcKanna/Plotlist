@@ -108,6 +108,7 @@ export default function OnboardingFollow() {
                   isMutualFollow={item.isMutualFollow}
                   mutualCount={item.mutualCount}
                   inContacts={item.inContacts}
+                  sharedShowCount={item.sharedShowCount}
                 />
               ))}
             </View>
@@ -130,6 +131,7 @@ export default function OnboardingFollow() {
                   isMutualFollow={item.isMutualFollow}
                   mutualCount={item.mutualCount}
                   inContacts={item.inContacts}
+                  sharedShowCount={item.sharedShowCount}
                 />
               ))}
             </View>

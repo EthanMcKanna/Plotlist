@@ -38,7 +38,15 @@ export default function TabsLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="home" size={iconSize} color={color} />
+            <Ionicons
+              name="home"
+              size={iconSize}
+              color={color}
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
           ),
         }}
         listeners={{
@@ -52,7 +60,15 @@ export default function TabsLayout() {
         options={{
           title: "Log",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="journal-outline" size={iconSize} color={color} />
+            <Ionicons
+              name="journal-outline"
+              size={iconSize}
+              color={color}
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
           ),
         }}
         listeners={{
@@ -66,7 +82,15 @@ export default function TabsLayout() {
         options={{
           title: "Search",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="search" size={iconSize} color={color} />
+            <Ionicons
+              name="search"
+              size={iconSize}
+              color={color}
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
           ),
         }}
         listeners={{
@@ -80,7 +104,15 @@ export default function TabsLayout() {
         options={{
           title: "Me",
           tabBarIcon: ({ color }) => (
-            <Ionicons name="person" size={iconSize} color={color} />
+            <Ionicons
+              name="person"
+              size={iconSize}
+              color={color}
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
           ),
         }}
         listeners={{

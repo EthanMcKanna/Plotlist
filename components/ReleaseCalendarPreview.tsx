@@ -32,10 +32,10 @@ export function ReleaseCalendarPreview() {
       return;
     }
 
-    void refreshForMe({}).catch(() => {
+    void refreshForMe({ today }).catch(() => {
       // Keep Home rendering even if the refresh fails.
     });
-  }, [isAuthenticated, preview, refreshForMe]);
+  }, [isAuthenticated, preview, refreshForMe, today]);
 
   if (!isAuthenticated || !preview) {
     return null;
@@ -141,7 +141,7 @@ export function ReleaseCalendarPreview() {
                     <Text className="text-[10px] font-bold text-white">
                       {item.airDate === today
                         ? "Tonight"
-                        : formatCalendarDay(item.airDateTs)}
+                        : formatCalendarDay(item.airDate ?? item.airDateTs)}
                     </Text>
                   </View>
                 </View>

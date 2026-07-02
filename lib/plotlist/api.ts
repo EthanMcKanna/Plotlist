@@ -68,6 +68,7 @@ export const api = {
     get: ref("query", "shows:get"),
     search: ref("query", "shows:search"),
     searchCatalog: ref("action", "shows:searchCatalog"),
+    getHomeCatalog: ref("action", "shows:getHomeCatalog"),
     getTmdbList: ref("action", "shows:getTmdbList"),
     ingestFromCatalog: ref("action", "shows:ingestFromCatalog"),
     getExtendedDetails: ref("action", "shows:getExtendedDetails"),

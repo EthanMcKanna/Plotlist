@@ -12,6 +12,10 @@ jest.mock("expo-haptics", () => ({
   selectionAsync: jest.fn(),
 }));
 
+jest.mock("@expo/vector-icons", () => ({
+  Ionicons: ({ name }: { name?: string }) => name ?? "icon",
+}));
+
 afterEach(() => {
   cleanup();
 });

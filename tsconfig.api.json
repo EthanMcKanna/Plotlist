@@ -12,6 +12,7 @@
   "include": [
     "api/**/*.ts",
     "db/**/*.ts",
+    "worker/**/*.ts",
     "drizzle.config.ts"
   ]
 }

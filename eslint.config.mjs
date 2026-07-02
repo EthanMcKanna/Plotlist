@@ -7,6 +7,7 @@ export default tseslint.config(
     ignores: [
       ".expo/**",
       ".vercel/**",
+      ".wrangler/**",
       "android/**",
       "ios/**",
       "node_modules/**",
