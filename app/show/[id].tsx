@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   Keyboard,
@@ -49,7 +50,7 @@ import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
-import { LoadingScreen } from "../../components/LoadingScreen";
+import { ShowDetailSkeleton } from "../../components/ShowDetailSkeleton";
 import { mapGenreIdsToNames } from "../../lib/plotlist/embeddingUtils";
 import {
   optimisticMarkSeasonWatched,
@@ -1427,12 +1428,13 @@ export default function ShowScreen() {
     !showExternalId ||
     Boolean(activeDetails) ||
     extendedDetailsLoadState === "ready";
-  const reviewsSettled = isShowPreview || reviewsStatus !== "LoadingFirstPage";
-  const initialDetailSurfaceReady =
-    showQuerySettled && extendedDetailsSettled && reviewsSettled;
+  // Reviews render below the fold and stream in on their own; gating first
+  // paint on them (or showing the app-icon boot screen) made every show tap
+  // feel like an app relaunch.
+  const initialDetailSurfaceReady = showQuerySettled && extendedDetailsSettled;
 
   if (!initialDetailSurfaceReady) {
-    return <LoadingScreen />;
+    return <ShowDetailSkeleton onBack={handleBackPress} />;
   }
 
   if (!show) {
@@ -2116,6 +2118,10 @@ export default function ShowScreen() {
                   </Text>
                 </GlassPressable>
               ) : null}
+            </View>
+          ) : reviewsStatus === "LoadingFirstPage" ? (
+            <View style={{ alignItems: "center", paddingVertical: 24 }}>
+              <ActivityIndicator color="#7dd3fc" />
             </View>
           ) : (
             <EmptyState

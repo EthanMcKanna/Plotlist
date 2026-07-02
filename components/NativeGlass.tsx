@@ -1,5 +1,6 @@
-import { ReactNode, useMemo } from "react";
+import { ComponentType, ReactNode, useMemo } from "react";
 import {
+  Platform,
   Pressable,
   PressableProps,
   StyleProp,
@@ -41,8 +42,43 @@ const VARIANT_TOKENS: Record<GlassVariant, VariantTokens> = {
   },
 };
 
+type NativeGlassViewProps = ViewProps & {
+  glassEffectStyle?: GlassStyle;
+  tintColor?: string;
+  isInteractive?: boolean;
+  colorScheme?: "auto" | "light" | "dark";
+};
+
+// Liquid Glass ships through this single guarded choke point. The native
+// module previously crashed release builds when the JS bundle and binary
+// disagreed about its presence (`requireNativeModule` throws), so:
+// 1. only touch the module on iOS,
+// 2. lazy-require inside try/catch,
+// 3. render natively only when isLiquidGlassAvailable() confirms iOS 26+
+//    support in the installed binary,
+// 4. never animate opacity on a glass view or its parents (see
+//    docs/ios-native-surface-audit.md).
+// Anything else falls back to the tinted JS surfaces below.
+let NativeGlassView: ComponentType<NativeGlassViewProps> | null = null;
+
+if (Platform.OS === "ios") {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const glassModule = require("expo-glass-effect");
+    if (
+      typeof glassModule?.isLiquidGlassAvailable === "function" &&
+      glassModule.isLiquidGlassAvailable() === true &&
+      glassModule.GlassView
+    ) {
+      NativeGlassView = glassModule.GlassView as ComponentType<NativeGlassViewProps>;
+    }
+  } catch {
+    NativeGlassView = null;
+  }
+}
+
 export function isNativeGlassAvailable() {
-  return false;
+  return NativeGlassView !== null;
 }
 
 export function GlassSurface({
@@ -51,11 +87,11 @@ export function GlassSurface({
   contentStyle,
   radius = 8,
   variant = "surface",
-  glassEffectStyle: _glassEffectStyle = "regular",
-  tintColor: _tintColor,
+  glassEffectStyle = "regular",
+  tintColor,
   fallbackColor,
   borderColor,
-  interactive: _interactive = false,
+  interactive = false,
   ...viewProps
 }: ViewProps & {
   children?: ReactNode;
@@ -71,23 +107,36 @@ export function GlassSurface({
   const tokens = VARIANT_TOKENS[variant];
   const resolvedBorderColor = borderColor ?? tokens.borderColor;
   const resolvedFallbackColor = fallbackColor ?? tokens.fallbackColor;
+  const resolvedTintColor = tintColor ?? tokens.tintColor;
   const surfaceStyle = useMemo(
     () => [
       styles.surface,
       {
         borderColor: resolvedBorderColor,
         borderRadius: radius,
-        backgroundColor: resolvedFallbackColor,
+        // Native glass supplies its own material; painting a background over
+        // it would flatten the effect.
+        backgroundColor: NativeGlassView ? "transparent" : resolvedFallbackColor,
       },
       style,
     ],
-    [
-      radius,
-      resolvedBorderColor,
-      resolvedFallbackColor,
-      style,
-    ],
+    [radius, resolvedBorderColor, resolvedFallbackColor, style],
   );
+
+  if (NativeGlassView) {
+    return (
+      <NativeGlassView
+        {...viewProps}
+        glassEffectStyle={glassEffectStyle}
+        tintColor={resolvedTintColor}
+        isInteractive={interactive}
+        colorScheme="dark"
+        style={surfaceStyle}
+      >
+        <View style={contentStyle}>{children}</View>
+      </NativeGlassView>
+    );
+  }
 
   return (
     <View {...viewProps} style={surfaceStyle}>

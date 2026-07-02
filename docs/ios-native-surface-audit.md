@@ -10,6 +10,7 @@ Visual thesis: Plotlist should feel like a native iOS media notebook made of smo
 
 ## Liquid Glass Rules
 
+- Native Liquid Glass (`expo-glass-effect`) is live again, but only through the guarded choke point in `components/NativeGlass.tsx`: iOS-only, lazy `require` in try/catch, and rendered natively only when `isLiquidGlassAvailable()` confirms the installed binary supports it. A JS/binary mismatch degrades to the tinted JS fallback instead of crashing at startup (`requireNativeModule("ExpoGlassEffect")` throws on mismatch — the original release-crash cause). `tests/iosNativeCrashGuards.test.ts` enforces this pattern and that no other file imports the module.
 - Use Liquid Glass on system-adjacent surfaces: bottom tabs, compact controls, search command surface, profile/stat panels, settings groups, modal sheets, and floating detail controls.
 - Keep dense feed rows, poster rails, and image cards mostly opaque because those surfaces need fast scanning and stable text contrast.
 - Avoid animating opacity on native glass or its parents. Scroll-fading chrome such as `HomeTopBar` keeps the existing blur path for correctness.
