@@ -4,15 +4,23 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("iOS native startup guards", () => {
-  it("keeps the tab navigator on the stable Expo Router Tabs implementation", () => {
+  it("gates the native UITabBar to iOS and keeps the JS tabs fallback", () => {
+    // The native tab bar (expo-router NativeTabs on react-native-screens
+    // BottomTabs) is deliberately adopted on iOS — verified on the iOS 26.5
+    // simulator 2026-07-02 with the same pods the release build uses, so the
+    // JS bundle and binary agree about the native components. Android and
+    // web must stay on the stable JS Tabs implementation, and the platform
+    // gate must not silently disappear.
     const tabLayout = readFileSync(
       join(process.cwd(), "app", "(tabs)", "_layout.tsx"),
       "utf8",
     );
 
-    expect(tabLayout).not.toContain("expo-router/unstable-native-tabs");
-    expect(tabLayout).not.toContain("<NativeTabs");
+    expect(tabLayout).toContain('Platform.OS === "ios"');
+    expect(tabLayout).toContain("expo-router/unstable-native-tabs");
+    expect(tabLayout).toContain("<NativeTabs");
     expect(tabLayout).toContain('from "expo-router"');
+    expect(tabLayout).toContain("<Tabs");
   });
 
   it("ships the native glass-effect module with the JS bundle and binary in agreement", () => {

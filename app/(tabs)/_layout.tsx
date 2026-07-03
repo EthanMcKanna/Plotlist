@@ -1,35 +1,37 @@
 import { Tabs } from "expo-router";
+import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
-import { View, StyleSheet } from "react-native";
-
-import { GlassSurface, isNativeGlassAvailable } from "../../components/NativeGlass";
+import { Platform, View, StyleSheet } from "react-native";
 
 const iconSize = 22;
 
-// Native Liquid Glass when the installed binary supports it (iOS 26+),
-// otherwise the previous blur treatment.
-function TabBarBackground() {
-  if (isNativeGlassAvailable()) {
-    return (
-      <GlassSurface
-        radius={0}
-        borderColor="transparent"
-        tintColor="rgba(13, 15, 20, 0.32)"
-        style={StyleSheet.absoluteFill}
-        contentStyle={styles.glassEdge}
-      />
-    );
-  }
+// iOS gets the real UITabBar (system Liquid Glass on iOS 26, correct
+// materials on older versions, native pop-to-top/scroll-to-top). Android and
+// web keep the JS tab bar below.
+function NativeTabsLayout() {
   return (
-    <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark">
-      <View style={styles.blurFill} />
-    </BlurView>
+    <NativeTabs tintColor="#0ea5e9">
+      <NativeTabs.Trigger name="home">
+        <Icon sf={{ default: "house", selected: "house.fill" }} />
+        <Label>Home</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="log">
+        <Icon sf={{ default: "book.closed", selected: "book.closed.fill" }} />
+        <Label>Log</Label>
+      </NativeTabs.Trigger>
+      {/* The system search role opts into the dedicated iOS 26 search tab. */}
+      <NativeTabs.Trigger name="search" role="search" />
+      <NativeTabs.Trigger name="profile">
+        <Icon sf={{ default: "person", selected: "person.fill" }} />
+        <Label>Me</Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }
 
-export default function TabsLayout() {
+function JsTabsLayout() {
   return (
     <Tabs
       screenOptions={{
@@ -42,7 +44,11 @@ export default function TabsLayout() {
           borderTopWidth: 0,
           elevation: 0,
         },
-        tabBarBackground: () => <TabBarBackground />,
+        tabBarBackground: () => (
+          <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark">
+            <View style={styles.blurFill} />
+          </BlurView>
+        ),
       }}
     >
       <Tabs.Screen
@@ -137,16 +143,18 @@ export default function TabsLayout() {
   );
 }
 
+export default function TabsLayout() {
+  if (Platform.OS === "ios") {
+    return <NativeTabsLayout />;
+  }
+  return <JsTabsLayout />;
+}
+
 const styles = StyleSheet.create({
   blurFill: {
     backgroundColor: "rgba(13, 15, 20, 0.85)",
     borderTopColor: "rgba(42, 46, 56, 0.5)",
     borderTopWidth: 0.5,
-    flex: 1,
-  },
-  glassEdge: {
-    borderTopColor: "rgba(255, 255, 255, 0.10)",
-    borderTopWidth: StyleSheet.hairlineWidth,
     flex: 1,
   },
 });
