@@ -69,6 +69,7 @@ import {
   slimSeasonPayload,
   upsertSeasonCacheEntry,
 } from "./season-cache";
+import { getImdbRatings } from "./imdb-ratings";
 import { buildWatchStats } from "../../lib/watchStats";
 import {
   getEpisodeProgressState,
@@ -950,6 +951,53 @@ async function tmdb(path: string, params: Record<string, string | number | undef
     throw new ApiError(response.status, "tmdb_error", `TMDB request failed with ${response.status}`);
   }
   return await response.json();
+}
+
+function readImdbIdFromDetailsPayload(payload: unknown): string | null {
+  const raw = payload as { external_ids?: { imdb_id?: unknown } } | null;
+  const imdbId = raw?.external_ids?.imdb_id;
+  return typeof imdbId === "string" && imdbId.startsWith("tt") ? imdbId : null;
+}
+
+// Resolve a show's IMDb id, persisting it on the shows row. An empty string
+// records "TMDB has no mapping" so unrated shows don't refetch every call;
+// transient TMDB failures leave the column null so a later call retries.
+async function ensureShowImdbId(show: typeof shows.$inferSelect): Promise<string | null> {
+  if (typeof show.imdbId === "string") {
+    return show.imdbId.startsWith("tt") ? show.imdbId : null;
+  }
+  if (show.externalSource !== "tmdb") {
+    return null;
+  }
+  const cached = await db
+    .select()
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, show.externalSource),
+        eq(tmdbDetailsCache.externalId, show.externalId),
+      ),
+    )
+    .limit(1);
+  let imdbId = readImdbIdFromDetailsPayload(cached[0]?.payload);
+  if (!imdbId) {
+    try {
+      const payload = (await tmdb(`/tv/${show.externalId}/external_ids`)) as {
+        imdb_id?: unknown;
+      };
+      imdbId =
+        typeof payload?.imdb_id === "string" && payload.imdb_id.startsWith("tt")
+          ? payload.imdb_id
+          : null;
+    } catch {
+      return null;
+    }
+  }
+  await db
+    .update(shows)
+    .set({ imdbId: imdbId ?? "", updatedAt: Date.now() })
+    .where(eq(shows.id, show.id));
+  return imdbId;
 }
 
 const providerIds: Record<string, number | string> = {
@@ -3504,10 +3552,17 @@ export const actionHandlers: Record<string, RpcHandler> = {
       return null;
     }
     const payload = normalizeTmdbShowDetails(
-      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar" }),
+      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,external_ids" }),
     );
     const now = Date.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
+    const fetchedImdbId = readImdbIdFromDetailsPayload(payload);
+    if (show.imdbId == null && fetchedImdbId) {
+      await db
+        .update(shows)
+        .set({ imdbId: fetchedImdbId, updatedAt: now })
+        .where(eq(shows.id, show.id));
+    }
     const storedBackdropUrl =
       typeof show.backdropUrl === "string" && show.backdropUrl.includes("/original/")
         ? null
@@ -3544,6 +3599,19 @@ export const actionHandlers: Record<string, RpcHandler> = {
       await upsertSeasonCacheEntry(show.externalId, slim).catch(() => {});
     }
     return payload;
+  },
+  "shows:getImdbRatings": async ({ args }) => {
+    const parsed = z
+      .object({ showId: z.string(), seasonNumbers: z.array(z.number()).optional() })
+      .parse(args ?? {});
+    // Without an OMDb key the feature is off; skip the external-ids lookup too.
+    if (!process.env.OMDB_API_KEY) return null;
+    const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
+    const show = showRows[0];
+    if (!show) return null;
+    const imdbId = await ensureShowImdbId(show);
+    if (!imdbId) return null;
+    return await getImdbRatings(imdbId, parsed.seasonNumbers ?? []);
   },
   "embeddings:saveViewerTastePreferences": async ({ args, req }) => {
     const user = await requireAuthUser(req);

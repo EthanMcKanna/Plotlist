@@ -89,6 +89,10 @@ Used by recommendation and semantic-search features:
 - `GEMINI_EMBEDDING_MODEL`
 - `GEMINI_EMBEDDING_VERSION`
 
+Optional ratings integration:
+
+- `OMDB_API_KEY`: OMDb API key (free tier at omdbapi.com/apikey.aspx) used to show IMDb ratings for shows, seasons, and episodes; the feature stays hidden when unset
+
 Optional App Review/testing flags:
 
 - `ALLOW_APP_REVIEW_OTP_BYPASS`

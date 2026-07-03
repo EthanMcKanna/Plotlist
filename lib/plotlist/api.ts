@@ -73,6 +73,7 @@ export const api = {
     ingestFromCatalog: ref("action", "shows:ingestFromCatalog"),
     getExtendedDetails: ref("action", "shows:getExtendedDetails"),
     getSeasonDetails: ref("action", "shows:getSeasonDetails"),
+    getImdbRatings: ref("action", "shows:getImdbRatings"),
   },
   watchStates: {
     setStatus: ref("mutation", "watchStates:setStatus"),

@@ -10,6 +10,7 @@ const serverEnvSchema = z.object({
   TWILIO_VERIFY_SERVICE_SID: z.string().min(1),
   CONTACT_HASH_SECRET: z.string().min(1),
   GEMINI_API_KEY: z.string().min(1).optional(),
+  OMDB_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2-preview"),
   GEMINI_EMBEDDING_VERSION: z.string().default("shows-v1"),
   ALLOW_APP_REVIEW_OTP_BYPASS: z.enum(["true", "false"]).optional(),

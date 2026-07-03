@@ -2,6 +2,7 @@ import { count, desc, eq, lte, or } from "drizzle-orm";
 
 import {
   authSessions,
+  imdbRatingsCache,
   phoneVerificationRequests,
   rateLimits,
   showEmbeddingJobs,
@@ -66,7 +67,7 @@ async function latestEpisodeCacheJob() {
 export async function cleanupExpiredTmdbCache() {
   const now = Date.now();
 
-  const [details, search, list, seasons] = await Promise.all([
+  const [details, search, list, seasons, imdbRatings] = await Promise.all([
     db
       .delete(tmdbDetailsCache)
       .where(lte(tmdbDetailsCache.expiresAt, now))
@@ -85,10 +86,16 @@ export async function cleanupExpiredTmdbCache() {
       .delete(tmdbSeasonCache)
       .where(lte(tmdbSeasonCache.expiresAt, now - 7 * 24 * 60 * 60 * 1000))
       .returning({ id: tmdbSeasonCache.id }),
+    // IMDb rating rows also serve stale-if-available on OMDb failure.
+    db
+      .delete(imdbRatingsCache)
+      .where(lte(imdbRatingsCache.expiresAt, now - 7 * 24 * 60 * 60 * 1000))
+      .returning({ id: imdbRatingsCache.id }),
   ]);
 
   return {
-    removed: details.length + search.length + list.length + seasons.length,
+    removed:
+      details.length + search.length + list.length + seasons.length + imdbRatings.length,
   };
 }
 

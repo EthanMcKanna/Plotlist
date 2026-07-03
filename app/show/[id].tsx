@@ -50,6 +50,7 @@ import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
+import { ImdbLogo } from "../../components/ImdbBadge";
 import {
   SHOW_BACKDROP_HEIGHT,
   SHOW_POSTER_HEIGHT,
@@ -331,6 +332,16 @@ function normalizeExtendedDetails(details: any) {
   };
 }
 
+type ImdbSeasonRatingsData = {
+  averageRating: number | null;
+  episodes: { episodeNumber: number; rating: number }[];
+};
+
+type ImdbRatingsData = {
+  show: { rating: number | null; votes: number | null } | null;
+  seasons: Record<number, ImdbSeasonRatingsData>;
+};
+
 export default function ShowScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -572,6 +583,7 @@ export default function ShowScreen() {
   ).withOptimisticUpdate(optimisticUnmarkSeasonWatched);
   const getExtendedDetails = useAction(api.shows.getExtendedDetails);
   const getSeasonDetails = useAction(api.shows.getSeasonDetails);
+  const getImdbRatings = useAction(api.shows.getImdbRatings);
   const getSimilarShows = useAction(api.embeddings.getSimilarShows);
 
   const [fetchedExtendedDetails, setFetchedExtendedDetails] = useState<{
@@ -598,6 +610,9 @@ export default function ShowScreen() {
     Record<number, string>
   >({});
   const [visibleSeasonCount, setVisibleSeasonCount] = useState(INITIAL_VISIBLE_SEASONS);
+  const [imdbRatings, setImdbRatings] = useState<ImdbRatingsData | null>(null);
+  const imdbRequestedSeasonsRef = useRef<Set<number>>(new Set());
+  const imdbShowRequestedRef = useRef(false);
   const [selectedEpisode, setSelectedEpisode] = useState<{
     episode: any;
     seasonName: string;
@@ -1091,7 +1106,62 @@ export default function ShowScreen() {
     setVisibleSeasonCount(INITIAL_VISIBLE_SEASONS);
     setSelectedEpisode(null);
     setEpisodeSheetVisible(false);
+    setImdbRatings(null);
+    imdbRequestedSeasonsRef.current = new Set();
+    imdbShowRequestedRef.current = false;
   }, [isShowPreview, show?.externalId]);
+
+  // IMDb ratings load lazily and merge into one map: the show-level rating as
+  // soon as the show is known, then each season's episode ratings as that
+  // season's guide entries load. Results are keyed by show/season, so late
+  // responses merge safely; only a show switch discards them.
+  useEffect(() => {
+    if (isShowPreview || !showId || !show?.externalId) {
+      return;
+    }
+    const externalId = show.externalId;
+    const pendingSeasons = Object.keys(seasonDetailsByNumber)
+      .map(Number)
+      .filter(
+        (seasonNumber) =>
+          seasonNumber >= 1 && !imdbRequestedSeasonsRef.current.has(seasonNumber),
+      );
+    if (imdbShowRequestedRef.current && pendingSeasons.length === 0) {
+      return;
+    }
+    imdbShowRequestedRef.current = true;
+    for (const seasonNumber of pendingSeasons) {
+      imdbRequestedSeasonsRef.current.add(seasonNumber);
+    }
+    void getImdbRatings({ showId, seasonNumbers: pendingSeasons })
+      .then((result) => {
+        if (activeShowExternalIdRef.current !== externalId) {
+          return;
+        }
+        // Seasons the server couldn't resolve this call (unrated so far, or
+        // past its inline fetch cap) stay eligible for the next request.
+        for (const seasonNumber of pendingSeasons) {
+          if (!result?.seasons?.[seasonNumber]) {
+            imdbRequestedSeasonsRef.current.delete(seasonNumber);
+          }
+        }
+        if (!result) {
+          return;
+        }
+        setImdbRatings((current) => ({
+          show: result.show ?? current?.show ?? null,
+          seasons: { ...current?.seasons, ...result.seasons },
+        }));
+      })
+      .catch(() => {
+        if (activeShowExternalIdRef.current !== externalId) {
+          return;
+        }
+        for (const seasonNumber of pendingSeasons) {
+          imdbRequestedSeasonsRef.current.delete(seasonNumber);
+        }
+      });
+  }, [getImdbRatings, isShowPreview, seasonDetailsByNumber, show?.externalId, showId]);
 
   // Clear episode content after sheet dismiss animation (fallback if onDismiss doesn't fire)
   useEffect(() => {
@@ -1372,6 +1442,8 @@ export default function ShowScreen() {
     return parts.join("  ·  ");
   }, [show?.year, displayGenres, activeDetails?.episodeRunTime]);
 
+  const imdbShowRating = imdbRatings?.show?.rating ?? null;
+  const imdbShowVotes = imdbRatings?.show?.votes ?? null;
   const voteAverage = activeDetails?.voteAverage ?? show?.tmdbVoteAverage ?? null;
   const voteCount = activeDetails?.voteCount ?? show?.tmdbVoteCount ?? null;
   const ratingDisplay =
@@ -1609,7 +1681,34 @@ export default function ShowScreen() {
 
           {/* Rating & Content Rating */}
           <View className="mt-4 flex-row flex-wrap items-center justify-center gap-3">
-            {ratingDisplay && (
+            {imdbShowRating !== null && (
+              <GlassSurface
+                radius={999}
+                variant="control"
+                fallbackColor="rgba(245,197,24,0.10)"
+                tintColor="rgba(245,197,24,0.10)"
+                borderColor="rgba(245,197,24,0.18)"
+                contentStyle={{
+                  alignItems: "center",
+                  flexDirection: "row",
+                  gap: 7,
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                }}
+              >
+                <ImdbLogo height={16} />
+                <Text className="text-lg font-bold text-text-primary">
+                  {imdbShowRating.toFixed(1)}
+                </Text>
+                <Text className="text-sm text-text-tertiary">/10</Text>
+                {imdbShowVotes ? (
+                  <Text className="text-xs text-text-tertiary">
+                    ({imdbShowVotes.toLocaleString()})
+                  </Text>
+                ) : null}
+              </GlassSurface>
+            )}
+            {ratingDisplay && imdbShowRating === null && (
               <GlassSurface
                 radius={999}
                 variant="control"
@@ -1966,6 +2065,7 @@ export default function ShowScreen() {
             seasonDetailsByNumber={seasonDetailsByNumber}
             seasonLoadStateByNumber={seasonLoadStateByNumber}
             seasonLoadErrorByNumber={seasonLoadErrorByNumber}
+            imdbSeasonRatings={imdbRatings?.seasons}
             isAuthenticated={isAuthenticated}
             watchedEpisodeSet={watchedEpisodeSet}
             myEpisodeRatingMap={myEpisodeRatingMap}
@@ -2447,6 +2547,10 @@ export default function ShowScreen() {
           const myEpReviewText = myEpData?.reviewText;
           const epCode = `S${String(selectedEpisode.seasonNumber).padStart(2, "0")} E${String(selectedEpisode.episode.episodeNumber).padStart(2, "0")}`;
           const hasTmdbRating = selectedEpisode.episode.voteCount > 0 && selectedEpisode.episode.voteAverage > 0;
+          const sheetImdbRating =
+            imdbRatings?.seasons?.[selectedEpisode.seasonNumber]?.episodes.find(
+              (entry) => entry.episodeNumber === selectedEpisode.episode.episodeNumber,
+            )?.rating ?? null;
           const selectedStillPath =
             selectedEpisode.episode.stillPath ?? selectedEpisode.episode.still_path ?? null;
 
@@ -2666,8 +2770,28 @@ export default function ShowScreen() {
                       </Text>
                     </GlassPressable>
 
-                    {/* TMDB rating pill */}
-                    {hasTmdbRating && (
+                    {/* Rating pill: IMDb when known, else TMDB */}
+                    {sheetImdbRating !== null ? (
+                      <GlassSurface
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(245,197,24,0.08)"
+                        tintColor="rgba(245,197,24,0.08)"
+                        borderColor="rgba(245,197,24,0.16)"
+                        contentStyle={{
+                          alignItems: "center",
+                          flexDirection: "row",
+                          gap: 6,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                        }}
+                      >
+                        <ImdbLogo height={13} />
+                        <Text className="text-sm font-semibold" style={{ color: "#fcd34d" }}>
+                          {sheetImdbRating.toFixed(1)}
+                        </Text>
+                      </GlassSurface>
+                    ) : hasTmdbRating ? (
                       <GlassSurface
                         radius={999}
                         variant="control"
@@ -2687,7 +2811,7 @@ export default function ShowScreen() {
                           {selectedEpisode.episode.voteAverage.toFixed(1)}
                         </Text>
                       </GlassSurface>
-                    )}
+                    ) : null}
                   </View>
                 )}
 

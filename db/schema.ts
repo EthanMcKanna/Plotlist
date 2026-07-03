@@ -165,6 +165,9 @@ export const shows = sqliteTable(
     tmdbPopularity: doublePrecision("tmdb_popularity"),
     tmdbVoteAverage: doublePrecision("tmdb_vote_average"),
     tmdbVoteCount: integer("tmdb_vote_count"),
+    // IMDb id (e.g. "tt0903747") from TMDB external_ids; "" means TMDB has
+    // none, so lookups don't refetch on every request.
+    imdbId: text("imdb_id"),
     searchText: text("search_text").notNull(),
     createdAt: timestampMs("created_at").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
@@ -505,6 +508,26 @@ export const tmdbSeasonCache = sqliteTable(
       table.seasonNumber,
     ),
     expiresIdx: index("tmdb_season_cache_expires_idx").on(table.expiresAt),
+  }),
+);
+
+export const imdbRatingsCache = sqliteTable(
+  "imdb_ratings_cache",
+  {
+    id: text("id").primaryKey(),
+    imdbId: text("imdb_id").notNull(),
+    // -1 holds the show-level rating; >= 1 holds that season's episode ratings.
+    seasonNumber: integer("season_number").notNull(),
+    payload: jsonb("payload").notNull(),
+    fetchedAt: timestampMs("fetched_at").notNull(),
+    expiresAt: timestampMs("expires_at").notNull(),
+  },
+  (table) => ({
+    imdbSeasonIdx: uniqueIndex("imdb_ratings_cache_imdb_season_idx").on(
+      table.imdbId,
+      table.seasonNumber,
+    ),
+    expiresIdx: index("imdb_ratings_cache_expires_idx").on(table.expiresAt),
   }),
 );
 

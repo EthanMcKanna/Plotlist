@@ -16,6 +16,7 @@ import {
   type SeasonLoadState,
 } from "../lib/seasonGuide";
 import { GlassPressable, GlassSurface } from "./NativeGlass";
+import { ImdbLogo } from "./ImdbBadge";
 
 type EpisodeGuideEpisode = {
   id: number | string;
@@ -43,12 +44,18 @@ type EpisodeGuideSeason = {
   poster_path?: string | null;
 };
 
+type EpisodeGuideImdbSeason = {
+  averageRating: number | null;
+  episodes: { episodeNumber: number; rating: number }[];
+};
+
 type EpisodeGuideProps = {
   seasons: EpisodeGuideSeason[];
   visibleSeasonCount: number;
   seasonDetailsByNumber: Record<number, { episodes?: EpisodeGuideEpisode[] } | undefined>;
   seasonLoadStateByNumber: Record<number, SeasonLoadState | undefined>;
   seasonLoadErrorByNumber: Record<number, string | undefined>;
+  imdbSeasonRatings?: Record<number, EpisodeGuideImdbSeason>;
   isAuthenticated: boolean;
   watchedEpisodeSet: Set<string>;
   myEpisodeRatingMap: Map<string, { rating: number; reviewText?: string }>;
@@ -84,6 +91,7 @@ function EpisodeGuideComponent({
   seasonDetailsByNumber,
   seasonLoadStateByNumber,
   seasonLoadErrorByNumber,
+  imdbSeasonRatings,
   isAuthenticated,
   watchedEpisodeSet,
   myEpisodeRatingMap,
@@ -153,6 +161,10 @@ function EpisodeGuideComponent({
           const seasonYear = season.air_date
             ? new Date(season.air_date).getFullYear()
             : null;
+          const imdbSeason = imdbSeasonRatings?.[season.season_number];
+          const imdbEpisodeRatingByNumber = new Map(
+            (imdbSeason?.episodes ?? []).map((entry) => [entry.episodeNumber, entry.rating]),
+          );
 
           return (
             <View key={season.id}>
@@ -281,6 +293,14 @@ function EpisodeGuideComponent({
                         </Text>
                       </GlassSurface>
                     )}
+                    {imdbSeason?.averageRating != null ? (
+                      <View className="flex-row items-center gap-1">
+                        <ImdbLogo height={12} />
+                        <Text className="text-xs font-semibold text-text-secondary">
+                          {imdbSeason.averageRating.toFixed(1)}
+                        </Text>
+                      </View>
+                    ) : null}
                     {seasonYear ? (
                       <Text className="text-xs text-text-tertiary">
                         {seasonYear}
@@ -356,6 +376,10 @@ function EpisodeGuideComponent({
                       (episode.voteCount ?? 0) > 0 && (episode.voteAverage ?? 0) > 0
                         ? episode.voteAverage?.toFixed(1)
                         : null;
+                    const imdbRating =
+                      imdbEpisodeRatingByNumber.get(episode.episodeNumber)?.toFixed(1) ??
+                      null;
+                    const communityRating = imdbRating ?? tmdbRating;
                     const episodeKey = `S${season.season_number}E${episode.episodeNumber}`;
                     const isWatched = watchedEpisodeSet.has(episodeKey);
                     const isAvailable = isEpisodeAvailable(episode.airDate);
@@ -455,14 +479,27 @@ function EpisodeGuideComponent({
                                   </Text>
                                 </>
                               ) : isWatched ? (
-                                <Text className="text-xs" style={{ color: "#64748b" }}>
-                                  {tmdbRating ? `${tmdbRating} avg` : "Not rated"}
-                                </Text>
-                              ) : tmdbRating ? (
+                                imdbRating ? (
+                                  <>
+                                    <ImdbLogo height={11} />
+                                    <Text className="text-xs" style={{ color: "#64748b" }}>
+                                      {imdbRating}
+                                    </Text>
+                                  </>
+                                ) : (
+                                  <Text className="text-xs" style={{ color: "#64748b" }}>
+                                    {tmdbRating ? `${tmdbRating} avg` : "Not rated"}
+                                  </Text>
+                                )
+                              ) : communityRating ? (
                                 <>
-                                  <Ionicons name="star" size={11} color="#FBBF24" />
+                                  {imdbRating ? (
+                                    <ImdbLogo height={11} />
+                                  ) : (
+                                    <Ionicons name="star" size={11} color="#FBBF24" />
+                                  )}
                                   <Text className="text-xs font-medium text-text-secondary">
-                                    {tmdbRating}
+                                    {communityRating}
                                   </Text>
                                 </>
                               ) : (
