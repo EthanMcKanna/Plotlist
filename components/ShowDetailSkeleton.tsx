@@ -32,7 +32,7 @@ function useShimmer() {
   return value;
 }
 
-function ShimmerBlock({
+export function ShimmerBlock({
   width,
   height,
   radius = 12,

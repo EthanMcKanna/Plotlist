@@ -17,6 +17,7 @@ import {
 } from "../lib/seasonGuide";
 import { GlassPressable, GlassSurface } from "./NativeGlass";
 import { ImdbLogo } from "./ImdbBadge";
+import { ShimmerBlock } from "./ShowDetailSkeleton";
 
 type EpisodeGuideEpisode = {
   id: number | string;
@@ -55,7 +56,9 @@ type EpisodeGuideProps = {
   seasonDetailsByNumber: Record<number, { episodes?: EpisodeGuideEpisode[] } | undefined>;
   seasonLoadStateByNumber: Record<number, SeasonLoadState | undefined>;
   seasonLoadErrorByNumber: Record<number, string | undefined>;
-  imdbSeasonRatings?: Record<number, EpisodeGuideImdbSeason>;
+  // Missing key = ratings still loading for that season; null = resolved
+  // with no IMDb ratings.
+  imdbSeasonRatings?: Record<number, EpisodeGuideImdbSeason | null>;
   isAuthenticated: boolean;
   watchedEpisodeSet: Set<string>;
   myEpisodeRatingMap: Map<string, { rating: number; reviewText?: string }>;
@@ -162,6 +165,7 @@ function EpisodeGuideComponent({
             ? new Date(season.air_date).getFullYear()
             : null;
           const imdbSeason = imdbSeasonRatings?.[season.season_number];
+          const imdbSeasonLoading = imdbSeason === undefined;
           const imdbEpisodeRatingByNumber = new Map(
             (imdbSeason?.episodes ?? []).map((entry) => [entry.episodeNumber, entry.rating]),
           );
@@ -293,7 +297,9 @@ function EpisodeGuideComponent({
                         </Text>
                       </GlassSurface>
                     )}
-                    {imdbSeason?.averageRating != null ? (
+                    {imdbSeasonLoading ? (
+                      <ShimmerBlock width={52} height={14} radius={7} />
+                    ) : imdbSeason?.averageRating != null ? (
                       <View className="flex-row items-center gap-1">
                         <ImdbLogo height={12} />
                         <Text className="text-xs font-semibold text-text-secondary">
@@ -372,14 +378,9 @@ function EpisodeGuideComponent({
                 >
                   {episodes.map((episode) => {
                     const stillPath = episode.stillPath ?? episode.still_path ?? null;
-                    const tmdbRating =
-                      (episode.voteCount ?? 0) > 0 && (episode.voteAverage ?? 0) > 0
-                        ? episode.voteAverage?.toFixed(1)
-                        : null;
                     const imdbRating =
                       imdbEpisodeRatingByNumber.get(episode.episodeNumber)?.toFixed(1) ??
                       null;
-                    const communityRating = imdbRating ?? tmdbRating;
                     const episodeKey = `S${season.season_number}E${episode.episodeNumber}`;
                     const isWatched = watchedEpisodeSet.has(episodeKey);
                     const isAvailable = isEpisodeAvailable(episode.airDate);
@@ -478,28 +479,16 @@ function EpisodeGuideComponent({
                                     {myRatingData.rating}
                                   </Text>
                                 </>
-                              ) : isWatched ? (
-                                imdbRating ? (
-                                  <>
-                                    <ImdbLogo height={11} />
-                                    <Text className="text-xs" style={{ color: "#64748b" }}>
-                                      {imdbRating}
-                                    </Text>
-                                  </>
-                                ) : (
-                                  <Text className="text-xs" style={{ color: "#64748b" }}>
-                                    {tmdbRating ? `${tmdbRating} avg` : "Not rated"}
-                                  </Text>
-                                )
-                              ) : communityRating ? (
+                              ) : imdbSeasonLoading ? (
+                                <ShimmerBlock width={48} height={12} radius={6} />
+                              ) : imdbRating ? (
                                 <>
-                                  {imdbRating ? (
-                                    <ImdbLogo height={11} />
-                                  ) : (
-                                    <Ionicons name="star" size={11} color="#FBBF24" />
-                                  )}
-                                  <Text className="text-xs font-medium text-text-secondary">
-                                    {communityRating}
+                                  <ImdbLogo height={11} />
+                                  <Text
+                                    className="text-xs font-medium"
+                                    style={{ color: isWatched ? "#64748b" : "#9BA1B0" }}
+                                  >
+                                    {imdbRating}
                                   </Text>
                                 </>
                               ) : (
