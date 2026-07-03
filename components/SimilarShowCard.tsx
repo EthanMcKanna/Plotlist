@@ -1,7 +1,7 @@
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { guardedPush } from "../lib/navigation";
 import { useAction } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { Poster } from "./Poster";
@@ -31,7 +31,7 @@ export function SimilarShowCard({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       if (showId) {
-        router.push({ pathname: "/show/[id]", params: { id: showId } });
+        guardedPush({ pathname: "/show/[id]", params: { id: showId } });
         return;
       }
       if (!externalId) {
@@ -46,7 +46,7 @@ export function SimilarShowCard({
       });
 
       // Navigate to the show details page
-      router.push(`/show/${nextShowId}`);
+      guardedPush(`/show/${nextShowId}`);
     } catch (error) {
       console.error("Failed to load show:", error);
       Alert.alert("Error", "Failed to load show details. Please try again.");

@@ -14,6 +14,7 @@ import { ReviewRow } from "../../components/ReviewRow";
 import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
+import { guardedPush } from "../../lib/navigation";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Avatar } from "../../components/Avatar";
@@ -456,7 +457,7 @@ export default function ProfileScreen() {
                   <ShowPosterCard
                     key={show._id}
                     show={show}
-                    onPress={() => router.push(`/show/${show._id}`)}
+                    onPress={() => guardedPush(`/show/${show._id}`)}
                   />
                 ))}
               </ScrollView>
@@ -488,7 +489,7 @@ export default function ProfileScreen() {
                   <ShowPosterCard
                     key={show._id}
                     show={show}
-                    onPress={() => router.push(`/show/${show._id}`)}
+                    onPress={() => guardedPush(`/show/${show._id}`)}
                   />
                 ))}
               </ScrollView>
@@ -507,7 +508,7 @@ export default function ProfileScreen() {
                   <ShowPosterCard
                     key={show._id}
                     show={show}
-                    onPress={() => router.push(`/show/${show._id}`)}
+                    onPress={() => guardedPush(`/show/${show._id}`)}
                   />
                 ))}
               </ScrollView>
@@ -547,7 +548,7 @@ export default function ProfileScreen() {
                       posterUrl: item.posterUrl,
                     }}
                     badge={String(item.rating)}
-                    onPress={() => router.push(`/show/${item.showId}`)}
+                    onPress={() => guardedPush(`/show/${item.showId}`)}
                   />
                 ))}
               </ScrollView>

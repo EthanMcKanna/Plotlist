@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { guardedPush } from "../lib/navigation";
 import { Poster } from "./Poster";
 import { formatRelativeTime } from "../lib/format";
 import { Avatar } from "./Avatar";
@@ -60,9 +61,9 @@ function ReviewFeedItem({ item }: { item: FeedReviewItem }) {
   const handleShowPress = useCallback(() => {
     if (item.show?._id) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push(`/show/${item.show._id}`);
+      guardedPush(`/show/${item.show._id}`);
     }
-  }, [router, item.show?._id]);
+  }, [item.show?._id]);
 
   const handleReviewPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -146,9 +147,9 @@ function StatusFeedItem({ item }: { item: FeedStatusItem }) {
   const handleShowPress = useCallback(() => {
     if (item.show?._id) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push(`/show/${item.show._id}`);
+      guardedPush(`/show/${item.show._id}`);
     }
-  }, [router, item.show?._id]);
+  }, [item.show?._id]);
 
   return (
     <View className="flex-row gap-3">

@@ -15,6 +15,8 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { guardedPush } from "../../lib/navigation";
+
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { EmptyState } from "../../components/EmptyState";
 import { FlashList } from "../../components/FlashList";
@@ -243,7 +245,7 @@ function LatestMoment({
           return;
         }
         if (item.show?._id) {
-          router.push(`/show/${item.show._id}`);
+          guardedPush(`/show/${item.show._id}`);
         }
       }}
       className="mt-3 active:opacity-90"
@@ -458,7 +460,7 @@ function ActivityRow({
           return;
         }
         if (item.show?._id) {
-          router.push(`/show/${item.show._id}`);
+          guardedPush(`/show/${item.show._id}`);
         }
       }}
       onLongPress={() => {
@@ -528,7 +530,7 @@ function ClusterRow({
       onPress={() => {
         triggerLightHaptic();
         if (row.show?._id) {
-          router.push(`/show/${row.show._id}`);
+          guardedPush(`/show/${row.show._id}`);
         }
       }}
     >

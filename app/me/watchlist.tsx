@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Dimensions, Pressable, Text, View } from "react-native";
 import { FlashList } from "../../components/FlashList";
 import { useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 
 import { Screen } from "../../components/Screen";
@@ -11,6 +11,7 @@ import { Poster } from "../../components/Poster";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { api } from "../../lib/plotlist/api";
+import { guardedPush } from "../../lib/navigation";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const H_PADDING = 24;
@@ -168,7 +169,7 @@ export default function WatchlistScreen() {
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push(`/show/${item.show._id}`);
+              guardedPush(`/show/${item.show._id}`);
             }}
             className="active:opacity-80"
           >

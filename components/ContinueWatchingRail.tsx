@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import {
   Platform,
   Pressable,
@@ -10,7 +10,6 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
@@ -18,6 +17,7 @@ import type { Id } from "../lib/plotlist/types";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
+import { guardedPush } from "../lib/navigation";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import type { EpisodeSeasonSummary } from "../lib/episodeProgressState";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
@@ -46,6 +46,7 @@ export type ContinueWatchingItem = {
   nextEpisodeName?: string | null;
   isUpcoming?: boolean;
   isCaughtUp?: boolean;
+  optimisticCaughtUp?: boolean;
   seasons?: EpisodeSeasonSummary[];
 };
 
@@ -196,7 +197,12 @@ export function getContinueWatchingMarkWatchedLabel(item: ContinueWatchingItem) 
 export function getActiveContinueWatchingItems(
   items: ContinueWatchingItem[] | null | undefined,
 ) {
-  return (items ?? []).filter((item) => !isContinueWatchingComplete(item));
+  // Items an optimistic update just marked caught-up stay in the rail (shown
+  // as "Complete") until the server confirms — dropping them immediately
+  // makes the card vanish and flash back whenever more episodes exist.
+  return (items ?? []).filter(
+    (item) => !isContinueWatchingComplete(item) || item.optimisticCaughtUp === true,
+  );
 }
 
 export function useContinueWatchingItems(enabled = true) {
@@ -233,9 +239,17 @@ export function ContinueWatchingRail({
   const markEpisodeWatched = useMutation(
     api.episodeProgress.markEpisodeWatched,
   ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
+  const pendingMarkShowIds = useRef<Set<string>>(new Set());
 
   const handleMarkWatched = useCallback(
     (item: ContinueWatchingItem) => {
+      const showId = String(item.showId);
+      // One in-flight mark per show: repeated taps before the server responds
+      // would walk the optimistic pointer past episodes that don't exist.
+      if (pendingMarkShowIds.current.has(showId) || isContinueWatchingComplete(item)) {
+        return;
+      }
+      pendingMarkShowIds.current.add(showId);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const season = item.nextSeasonNumber ?? 1;
       const episode = item.nextEpisodeNumber ?? 1;
@@ -244,7 +258,11 @@ export function ContinueWatchingRail({
         seasonNumber: season,
         episodeNumber: episode,
         createLog: true,
-      });
+      })
+        .catch(() => {})
+        .finally(() => {
+          pendingMarkShowIds.current.delete(showId);
+        });
     },
     [markEpisodeWatched],
   );
@@ -272,7 +290,7 @@ export function ContinueWatchingRail({
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/search");
+              guardedPush("/search");
             }}
             style={styles.emptyCard}
             className="active:opacity-90"
@@ -325,7 +343,7 @@ export function ContinueWatchingRail({
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/search");
+              guardedPush("/search");
             }}
             style={styles.emptyCard}
             className="active:opacity-90"
@@ -413,10 +431,10 @@ function ContinueWatchingCard({
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (complete) {
-      router.push({ pathname: "/show/[id]", params: { id: item.showId } });
+      guardedPush({ pathname: "/show/[id]", params: { id: item.showId } });
       return;
     }
-    router.push({
+    guardedPush({
       pathname: "/show/[id]",
       params: {
         id: item.showId,

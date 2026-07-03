@@ -61,6 +61,7 @@ import {
   shouldRenderContinueWatchingEmptyState,
 } from "../../components/ContinueWatchingRail";
 import { getHomeRailIdentitySet } from "../../lib/homeRailIdentity";
+import { resetNavigationLock } from "../../lib/navigationLock";
 import { router } from "expo-router";
 
 const includeHiddenElements = { includeHiddenElements: true };
@@ -283,6 +284,27 @@ describe("ContinueWatchingRail helpers", () => {
     expect(previewKeys.has("title:severance")).toBe(false);
   });
 
+  it("keeps optimistically caught-up cards mounted until the server confirms", () => {
+    const items = [
+      {
+        showId: "show_severance" as any,
+        show: {
+          title: "Severance",
+          posterUrl: "poster.jpg",
+        },
+        totalWatched: 19,
+        totalEpisodes: 19,
+        isCaughtUp: true,
+        optimisticCaughtUp: true,
+      },
+    ];
+
+    expect(getActiveContinueWatchingItems(items).map((item) => item.show.title)).toEqual([
+      "Severance",
+    ]);
+    expect(getContinueWatchingBadgeLabel(items[0])).toBe("Complete");
+  });
+
   it("lets the homepage suppress empty resume chrome on cold start", () => {
     expect(shouldRenderContinueWatchingEmptyState([], true)).toBe(false);
     expect(shouldRenderContinueWatchingEmptyState([], false)).toBe(true);
@@ -291,6 +313,7 @@ describe("ContinueWatchingRail helpers", () => {
 
   it("keeps empty resume copy short while preserving the search action", () => {
     jest.mocked(router.push).mockClear();
+    resetNavigationLock();
 
     render(<ContinueWatchingRail items={[]} />);
 
@@ -306,6 +329,7 @@ describe("ContinueWatchingRail helpers", () => {
 
   it("keeps caught-up resume copy short while preserving the search action", () => {
     jest.mocked(router.push).mockClear();
+    resetNavigationLock();
 
     render(
       <ContinueWatchingRail

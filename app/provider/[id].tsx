@@ -15,6 +15,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Poster } from "../../components/Poster";
+import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
 import {
   getProviderCatalogSignalLabel,
@@ -150,12 +151,12 @@ export default function ProviderScreen() {
           overview: item.overview,
           posterUrl: item.posterUrl,
         });
-        router.push(`/show/${showId}`);
+        guardedPush(`/show/${showId}`);
       } catch {
         // ignore - user navigated away or show already exists
       }
     },
-    [ingestFromCatalog, router],
+    [ingestFromCatalog],
   );
 
   const renderItem = useCallback(

@@ -264,6 +264,85 @@ describe("episode progress optimistic cache updates", () => {
     ]);
   });
 
+  it("keeps an ongoing show active when the server total is release-inflated", () => {
+    // The server reports totalEpisodes = watchedCount + 1 for ongoing shows
+    // with a released next episode; marking that episode must not flip the
+    // card to caught-up (it used to vanish and flash back on refetch).
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getProgressForShow,
+        args: { showId: "show_1" },
+        data: Array.from({ length: 7 }, (_, index) => ({
+          _id: `episode_${index + 1}`,
+          showId: "show_1",
+          seasonNumber: 1,
+          episodeNumber: index + 1,
+          watchedAt: 1_700_000_000_000 + index,
+        })),
+      },
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 7,
+            totalEpisodes: 8,
+            progressPct: 7 / 8,
+            nextSeasonNumber: 1,
+            nextEpisodeNumber: 8,
+            nextReleaseDate: 1_750_000_000_000,
+            nextEpisodeReleasedToday: true,
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, {
+      showId: "show_1",
+      seasonNumber: 1,
+      episodeNumber: 8,
+    });
+
+    expect(get(api.episodeProgress.getUpNext)).toEqual([
+      expect.objectContaining({
+        totalWatched: 8,
+        isCaughtUp: false,
+      }),
+    ]);
+  });
+
+  it("flags freshly caught-up items so the rail can keep them until the server confirms", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 1,
+            totalEpisodes: 2,
+            progressPct: 0.5,
+            nextSeasonNumber: 1,
+            nextEpisodeNumber: 2,
+            seasons: [{ seasonNumber: 1, episodeCount: 2, airDate: null }],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, {
+      showId: "show_1",
+      seasonNumber: 1,
+      episodeNumber: 2,
+    });
+
+    expect(get(api.episodeProgress.getUpNext)).toEqual([
+      expect.objectContaining({
+        isCaughtUp: true,
+        optimisticCaughtUp: true,
+      }),
+    ]);
+  });
+
   it("toggles show-detail episode progress immediately", () => {
     const { store, get } = createLocalStore([
       {

@@ -4,7 +4,30 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { View, StyleSheet } from "react-native";
 
+import { GlassSurface, isNativeGlassAvailable } from "../../components/NativeGlass";
+
 const iconSize = 22;
+
+// Native Liquid Glass when the installed binary supports it (iOS 26+),
+// otherwise the previous blur treatment.
+function TabBarBackground() {
+  if (isNativeGlassAvailable()) {
+    return (
+      <GlassSurface
+        radius={0}
+        borderColor="transparent"
+        tintColor="rgba(13, 15, 20, 0.32)"
+        style={StyleSheet.absoluteFill}
+        contentStyle={styles.glassEdge}
+      />
+    );
+  }
+  return (
+    <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark">
+      <View style={styles.blurFill} />
+    </BlurView>
+  );
+}
 
 export default function TabsLayout() {
   return (
@@ -19,18 +42,7 @@ export default function TabsLayout() {
           borderTopWidth: 0,
           elevation: 0,
         },
-        tabBarBackground: () => (
-          <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark">
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: "rgba(13, 15, 20, 0.85)",
-                borderTopWidth: 0.5,
-                borderTopColor: "rgba(42, 46, 56, 0.5)",
-              }}
-            />
-          </BlurView>
-        ),
+        tabBarBackground: () => <TabBarBackground />,
       }}
     >
       <Tabs.Screen
@@ -124,3 +136,17 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  blurFill: {
+    backgroundColor: "rgba(13, 15, 20, 0.85)",
+    borderTopColor: "rgba(42, 46, 56, 0.5)",
+    borderTopWidth: 0.5,
+    flex: 1,
+  },
+  glassEdge: {
+    borderTopColor: "rgba(255, 255, 255, 0.10)",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+  },
+});

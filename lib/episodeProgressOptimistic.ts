@@ -34,6 +34,11 @@ type UpNextItem = {
   nextEpisodeName?: string | null;
   isUpcoming?: boolean;
   isCaughtUp?: boolean;
+  // Set while an optimistic update believes the show just became caught up,
+  // so the continue-watching rail keeps the card mounted (showing "Complete")
+  // until the server confirms instead of yanking it and maybe flashing it
+  // back when more episodes exist.
+  optimisticCaughtUp?: boolean;
   seasons?: EpisodeSeasonSummary[];
 };
 
@@ -118,9 +123,17 @@ function updateUpNextItem(
 
   let nextSeasonNumber = item.nextSeasonNumber ?? 1;
   let nextEpisodeNumber = item.nextEpisodeNumber ?? 1;
-  const caughtUp =
-    progressState.isCaughtUp ||
-    (totalEpisodes > 0 && progressCount >= totalEpisodes);
+  const hasSeasonData = progressState.totalEpisodes > 0;
+  // Only infer caught-up from the count comparison when the item's total
+  // did not come from release-event inflation (the server reports
+  // `watchedCount + 1` for ongoing shows with a released next episode, which
+  // would wrongly complete the show on every mark).
+  const caughtUp = hasSeasonData
+    ? progressState.isCaughtUp
+    : totalEpisodes > 0 &&
+      progressCount >= totalEpisodes &&
+      !item.nextReleaseDate &&
+      !item.nextEpisodeReleasedToday;
 
   if (caughtUp && latest) {
     nextSeasonNumber = latest.seasonNumber;
@@ -163,6 +176,7 @@ function updateUpNextItem(
     nextEpisodeReleasedToday: nextChanged ? false : item.nextEpisodeReleasedToday,
     isUpcoming: nextChanged ? false : item.isUpcoming,
     isCaughtUp: caughtUp,
+    optimisticCaughtUp: caughtUp && !item.isCaughtUp ? true : undefined,
     seasons: progressState.seasons.length > 0 ? progressState.seasons : item.seasons,
   };
 }

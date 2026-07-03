@@ -64,6 +64,7 @@ import { getReleaseAwareUpNextEpisode } from "../../lib/upNextReleaseMerge";
 import { buildWatchStats } from "../../lib/watchStats";
 import {
   getEpisodeProgressState,
+  isEpisodeVerified,
   normalizeEpisodeSeasonSummaries,
 } from "../../lib/episodeProgressState";
 
@@ -224,20 +225,68 @@ function readSeasonSummaries(payload: unknown): SeasonSummary[] {
   );
 }
 
-async function touchWatchingState(userId: string, showId: string, updatedAt: number) {
+function isShowEnded(payload: unknown): boolean {
+  const status = (payload as { status?: unknown })?.status;
+  return typeof status === "string" && /^(ended|canceled|cancelled)$/i.test(status.trim());
+}
+
+// After any episode-progress change, recompute the show's watch status:
+// finishing every known episode of an ended show completes it, and anything
+// else (including unmarking episodes on a completed show) puts it back in
+// "watching". This keeps the watching ↔ completed transition automatic in
+// both directions instead of blindly forcing "watching".
+async function syncWatchStateAfterEpisodeChange(
+  userId: string,
+  showId: string,
+  updatedAt: number,
+) {
+  let status: "watching" | "completed" = "watching";
+  try {
+    const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
+    const show = showRows[0];
+    if (show && show.externalSource === "tmdb") {
+      const [progressRows, detailRows] = await Promise.all([
+        db
+          .select()
+          .from(episodeProgress)
+          .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId))),
+        db
+          .select()
+          .from(tmdbDetailsCache)
+          .where(
+            and(
+              eq(tmdbDetailsCache.externalSource, show.externalSource),
+              eq(tmdbDetailsCache.externalId, show.externalId),
+            ),
+          )
+          .limit(1),
+      ]);
+      const payload = detailRows[0]?.payload;
+      const progressState = getEpisodeProgressState({
+        watchedEpisodes: progressRows,
+        seasons: readSeasonSummaries(payload),
+      });
+      if (progressState.isCaughtUp && isShowEnded(payload)) {
+        status = "completed";
+      }
+    }
+  } catch {
+    // Status refinement is best-effort; the progress write already succeeded.
+  }
+
   await db
     .insert(watchStates)
     .values({
       id: createId("state"),
       userId,
       showId,
-      status: "watching",
+      status,
       updatedAt,
     })
     .onConflictDoUpdate({
       target: [watchStates.userId, watchStates.showId],
       set: {
-        status: "watching",
+        status,
         updatedAt,
       },
     });
@@ -2114,12 +2163,25 @@ export const queryHandlers: Record<string, RpcHandler> = {
   },
   "episodeProgress:getUpNext": async ({ req }) => {
     const user = await requireAuthUser(req);
-    const rows = await db
-      .select()
-      .from(watchStates)
-      .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "watching")))
-      .orderBy(desc(watchStates.updatedAt))
-      .limit(50);
+    const [watchingRows, completedRows] = await Promise.all([
+      db
+        .select()
+        .from(watchStates)
+        .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "watching")))
+        .orderBy(desc(watchStates.updatedAt))
+        .limit(50),
+      // Completed shows come back to the rail when a new episode airs; they
+      // are filtered below to only those with a release after the user's
+      // progress frontier.
+      db
+        .select()
+        .from(watchStates)
+        .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "completed")))
+        .orderBy(desc(watchStates.updatedAt))
+        .limit(25),
+    ]);
+    const completedShowIds = new Set(completedRows.map((row) => row.showId));
+    const rows = [...watchingRows, ...completedRows];
     if (rows.length === 0) {
       return [];
     }
@@ -2288,6 +2350,35 @@ export const queryHandlers: Record<string, RpcHandler> = {
             ? Math.min(1, Math.max(0, progressState.totalWatched / releaseAware.totalEpisodes))
             : progressPct;
 
+        // Completed shows only resurface when a release event confirms a new
+        // episode aired today beyond the user's progress frontier.
+        if (
+          completedShowIds.has(show.id) &&
+          !releaseAware.nextEpisodeReleasedToday
+        ) {
+          return null;
+        }
+
+        const isCaughtUp = releaseAware.isCaughtUp ?? progressState.isCaughtUp;
+        // When season metadata exists but can't confirm the pointed-at
+        // episode exists (announced-but-empty next season, stale counts) and
+        // no release event backs it either, present the card as upcoming so
+        // the rail never offers to play or mark an episode that isn't real.
+        const nextEpisodeVerified = isEpisodeVerified(
+          {
+            seasonNumber: releaseAware.nextSeasonNumber,
+            episodeNumber: releaseAware.nextEpisodeNumber,
+          },
+          progressState.seasons,
+        );
+        const presentAsUpcoming =
+          Boolean(releaseAware.isUpcoming) ||
+          (!isCaughtUp &&
+            !releaseAware.nextEpisodeReleasedToday &&
+            !releaseAware.nextReleaseDate &&
+            progressState.seasons.length > 0 &&
+            !nextEpisodeVerified);
+
         return {
           showId: show.id,
           show: showToDoc(show),
@@ -2301,8 +2392,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
           nextAirDate: releaseAware.nextAirDate,
           nextReleaseDate: releaseAware.nextReleaseDate,
           nextEpisodeReleasedToday: releaseAware.nextEpisodeReleasedToday,
-          isUpcoming: releaseAware.isUpcoming,
-          isCaughtUp: releaseAware.isCaughtUp ?? progressState.isCaughtUp,
+          isUpcoming: presentAsUpcoming,
+          isCaughtUp,
           seasons: progressState.seasons,
           sortTimestamp: releaseAware.sortTimestamp,
         };
@@ -3040,7 +3131,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
     if (existing[0]) {
       await db.delete(episodeProgress).where(eq(episodeProgress.id, existing[0].id));
-      await touchWatchingState(user.id, parsed.showId, now);
+      await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
       return false;
     }
     const created = await insertEpisodeProgressOnce({
@@ -3055,7 +3146,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
       await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
     }
-    await touchWatchingState(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return true;
   },
   "episodeProgress:markEpisodeWatched": async ({ args, req }) => {
@@ -3074,7 +3165,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
       await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
     }
-    await touchWatchingState(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return true;
   },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
@@ -3090,7 +3181,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         watchedAt: now,
       });
     }
-    await touchWatchingState(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return { success: true };
   },
   "episodeProgress:unmarkSeasonWatched": async ({ args, req }) => {
@@ -3098,7 +3189,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});
     const now = Date.now();
     await db.delete(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber)));
-    await touchWatchingState(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return { success: true };
   },
   "reports:create": async ({ args, req }) => {

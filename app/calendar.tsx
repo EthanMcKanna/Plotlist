@@ -14,6 +14,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { EmptyState } from "../components/EmptyState";
+import { guardedPush } from "../lib/navigation";
 import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
@@ -165,7 +166,7 @@ function ReleaseCard({
     <Pressable
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push(`/show/${item.show._id}`);
+        guardedPush(`/show/${item.show._id}`);
       }}
       className="overflow-hidden rounded-2xl border border-dark-border bg-dark-card active:opacity-80"
     >

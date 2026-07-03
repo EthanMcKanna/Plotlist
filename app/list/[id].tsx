@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Dimensions, Pressable, ScrollView, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -18,6 +18,7 @@ import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
+import { guardedPush } from "../../lib/navigation";
 import type { Id } from "../../lib/plotlist/types";
 import { ReportModal } from "../../components/ReportModal";
 
@@ -291,7 +292,7 @@ export default function ListScreen() {
 
   const handlePosterPress = useCallback((showId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/show/${showId}`);
+    guardedPush(`/show/${showId}`);
   }, []);
 
   const handleDragStart = useCallback((itemId: string, index: number) => {

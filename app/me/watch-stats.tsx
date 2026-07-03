@@ -4,6 +4,7 @@ import { router } from "expo-router";
 
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable } from "../../components/NativeGlass";
+import { guardedPush } from "../../lib/navigation";
 import { Screen } from "../../components/Screen";
 import { WatchStatsDashboard } from "../../components/WatchStatsDashboard";
 import { api } from "../../lib/plotlist/api";
@@ -68,7 +69,7 @@ export default function WatchStatsScreen() {
       onBack={() => router.back()}
       onSearch={() => router.push("/search")}
       onMyShows={() => router.push("/me/watchlist")}
-      onShow={(showId) => router.push(`/show/${showId}`)}
+      onShow={(showId) => guardedPush(`/show/${showId}`)}
     />
   );
 }

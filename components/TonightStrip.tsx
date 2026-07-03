@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
+import { guardedPush } from "../lib/navigation";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
@@ -455,7 +455,7 @@ function ScheduleCard({
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           if (item.show?._id) {
-            router.push(`/show/${item.show._id}`);
+            guardedPush(`/show/${item.show._id}`);
           }
         }}
         accessibilityRole="button"

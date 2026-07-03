@@ -50,7 +50,12 @@ import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
-import { ShowDetailSkeleton } from "../../components/ShowDetailSkeleton";
+import {
+  SHOW_BACKDROP_HEIGHT,
+  SHOW_POSTER_HEIGHT,
+  SHOW_POSTER_WIDTH,
+  ShowDetailSkeleton,
+} from "../../components/ShowDetailSkeleton";
 import { mapGenreIdsToNames } from "../../lib/plotlist/embeddingUtils";
 import {
   optimisticMarkSeasonWatched,
@@ -66,11 +71,11 @@ import {
 } from "../../lib/seasonGuide";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const BACKDROP_HEIGHT = 340;
+const BACKDROP_HEIGHT = SHOW_BACKDROP_HEIGHT;
 const DISMISS_THRESHOLD = 120;
 const DISMISS_VELOCITY = 500;
-const POSTER_HEIGHT = 240;
-const POSTER_WIDTH = 160;
+const POSTER_HEIGHT = SHOW_POSTER_HEIGHT;
+const POSTER_WIDTH = SHOW_POSTER_WIDTH;
 type WatchStatus = "watchlist" | "watching" | "completed" | "dropped";
 type ExtendedDetailsLoadState = "idle" | "loading" | "ready";
 

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Dimensions, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -12,8 +12,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "./NativeGlass";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
-const BACKDROP_HEIGHT = Math.round(SCREEN_WIDTH * 0.62);
+// Shared with app/show/[id].tsx so the skeleton and the real hero can never
+// drift apart: same backdrop height, same floating poster geometry.
+export const SHOW_BACKDROP_HEIGHT = 340;
+export const SHOW_POSTER_WIDTH = 160;
+export const SHOW_POSTER_HEIGHT = 240;
+const HERO_HEIGHT = SHOW_BACKDROP_HEIGHT + SHOW_POSTER_HEIGHT * 0.45;
 
 function useShimmer() {
   const value = useSharedValue(0);
@@ -51,37 +55,50 @@ function ShimmerBlock({
 }
 
 // Instant placeholder for the show detail surface so navigation never falls
-// back to the app-icon boot screen while queries resolve.
+// back to the app-icon boot screen while queries resolve. Mirrors the real
+// layout: full-width backdrop, poster floating centered over its bottom
+// edge, centered title/meta, rating pill, then the status + action row.
 export function ShowDetailSkeleton({ onBack }: { onBack?: () => void }) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.root}>
-      <ShimmerBlock width="100%" height={BACKDROP_HEIGHT} radius={0} />
-      <View style={styles.body}>
-        <View style={styles.headerRow}>
-          <ShimmerBlock width={104} height={156} radius={14} />
-          <View style={styles.titleColumn}>
-            <ShimmerBlock width="92%" height={26} radius={8} />
-            <ShimmerBlock width="55%" height={14} radius={7} style={{ marginTop: 10 }} />
-            <ShimmerBlock width="70%" height={14} radius={7} style={{ marginTop: 8 }} />
-          </View>
-        </View>
-        <View style={styles.chipRow}>
-          <ShimmerBlock width={96} height={34} radius={999} />
-          <ShimmerBlock width={96} height={34} radius={999} />
-          <ShimmerBlock width={96} height={34} radius={999} />
-        </View>
-        <ShimmerBlock width="100%" height={14} radius={7} style={{ marginTop: 26 }} />
-        <ShimmerBlock width="96%" height={14} radius={7} style={{ marginTop: 8 }} />
-        <ShimmerBlock width="84%" height={14} radius={7} style={{ marginTop: 8 }} />
-        <ShimmerBlock width="40%" height={18} radius={8} style={{ marginTop: 32 }} />
-        <View style={styles.railRow}>
-          <ShimmerBlock width={120} height={170} radius={14} />
-          <ShimmerBlock width={120} height={170} radius={14} />
-          <ShimmerBlock width={120} height={170} radius={14} />
+      {/* Hero: backdrop + floating centered poster */}
+      <View style={{ height: HERO_HEIGHT }}>
+        <ShimmerBlock width="100%" height={SHOW_BACKDROP_HEIGHT} radius={0} />
+        <View style={styles.posterWrap}>
+          <ShimmerBlock
+            width={SHOW_POSTER_WIDTH}
+            height={SHOW_POSTER_HEIGHT}
+            radius={14}
+            style={styles.poster}
+          />
         </View>
       </View>
+
+      {/* Title & metadata — centered like the real header */}
+      <View style={styles.titleBlock}>
+        <ShimmerBlock width="62%" height={26} radius={8} />
+        <ShimmerBlock width="48%" height={14} radius={7} style={{ marginTop: 10 }} />
+        <ShimmerBlock width={120} height={36} radius={999} style={{ marginTop: 16 }} />
+      </View>
+
+      {/* Status selector + action buttons row */}
+      <View style={styles.actionRow}>
+        <View style={styles.actionSelector}>
+          <ShimmerBlock width="100%" height={52} radius={16} />
+        </View>
+        <ShimmerBlock width={52} height={52} radius={16} />
+        <ShimmerBlock width={52} height={52} radius={16} />
+      </View>
+
+      {/* Description lines */}
+      <View style={styles.body}>
+        <ShimmerBlock width="100%" height={14} radius={7} style={{ marginTop: 24 }} />
+        <ShimmerBlock width="96%" height={14} radius={7} style={{ marginTop: 8 }} />
+        <ShimmerBlock width="84%" height={14} radius={7} style={{ marginTop: 8 }} />
+      </View>
+
       {onBack ? (
         <GlassPressable
           onPress={onBack}
@@ -100,34 +117,39 @@ export function ShowDetailSkeleton({ onBack }: { onBack?: () => void }) {
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: "#0b0d12",
+    backgroundColor: "#0D0F14",
     flex: 1,
   },
   block: {
     backgroundColor: "rgba(255,255,255,0.08)",
   },
-  body: {
-    marginTop: -44,
-    paddingHorizontal: 24,
+  posterWrap: {
+    alignItems: "center",
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
   },
-  headerRow: {
-    alignItems: "flex-end",
-    flexDirection: "row",
-    gap: 16,
+  poster: {
+    backgroundColor: "rgba(255,255,255,0.10)",
   },
-  titleColumn: {
-    flex: 1,
-    paddingBottom: 6,
+  titleBlock: {
+    alignItems: "center",
+    paddingHorizontal: 32,
+    paddingTop: 20,
   },
-  chipRow: {
+  actionRow: {
+    alignItems: "center",
     flexDirection: "row",
     gap: 10,
-    marginTop: 22,
+    marginTop: 24,
+    paddingHorizontal: 24,
   },
-  railRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 14,
+  actionSelector: {
+    flex: 1,
+  },
+  body: {
+    paddingHorizontal: 24,
   },
   back: {
     left: 20,

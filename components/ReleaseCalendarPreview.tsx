@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
+import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import { getLocalDateString } from "../lib/releaseCalendar";
@@ -92,7 +93,7 @@ export function ReleaseCalendarPreview() {
               style={{ width: CARD_WIDTH }}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push(`/show/${item.show._id}`);
+                guardedPush(`/show/${item.show._id}`);
               }}
             >
               {/* Thumbnail */}

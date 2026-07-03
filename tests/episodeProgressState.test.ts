@@ -5,6 +5,7 @@ import {
   getLatestWatchedEpisode,
   getNextEpisodeAfter,
   getTotalKnownEpisodes,
+  isEpisodeVerified,
   normalizeEpisodeSeasonSummaries,
 } from "../lib/episodeProgressState";
 
@@ -90,6 +91,30 @@ describe("episode progress state", () => {
       { seasonNumber: 2, episodeCount: 0, airDate: null },
     ]);
     expect(getTotalKnownEpisodes(seasons)).toBe(10);
+  });
+
+  it("prefers a later season with known episodes over an announced empty one", () => {
+    expect(
+      getNextEpisodeAfter({ seasonNumber: 1, episodeNumber: 8 }, [
+        { seasonNumber: 1, episodeCount: 8 },
+        { seasonNumber: 2, episodeCount: 0 },
+        { seasonNumber: 3, episodeCount: 10 },
+      ]),
+    ).toEqual({ seasonNumber: 3, episodeNumber: 1 });
+  });
+
+  it("verifies episode existence against season metadata", () => {
+    const seasons = [
+      { seasonNumber: 1, episodeCount: 8 },
+      { seasonNumber: 2, episodeCount: 0 },
+    ];
+
+    expect(isEpisodeVerified({ seasonNumber: 1, episodeNumber: 8 }, seasons)).toBe(true);
+    expect(isEpisodeVerified({ seasonNumber: 1, episodeNumber: 9 }, seasons)).toBe(false);
+    expect(isEpisodeVerified({ seasonNumber: 2, episodeNumber: 1 }, seasons)).toBe(false);
+    expect(isEpisodeVerified({ seasonNumber: 3, episodeNumber: 1 }, seasons)).toBe(false);
+    expect(isEpisodeVerified({ seasonNumber: 1, episodeNumber: 1 }, [])).toBe(false);
+    expect(isEpisodeVerified(null, seasons)).toBe(false);
   });
 
   it("ignores invalid watched positions when finding the latest progress frontier", () => {

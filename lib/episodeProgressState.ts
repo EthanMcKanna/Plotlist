@@ -178,9 +178,13 @@ export function getNextEpisodeAfter(
     };
   }
 
-  const nextSeason = normalizedSeasons.find(
+  const laterSeasons = normalizedSeasons.filter(
     (season) => season.seasonNumber > latest.seasonNumber,
   );
+  // Prefer a later season we know has episodes; an announced season with a
+  // zero count is only a last resort so the pointer stays actionable.
+  const nextSeason =
+    laterSeasons.find((season) => season.episodeCount > 0) ?? laterSeasons[0];
   if (nextSeason) {
     return {
       seasonNumber: nextSeason.seasonNumber,
@@ -189,6 +193,23 @@ export function getNextEpisodeAfter(
   }
 
   return null;
+}
+
+// Whether season metadata confirms this episode exists. False either when the
+// pointer runs past the known count (e.g. an announced-but-empty season) or
+// when we have no metadata to check against — callers that need to trust the
+// pointer should treat unverified episodes as not-yet-watchable.
+export function isEpisodeVerified(
+  position: EpisodePosition | null | undefined,
+  seasons: ReadonlyArray<Partial<EpisodeSeasonSummary>> | null | undefined,
+): boolean {
+  if (!position) return false;
+  const normalizedSeasons = normalizeEpisodeSeasonSummaries(seasons);
+  const season = normalizedSeasons.find(
+    (entry) => entry.seasonNumber === position.seasonNumber,
+  );
+  if (!season) return false;
+  return position.episodeNumber <= season.episodeCount;
 }
 
 export function getEpisodeProgressState({

@@ -19,6 +19,7 @@ import {
 import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
 import { useAction, useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
+import { guardedPush } from "../../lib/navigation";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -526,7 +527,7 @@ export default function SearchScreen() {
           overview: item.overview,
           posterUrl: item.posterUrl,
         });
-        router.push(`/show/${showId}`);
+        guardedPush(`/show/${showId}`);
       } catch (error) {
         Alert.alert("Could not add show", String(error));
       }

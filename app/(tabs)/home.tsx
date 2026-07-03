@@ -15,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, {
   useAnimatedScrollHandler,
@@ -23,6 +23,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { guardedPush } from "../../lib/navigation";
 import { useAction, useMutation } from "../../lib/plotlist/react";
 import { api } from "../../lib/plotlist/api";
 
@@ -942,7 +943,7 @@ export function HomeSurface({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       const knownId = catalog._id ?? catalog.showId;
       if (knownId) {
-        router.push({ pathname: "/show/[id]", params: { id: knownId } });
+        guardedPush({ pathname: "/show/[id]", params: { id: knownId } });
         return;
       }
       if (!catalog.externalId) {
@@ -963,7 +964,7 @@ export function HomeSurface({
           tmdbVoteAverage: catalog.tmdbVoteAverage,
           tmdbVoteCount: catalog.tmdbVoteCount,
         });
-        router.push(`/show/${nextShowId}`);
+        guardedPush(`/show/${nextShowId}`);
       } catch (error) {
         Alert.alert("Could not add show", String(error));
       }

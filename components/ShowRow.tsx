@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from "react-native";
-import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { guardedPush } from "../lib/navigation";
 import { Poster } from "./Poster";
 
 export function ShowRow({
@@ -23,7 +23,7 @@ export function ShowRow({
     if (onPress) {
       onPress();
     } else {
-      router.push(`/show/${id}`);
+      guardedPush(`/show/${id}`);
     }
   };
 
