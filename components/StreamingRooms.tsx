@@ -39,6 +39,7 @@ type StreamingRoomsProps = {
   rooms: ProviderRoom[];
   index?: number;
   cardWidth: number;
+  kicker?: string;
   mutedHeroTitleKeys?: Set<string>;
   mutedSupportTitleKeys?: Set<string>;
   softMutedSupportTitleKeys?: Set<string>;
@@ -52,6 +53,7 @@ export function StreamingRooms({
   rooms,
   index,
   cardWidth,
+  kicker = "Watch",
   mutedHeroTitleKeys = new Set(),
   mutedSupportTitleKeys = new Set(),
   softMutedSupportTitleKeys = new Set(),
@@ -73,7 +75,7 @@ export function StreamingRooms({
     <View className="mt-8">
       <HomeSectionHeader
         index={index}
-        kicker="Watch"
+        kicker={kicker}
         title="Streaming"
         accent={ACCENT}
         icon="tv"

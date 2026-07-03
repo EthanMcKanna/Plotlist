@@ -65,6 +65,12 @@ export type HomeSectionPlanOptions = {
   socialSignal?: HomeSocialSectionSignal;
   scheduleSignal?: HomeScheduleSectionSignal;
   now?: Date | string | number;
+  /**
+   * Optional epoch seed that adds a small deterministic jitter to discovery
+   * scores, so near-tied rails trade places across visits instead of
+   * freezing into one order. Omit for fully signal-driven ranking.
+   */
+  rotationSeed?: number;
 };
 
 const DEFAULT_DISCOVERY_ORDER: DiscoveryHomeSectionKind[] = [
@@ -87,7 +93,10 @@ const NUMBERED_HOME_SECTION_KINDS = new Set<HomeSectionKind>([
   "friends",
 ]);
 const SIGNED_IN_DISCOVERY_PREVIEW_COUNT = 1;
-const SIGNED_IN_DISCOVERY_TOTAL_COUNT = 3;
+const SIGNED_IN_DISCOVERY_TOTAL_COUNT = 4;
+// Jitter stays below the smallest meaningful signal step (currentCount * 7)
+// so it only reorders rails whose scores are effectively tied.
+const DISCOVERY_ROTATION_JITTER_RANGE = 6;
 
 const DISCOVERY_BASE_SCORE: Record<DiscoveryHomeSectionKind, number> = {
   heat: 70,
@@ -144,10 +153,26 @@ function getDaypartBoost(
   return 0;
 }
 
+function getDiscoveryRotationJitter(
+  kind: DiscoveryHomeSectionKind,
+  rotationSeed: number | undefined,
+) {
+  if (rotationSeed === undefined) return 0;
+  // FNV-1a over seed + kind, reduced to a small deterministic offset.
+  let hash = 0x811c9dc5;
+  const input = `${rotationSeed}|${kind}`;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % DISCOVERY_ROTATION_JITTER_RANGE;
+}
+
 function getDiscoverySectionScore(
   kind: DiscoveryHomeSectionKind,
   signals: Partial<Record<DiscoveryHomeSectionKind, HomeDiscoverySectionSignal>>,
   now: HomeSectionPlanOptions["now"],
+  rotationSeed?: number,
 ) {
   const signal = signals[kind];
   if (signal && signal.itemCount <= 0 && (signal.providerRoomCount ?? 0) <= 0) {
@@ -165,18 +190,20 @@ function getDiscoverySectionScore(
     currentCount * 7 +
     explicitCurrentCount * 5 +
     providerRoomCount * 6 +
-    getDaypartBoost(kind, now)
+    getDaypartBoost(kind, now) +
+    getDiscoveryRotationJitter(kind, rotationSeed)
   );
 }
 
 export function getRankedHomeDiscoverySections({
   sectionSignals = {},
   now,
-}: Pick<HomeSectionPlanOptions, "sectionSignals" | "now"> = {}) {
+  rotationSeed,
+}: Pick<HomeSectionPlanOptions, "sectionSignals" | "now" | "rotationSeed"> = {}) {
   return [...DEFAULT_DISCOVERY_ORDER].sort((left, right) => {
     const scoreDelta =
-      getDiscoverySectionScore(right, sectionSignals, now) -
-      getDiscoverySectionScore(left, sectionSignals, now);
+      getDiscoverySectionScore(right, sectionSignals, now, rotationSeed) -
+      getDiscoverySectionScore(left, sectionSignals, now, rotationSeed);
     if (scoreDelta !== 0) return scoreDelta;
     return DEFAULT_DISCOVERY_ORDER.indexOf(left) - DEFAULT_DISCOVERY_ORDER.indexOf(right);
   });
@@ -217,10 +244,12 @@ export function getHomeSectionPlan({
   socialSignal,
   scheduleSignal,
   now,
+  rotationSeed,
 }: HomeSectionPlanOptions): HomeSection[] {
   const discoverySections = getRankedHomeDiscoverySections({
     sectionSignals,
     now,
+    rotationSeed,
   }).map((kind) => ({ kind }));
   const signedInDiscoverySections = hasProfile
     ? discoverySections.slice(0, SIGNED_IN_DISCOVERY_TOTAL_COUNT)

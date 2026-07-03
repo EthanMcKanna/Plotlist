@@ -146,10 +146,10 @@ describe("homepage feed refresh summary", () => {
   it("exposes the current-demand chart freshness window in every summary", () => {
     const summary = summarizeHomepageFeedRefresh(
       [{ category: "trending_day", itemCount: 8, health: health() }],
-      new Date("2026-06-06T12:00:00Z").getTime(),
+      new Date("2026-07-07T12:00:00Z").getTime(),
       {
         healthy: true,
-        checkedAt: new Date("2026-06-06T12:00:00Z").getTime(),
+        checkedAt: new Date("2026-07-07T12:00:00Z").getTime(),
         activeTitleCount: 14,
         activeCurrentDemandCount: 10,
         activeCurrentDemandPlatformCount: 7,
@@ -163,12 +163,12 @@ describe("homepage feed refresh summary", () => {
     expect(summary.statusCode).toBe(200);
     expect(summary.body.freshness).toEqual({
       currentDemandDailyChart: {
-        sourceId: "justwatch_us_daily_streaming_charts_jun1",
-        sourceCheckedAt: "2026-06-01",
+        sourceId: "justwatch_us_daily_streaming_charts_jul2",
+        sourceCheckedAt: "2026-07-02",
         sourceLabel: "JustWatch daily US TV streaming chart",
         sourceUrl: "https://www.justwatch.com/us/streaming-charts?ct=daily&t=shows",
         maxAgeDays: 7,
-        staleAt: "2026-06-09",
+        staleAt: "2026-07-10",
         daysUntilStale: 3,
         titleCount: 10,
         titles: HOME_EDITORIAL_JUSTWATCH_DAILY_TV_CHART_TITLES,
@@ -184,7 +184,7 @@ describe("homepage feed refresh summary", () => {
     });
     expect(
       getHomepageFeedRefreshFreshnessSummary(
-        new Date("2026-06-06T12:00:00Z").getTime(),
+        new Date("2026-07-07T12:00:00Z").getTime(),
         summary.body.editorialAudit,
       ).currentDemandDailyChart.daysUntilStale,
     ).toBe(3);
@@ -424,10 +424,10 @@ describe("homepage feed refresh summary", () => {
   it("builds compact route logs for warning action items without dropping freshness metadata", () => {
     const summary = summarizeHomepageFeedRefresh(
       [{ category: "trending_day", itemCount: 8, health: health() }],
-      new Date("2026-06-06T12:00:00Z").getTime(),
+      new Date("2026-07-07T12:00:00Z").getTime(),
       {
         healthy: true,
-        checkedAt: new Date("2026-06-06T12:00:00Z").getTime(),
+        checkedAt: new Date("2026-07-07T12:00:00Z").getTime(),
         activeTitleCount: 12,
         activeCurrentDemandCount: 10,
         activeCurrentDemandPlatformCount: 6,
@@ -457,7 +457,7 @@ describe("homepage feed refresh summary", () => {
       statusCode: 200,
       status: "warning",
       healthy: true,
-      refreshedAt: new Date("2026-06-06T12:00:00Z").getTime(),
+      refreshedAt: new Date("2026-07-07T12:00:00Z").getTime(),
       degradedCategoryCount: 0,
       actionItemCount: 1,
       criticalActionItemCount: 0,
@@ -478,12 +478,12 @@ describe("homepage feed refresh summary", () => {
       },
       freshness: {
         currentDemandDailyChart: {
-          sourceId: "justwatch_us_daily_streaming_charts_jun1",
-          sourceCheckedAt: "2026-06-01",
+          sourceId: "justwatch_us_daily_streaming_charts_jul2",
+          sourceCheckedAt: "2026-07-02",
           sourceLabel: "JustWatch daily US TV streaming chart",
           sourceUrl: "https://www.justwatch.com/us/streaming-charts?ct=daily&t=shows",
           maxAgeDays: 7,
-          staleAt: "2026-06-09",
+          staleAt: "2026-07-10",
           daysUntilStale: 3,
           titleCount: 10,
         },
@@ -500,7 +500,7 @@ describe("homepage feed refresh summary", () => {
   });
 
   it("builds compact route status logs even when the freshness cron is healthy", () => {
-    const refreshedAt = new Date("2026-06-01T12:00:00Z").getTime();
+    const refreshedAt = new Date("2026-07-02T12:00:00Z").getTime();
     const summary = summarizeHomepageFeedRefresh(
       [{ category: "trending_day", itemCount: 8, health: health() }],
       refreshedAt,
@@ -533,12 +533,12 @@ describe("homepage feed refresh summary", () => {
       },
       freshness: {
         currentDemandDailyChart: {
-          sourceId: "justwatch_us_daily_streaming_charts_jun1",
-          sourceCheckedAt: "2026-06-01",
+          sourceId: "justwatch_us_daily_streaming_charts_jul2",
+          sourceCheckedAt: "2026-07-02",
           sourceLabel: "JustWatch daily US TV streaming chart",
           sourceUrl: "https://www.justwatch.com/us/streaming-charts?ct=daily&t=shows",
           maxAgeDays: 7,
-          staleAt: "2026-06-09",
+          staleAt: "2026-07-10",
           daysUntilStale: 8,
           titleCount: 10,
         },
@@ -776,7 +776,7 @@ describe("homepage feed refresh summary", () => {
         degradedCategoryCount: expect.any(Number),
         freshness: expect.objectContaining({
           currentDemandDailyChart: expect.objectContaining({
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
+            sourceId: "justwatch_us_daily_streaming_charts_jul2",
           }),
         }),
       }),
@@ -793,7 +793,7 @@ describe("homepage feed refresh summary", () => {
         }),
         freshness: expect.objectContaining({
           currentDemandDailyChart: expect.objectContaining({
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
+            sourceId: "justwatch_us_daily_streaming_charts_jul2",
           }),
         }),
       }),
@@ -1253,9 +1253,9 @@ describe("homepage feed refresh summary", () => {
       ]),
     );
     expect(surfaceInput.hero?.slice(0, 5).map((item) => item.title)).toEqual([
+      "Widow's Bay",
       "Spider-Noir",
       "The Four Seasons",
-      "Widow's Bay",
       "Love Island USA",
       "Dutton Ranch",
     ]);

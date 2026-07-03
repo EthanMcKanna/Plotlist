@@ -47,7 +47,11 @@ jest.mock("../../lib/plotlist/react", () => ({
 import {
   ContinueWatchingRail,
   CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET,
+  formatContinueWatchingRuntime,
   getActiveContinueWatchingItems,
+  getContinueWatchingEpisodeTitle,
+  getContinueWatchingMetaLine,
+  getContinueWatchingProgressRatio,
   getContinueWatchingAccessibilityLabel,
   getContinueWatchingBadgeLabel,
   getContinueWatchingContextLine,
@@ -65,6 +69,90 @@ import { resetNavigationLock } from "../../lib/navigationLock";
 import { router } from "expo-router";
 
 const includeHiddenElements = { includeHiddenElements: true };
+
+describe("ContinueWatchingRail meta helpers", () => {
+  it("formats runtimes compactly across hour boundaries", () => {
+    expect(formatContinueWatchingRuntime(42)).toBe("42 min");
+    expect(formatContinueWatchingRuntime(60)).toBe("1h");
+    expect(formatContinueWatchingRuntime(65)).toBe("1h 5m");
+    expect(formatContinueWatchingRuntime(0)).toBeNull();
+    expect(formatContinueWatchingRuntime(null)).toBeNull();
+    expect(formatContinueWatchingRuntime(undefined)).toBeNull();
+  });
+
+  it("prefers the TMDB episode name and falls back to a numbered pointer", () => {
+    expect(
+      getContinueWatchingEpisodeTitle({
+        nextEpisodeName: "The Return",
+        nextEpisodeNumber: 5,
+        totalWatched: 4,
+        totalEpisodes: 10,
+      }),
+    ).toBe("The Return");
+    expect(
+      getContinueWatchingEpisodeTitle({
+        nextEpisodeNumber: 5,
+        totalWatched: 4,
+        totalEpisodes: 10,
+      }),
+    ).toBe("Episode 5");
+    expect(
+      getContinueWatchingEpisodeTitle({
+        isCaughtUp: true,
+        nextEpisodeName: "Finale",
+        totalWatched: 10,
+        totalEpisodes: 10,
+      }),
+    ).toBe("All caught up");
+  });
+
+  it("builds the quiet meta line from progress, runtime, and air dates", () => {
+    expect(
+      getContinueWatchingMetaLine({
+        totalWatched: 4,
+        totalEpisodes: 10,
+        nextEpisodeRuntime: 42,
+      }),
+    ).toBe("Episode 5 of 10 · 42 min");
+    expect(
+      getContinueWatchingMetaLine({
+        totalWatched: 4,
+        totalEpisodes: 10,
+      }),
+    ).toBe("Episode 5 of 10");
+    expect(
+      getContinueWatchingMetaLine({
+        isUpcoming: true,
+        nextAirDate: Date.parse("2026-07-10T12:00:00.000Z"),
+        totalEpisodes: 10,
+      }),
+    ).toBe("Airs Jul 10");
+    expect(
+      getContinueWatchingMetaLine({
+        isCaughtUp: true,
+        totalWatched: 10,
+        totalEpisodes: 10,
+      }),
+    ).toBe("You're up to date");
+  });
+
+  it("derives a clamped progress ratio for the card bar", () => {
+    expect(
+      getContinueWatchingProgressRatio({ progressPct: 0.4, totalWatched: 4, totalEpisodes: 10 }),
+    ).toBe(0.4);
+    expect(
+      getContinueWatchingProgressRatio({ totalWatched: 4, totalEpisodes: 10 }),
+    ).toBe(0.4);
+    expect(getContinueWatchingProgressRatio({ totalWatched: 4 })).toBe(0);
+    expect(
+      getContinueWatchingProgressRatio({
+        isCaughtUp: true,
+        totalWatched: 12,
+        totalEpisodes: 10,
+      }),
+    ).toBe(1);
+  });
+});
 
 describe("ContinueWatchingRail helpers", () => {
   it("does not render impossible next-episode counts", () => {
@@ -417,16 +505,54 @@ describe("ContinueWatchingRail helpers", () => {
       ).props.style,
     );
 
-    expect(chipStyle.backgroundColor).toBe("rgba(13,15,20,0.42)");
+    expect(chipStyle.backgroundColor).toBe("rgba(13,15,20,0.55)");
     expect(chipStyle.borderColor).toBe("rgba(255,255,255,0.10)");
-    expect(glyphStyle.backgroundColor).toBe("rgba(13,15,20,0.26)");
-    expect(glyphStyle.borderColor).toBe("rgba(255,255,255,0.12)");
+    expect(glyphStyle.backgroundColor).toBe("rgba(14,165,233,0.92)");
+    expect(glyphStyle.borderColor).toBe("rgba(255,255,255,0.18)");
     expect(glyphStyle.height).toBeLessThan(
       CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET,
     );
   });
 
-  it("keeps loaded resume artwork terse while preserving episode context for actions", () => {
+  it("surfaces the next episode name, progress, and runtime on the card", () => {
+    render(
+      <ContinueWatchingRail
+        items={[
+          {
+            showId: "show-alpha" as any,
+            show: {
+              title: "Alpha",
+              posterUrl: "poster.jpg",
+            },
+            totalWatched: 4,
+            totalEpisodes: 10,
+            progressPct: 0.4,
+            nextSeasonNumber: 2,
+            nextEpisodeNumber: 5,
+            nextEpisodeName: "The Return",
+            nextEpisodeRuntime: 42,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Alpha")).toBeTruthy();
+    expect(screen.getByText("S2 E5", includeHiddenElements)).toBeTruthy();
+    expect(screen.getByText("The Return", includeHiddenElements)).toBeTruthy();
+    expect(
+      screen.getByText("Episode 5 of 10 · 42 min", includeHiddenElements),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("continue-progress-fill-show-alpha", includeHiddenElements),
+    ).toBeTruthy();
+    expect(
+      screen.getByLabelText(
+        "Continue Alpha. S02 · E05. The Return · Episode 5 of 10",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to a plain episode pointer when TMDB has no episode name", () => {
     render(
       <ContinueWatchingRail
         items={[
@@ -440,21 +566,13 @@ describe("ContinueWatchingRail helpers", () => {
             totalEpisodes: 10,
             nextSeasonNumber: 2,
             nextEpisodeNumber: 5,
-            nextEpisodeName: "The Return",
           },
         ]}
       />,
     );
 
-    expect(screen.getByText("Alpha")).toBeTruthy();
-    expect(screen.getByText("S2 E5", includeHiddenElements)).toBeTruthy();
-    expect(screen.queryByText("The Return", includeHiddenElements)).toBeNull();
-    expect(screen.queryByText("Episode 5 of 10", includeHiddenElements)).toBeNull();
-    expect(
-      screen.getByLabelText(
-        "Continue Alpha. S02 · E05. The Return · Episode 5 of 10",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Episode 5", includeHiddenElements)).toBeTruthy();
+    expect(screen.getByText("Episode 5 of 10", includeHiddenElements)).toBeTruthy();
   });
 
   it("keeps the visible resume header terse without losing section context", () => {
@@ -508,7 +626,9 @@ describe("ContinueWatchingRail artwork", () => {
     expect(
       screen.getByTestId("continue-artwork-fallback-show-andor", includeHiddenElements),
     ).toBeTruthy();
-    expect(screen.getByText("Andor", includeHiddenElements)).toBeTruthy();
+    expect(
+      screen.getAllByText("Andor", includeHiddenElements).length,
+    ).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Messenger", includeHiddenElements)).toBeTruthy();
     expect(screen.getByText("S2 E7", includeHiddenElements)).toBeTruthy();
     expect(screen.queryByText("S02 · E07", includeHiddenElements)).toBeNull();

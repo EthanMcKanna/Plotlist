@@ -243,7 +243,7 @@ describe("home editorial seeds", () => {
       "JustWatch chart #9",
     );
     expect(getHomeEditorialSeedItemByTitle("The Testaments", "2026-05-26")).toBeNull();
-    expect(getHomeEditorialSeedItemByTitle("FROM", "2026-06-29")).toBeNull();
+    expect(getHomeEditorialSeedItemByTitle("FROM", "2026-07-13")).toBeNull();
   });
 
   it("requires visible freshness signals to stay title-gated", () => {
@@ -834,44 +834,44 @@ describe("home editorial seeds", () => {
   it("keeps the current JustWatch daily top 10 machine-readable and fully covered", () => {
     const chartTitles = [...HOME_EDITORIAL_JUSTWATCH_DAILY_TV_CHART_TITLES];
     const activeDemandTitles = new Set(
-      getHomeEditorialCurrentDemandSeedItems("2026-06-01").map((item) => item.title),
+      getHomeEditorialCurrentDemandSeedItems("2026-07-02").map((item) => item.title),
     );
 
     expect(HOME_EDITORIAL_JUSTWATCH_DAILY_TV_CHART).toMatchObject({
-      checkedAt: "2026-06-01",
+      checkedAt: "2026-07-02",
       country: "US",
       maxAgeDays: 7,
       period: "daily",
-      sourceId: "justwatch_us_daily_streaming_charts_jun1",
+      sourceId: "justwatch_us_daily_streaming_charts_jul2",
     });
     expect(chartTitles).toEqual([
-      "Spider-Noir",
       "Widow's Bay",
+      "The Bear",
+      "I Will Find You",
       "FROM",
-      "The Boroughs",
-      "Euphoria",
-      "Off Campus",
-      "The Four Seasons",
-      "Hacks",
-      "The Terror",
-      "Your Friends & Neighbors",
+      "House of the Dragon",
+      "X-Men '97",
+      "Maximum Pleasure Guaranteed",
+      "Elle",
+      "Silo",
+      "The Agency",
     ]);
     chartTitles.forEach((title, index) => {
       expect(activeDemandTitles.has(title)).toBe(true);
       expect(getHomeEditorialDailyChartRank(title)).toBe(index + 1);
       expect(getHomeEditorialSeedProvenance(title)?.sourceIds).toContain(
-        "justwatch_us_daily_streaming_charts_jun1",
+        "justwatch_us_daily_streaming_charts_jul2",
       );
     });
     expect(getHomeEditorialDailyChartRank("Not Suitable for Work")).toBeNull();
     expect(getHomeEditorialDailyChartRank("For All Mankind")).toBeNull();
-    expect(getHomeEditorialDemandConfidenceScore("Spider-Noir")).toBeGreaterThan(
+    expect(getHomeEditorialDemandConfidenceScore("Widow's Bay")).toBeGreaterThan(
       getHomeEditorialDemandConfidenceScore("For All Mankind"),
     );
     expect(getHomeEditorialDemandConfidenceScore("FROM")).toBeGreaterThan(
       getHomeEditorialDemandConfidenceScore("The Boys"),
     );
-    expect(auditHomeEditorialSeeds("2026-06-01T12:00:00.000Z").findings).not.toEqual(
+    expect(auditHomeEditorialSeeds("2026-07-02T12:00:00.000Z").findings).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ issue: "daily_chart_snapshot_stale" }),
         expect.objectContaining({ issue: "daily_chart_title_missing_seed" }),
@@ -881,41 +881,43 @@ describe("home editorial seeds", () => {
   });
 
   it("fails the editorial audit when the current chart snapshot gets stale", () => {
-    const audit = auditHomeEditorialSeeds("2026-06-09T12:00:00.000Z");
+    const audit = auditHomeEditorialSeeds("2026-07-10T12:00:00.000Z");
 
     expect(audit.healthy).toBe(false);
     expect(audit.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           issue: "daily_chart_snapshot_stale",
-          sourceId: "justwatch_us_daily_streaming_charts_jun1",
+          sourceId: "justwatch_us_daily_streaming_charts_jul2",
         }),
       ]),
     );
   });
 
   it("warns before the current chart snapshot crosses its freshness window", () => {
-    const audit = auditHomeEditorialSeeds("2026-06-07T12:00:00.000Z");
+    const audit = auditHomeEditorialSeeds("2026-07-08T12:00:00.000Z");
 
     expect(audit.healthy).toBe(true);
     expect(audit.findings).toEqual([]);
-    expect(audit.warnings).toEqual([
-      expect.objectContaining({
-        issue: "daily_chart_snapshot_expires_soon",
-        effectiveAt: "2026-06-09",
-        daysUntil: 2,
-        detail: expect.stringContaining(
-          "Affected daily-chart titles: Spider-Noir, Widow's Bay",
-        ),
-        expiringTitles: [...HOME_EDITORIAL_JUSTWATCH_DAILY_TV_CHART_TITLES],
-        findings: [
-          expect.objectContaining({
-            issue: "daily_chart_snapshot_stale",
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
-          }),
-        ],
-      }),
-    ]);
+    expect(audit.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          issue: "daily_chart_snapshot_expires_soon",
+          effectiveAt: "2026-07-10",
+          daysUntil: 2,
+          detail: expect.stringContaining(
+            "Affected daily-chart titles: Widow's Bay, The Bear",
+          ),
+          expiringTitles: [...HOME_EDITORIAL_JUSTWATCH_DAILY_TV_CHART_TITLES],
+          findings: [
+            expect.objectContaining({
+              issue: "daily_chart_snapshot_stale",
+              sourceId: "justwatch_us_daily_streaming_charts_jul2",
+            }),
+          ],
+        }),
+      ]),
+    );
   });
 
   it("maps researched editorial seeds into provider-specific rooms", () => {
@@ -1121,23 +1123,18 @@ describe("home editorial seeds", () => {
   it("keeps late-June current-demand coverage broad enough after early-June launches", () => {
     const audit = auditHomeEditorialSeeds("2026-06-22T12:00:00.000Z");
 
-    expect(audit.healthy).toBe(false);
+    expect(audit.healthy).toBe(true);
     expect(audit.activeCurrentDemandCount).toBeGreaterThanOrEqual(8);
     expect(audit.activeCurrentDemandPlatformCount).toBeGreaterThanOrEqual(5);
     expect(audit.activeCurrentDemandNonfictionCount).toBeGreaterThanOrEqual(1);
-    expect(audit.findings).toEqual([
-      expect.objectContaining({
-        issue: "daily_chart_snapshot_stale",
-        sourceId: "justwatch_us_daily_streaming_charts_jun1",
-      }),
-    ]);
+    expect(audit.findings).toEqual([]);
     expect(audit.warnings).toEqual([
       expect.objectContaining({
         issue: "current_demand_coverage_expires_soon",
         effectiveAt: "2026-07-13",
         daysUntil: 21,
         detail: expect.stringContaining(
-          "Titles dropping out before then: The Bear, Cape Fear",
+          "Titles dropping out before then: Widow's Bay, FROM",
         ),
         expiringTitles: expect.arrayContaining(["The Bear", "Cape Fear"]),
         findings: expect.arrayContaining([
@@ -1152,13 +1149,8 @@ describe("home editorial seeds", () => {
   it("forecasts when the researched current-demand shelf is about to expire", () => {
     const audit = auditHomeEditorialSeeds("2026-06-13T12:00:00.000Z");
 
-    expect(audit.healthy).toBe(false);
-    expect(audit.findings).toEqual([
-      expect.objectContaining({
-        issue: "daily_chart_snapshot_stale",
-        sourceId: "justwatch_us_daily_streaming_charts_jun1",
-      }),
-    ]);
+    expect(audit.healthy).toBe(true);
+    expect(audit.findings).toEqual([]);
     expect(audit.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

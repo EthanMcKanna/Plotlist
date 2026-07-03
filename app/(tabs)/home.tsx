@@ -96,6 +96,7 @@ import {
   getHomeRoomQuickTopUpItems,
   getProviderRoomItemRailKey,
 } from "../../lib/homeRoomRailTopUps";
+import { getHomeDiscoveryRailHeaderCopy } from "../../lib/homeRailHeaderCopy";
 import {
   getHomeDiscoverySectionSignal,
   getHomeProviderRoomsSectionSignal,
@@ -106,6 +107,7 @@ import {
   type HomeSection,
   type HomeSectionKind,
 } from "../../lib/homeSectionPlan";
+import { getHomeRotationEpoch } from "../../lib/homeSurfaceRotation";
 import {
   buildColdStartHomeShelfItems,
   buildPersonalHomeShelfItems,
@@ -214,6 +216,17 @@ export function HomeSurface({
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const surfaceNow = data.generatedAt;
+  // Discovery rail kickers shift with the time of day (titles stay fixed).
+  const railHeaderCopy = useMemo(
+    () => ({
+      heat: getHomeDiscoveryRailHeaderCopy("heat", { now: surfaceNow }),
+      fresh: getHomeDiscoveryRailHeaderCopy("fresh", { now: surfaceNow }),
+      critics: getHomeDiscoveryRailHeaderCopy("critics", { now: surfaceNow }),
+      quick: getHomeDiscoveryRailHeaderCopy("quick", { now: surfaceNow }),
+      rooms: getHomeDiscoveryRailHeaderCopy("rooms", { now: surfaceNow }),
+    }),
+    [surfaceNow],
+  );
   const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
   const roomCardWidth = Math.min(Math.max(width - 96, 240), 320);
 
@@ -1071,6 +1084,7 @@ export function HomeSurface({
           upcomingCount: schedulePreview.weekCount,
         },
         now: surfaceNow,
+        rotationSeed: getHomeRotationEpoch(surfaceNow),
       }),
     [
       data.hasProfile,
@@ -1228,8 +1242,8 @@ export function HomeSurface({
           return (
             <RailSkeleton
               index={getSectionDisplayIndex(item.kind)}
-              kicker="Now"
-              title="Trending"
+              kicker={railHeaderCopy.heat.kicker}
+              title={railHeaderCopy.heat.title}
               accent={HEAT_ACCENT}
               icon="flame"
               variant="feature"
@@ -1240,8 +1254,8 @@ export function HomeSurface({
         return (
           <SignatureRail
             index={getSectionDisplayIndex(item.kind)}
-            kicker="Now"
-            title="Trending"
+            kicker={railHeaderCopy.heat.kicker}
+            title={railHeaderCopy.heat.title}
             accent={HEAT_ACCENT}
             icon="flame"
             layout="feature"
@@ -1256,8 +1270,8 @@ export function HomeSurface({
           return (
             <RailSkeleton
               index={getSectionDisplayIndex(item.kind)}
-              kicker="Fresh"
-              title="New"
+              kicker={railHeaderCopy.fresh.kicker}
+              title={railHeaderCopy.fresh.title}
               accent={FRESH_ACCENT}
               icon="sparkles"
               variant="poster"
@@ -1268,8 +1282,8 @@ export function HomeSurface({
         return (
           <SignatureRail
             index={getSectionDisplayIndex(item.kind)}
-            kicker="Fresh"
-            title="New"
+            kicker={railHeaderCopy.fresh.kicker}
+            title={railHeaderCopy.fresh.title}
             accent={FRESH_ACCENT}
             icon="sparkles"
             layout="poster"
@@ -1284,8 +1298,8 @@ export function HomeSurface({
           return (
             <RailSkeleton
               index={getSectionDisplayIndex(item.kind)}
-              kicker="Quality"
-              title="Acclaimed"
+              kicker={railHeaderCopy.critics.kicker}
+              title={railHeaderCopy.critics.title}
               accent={CRITICS_ACCENT}
               icon="star"
               variant="poster"
@@ -1296,8 +1310,8 @@ export function HomeSurface({
         return (
           <SignatureRail
             index={getSectionDisplayIndex(item.kind)}
-            kicker="Quality"
-            title="Acclaimed"
+            kicker={railHeaderCopy.critics.kicker}
+            title={railHeaderCopy.critics.title}
             accent={CRITICS_ACCENT}
             icon="star"
             layout="poster"
@@ -1312,8 +1326,8 @@ export function HomeSurface({
           return (
             <RailSkeleton
               index={getSectionDisplayIndex(item.kind)}
-              kicker="Short"
-              title="Quick"
+              kicker={railHeaderCopy.quick.kicker}
+              title={railHeaderCopy.quick.title}
               accent={QUICK_ACCENT}
               icon="timer"
               variant="poster"
@@ -1324,8 +1338,8 @@ export function HomeSurface({
         return (
           <SignatureRail
             index={getSectionDisplayIndex(item.kind)}
-            kicker="Short"
-            title="Quick"
+            kicker={railHeaderCopy.quick.kicker}
+            title={railHeaderCopy.quick.title}
             accent={QUICK_ACCENT}
             icon="timer"
             layout="poster"
@@ -1340,8 +1354,8 @@ export function HomeSurface({
           return (
             <RailSkeleton
               index={getSectionDisplayIndex(item.kind)}
-              kicker="Watch"
-              title="Streaming"
+              kicker={railHeaderCopy.rooms.kicker}
+              title={railHeaderCopy.rooms.title}
               accent={ROOMS_ACCENT}
               icon="tv"
               variant="ribbon"
@@ -1353,6 +1367,7 @@ export function HomeSurface({
           <StreamingRooms
             rooms={streamingRooms}
             index={getSectionDisplayIndex(item.kind)}
+            kicker={railHeaderCopy.rooms.kicker}
             cardWidth={roomCardWidth}
             mutedHeroTitleKeys={roomHardPreviewKeys}
             mutedSupportTitleKeys={roomSurfacePreviewKeys}

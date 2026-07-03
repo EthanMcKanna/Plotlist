@@ -32,6 +32,9 @@ type UpNextItem = {
   nextEpisodeReleasedToday?: boolean;
   nextEpisodeStillUrl?: string | null;
   nextEpisodeName?: string | null;
+  nextEpisodeOverview?: string | null;
+  nextEpisodeRuntime?: number | null;
+  lastWatchedAt?: number | null;
   isUpcoming?: boolean;
   isCaughtUp?: boolean;
   // Set while an optimistic update believes the show just became caught up,
@@ -171,6 +174,9 @@ function updateUpNextItem(
     nextEpisodeNumber,
     nextEpisodeName: nextChanged ? null : item.nextEpisodeName,
     nextEpisodeStillUrl: nextChanged ? null : item.nextEpisodeStillUrl,
+    nextEpisodeOverview: nextChanged ? null : item.nextEpisodeOverview,
+    nextEpisodeRuntime: nextChanged ? null : item.nextEpisodeRuntime,
+    lastWatchedAt: mode === "mark" ? Date.now() : item.lastWatchedAt,
     nextAirDate: nextChanged ? null : item.nextAirDate,
     nextReleaseDate: nextChanged ? null : item.nextReleaseDate,
     nextEpisodeReleasedToday: nextChanged ? false : item.nextEpisodeReleasedToday,

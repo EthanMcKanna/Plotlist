@@ -118,10 +118,10 @@ describe("homepage feed refresh cron route", () => {
         status: "critical",
         freshness: expect.objectContaining({
           currentDemandDailyChart: expect.objectContaining({
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
-            sourceCheckedAt: "2026-06-01",
+            sourceId: "justwatch_us_daily_streaming_charts_jul2",
+            sourceCheckedAt: "2026-07-02",
             sourceUrl: "https://www.justwatch.com/us/streaming-charts?ct=daily&t=shows",
-            staleAt: "2026-06-09",
+            staleAt: "2026-07-10",
           }),
         }),
       }),
@@ -134,7 +134,7 @@ describe("homepage feed refresh cron route", () => {
         criticalActionItemCount: expect.any(Number),
         freshness: expect.objectContaining({
           currentDemandDailyChart: expect.objectContaining({
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
+            sourceId: "justwatch_us_daily_streaming_charts_jul2",
           }),
         }),
       }),
@@ -147,7 +147,7 @@ describe("homepage feed refresh cron route", () => {
         healthy: false,
         freshness: expect.objectContaining({
           currentDemandDailyChart: expect.objectContaining({
-            sourceId: "justwatch_us_daily_streaming_charts_jun1",
+            sourceId: "justwatch_us_daily_streaming_charts_jul2",
           }),
         }),
       }),

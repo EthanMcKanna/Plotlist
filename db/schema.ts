@@ -487,6 +487,27 @@ export const tmdbListCache = sqliteTable(
   }),
 );
 
+export const tmdbSeasonCache = sqliteTable(
+  "tmdb_season_cache",
+  {
+    id: text("id").primaryKey(),
+    externalSource: text("external_source").notNull(),
+    externalId: text("external_id").notNull(),
+    seasonNumber: integer("season_number").notNull(),
+    payload: jsonb("payload").notNull(),
+    fetchedAt: timestampMs("fetched_at").notNull(),
+    expiresAt: timestampMs("expires_at").notNull(),
+  },
+  (table) => ({
+    externalSeasonIdx: uniqueIndex("tmdb_season_cache_external_season_idx").on(
+      table.externalSource,
+      table.externalId,
+      table.seasonNumber,
+    ),
+    expiresIdx: index("tmdb_season_cache_expires_idx").on(table.expiresAt),
+  }),
+);
+
 export const tmdbImportJobs = sqliteTable(
   "tmdb_import_jobs",
   {

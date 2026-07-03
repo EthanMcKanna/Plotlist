@@ -240,6 +240,7 @@ describe("HomeSurface rendered preview", () => {
         "home-section-for-you",
         "home-section-heat",
         "home-section-fresh",
+        "home-section-critics",
       ]);
       expect(sectionDataSet).toEqual([
         { homeSection: "hero", homeSectionId: "home-section-hero" },
@@ -253,6 +254,7 @@ describe("HomeSurface rendered preview", () => {
         { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "heat", homeSectionId: "home-section-heat" },
         { homeSection: "fresh", homeSectionId: "home-section-fresh" },
+        { homeSection: "critics", homeSectionId: "home-section-critics" },
       ]);
       const unlabeledControls = UNSAFE_root.findAll((node: unknown) => {
         const role = getRenderedAccessibilityRole(node);
@@ -337,10 +339,11 @@ describe("HomeSurface rendered preview", () => {
         expect(screen.getByLabelText(label)).toBeTruthy();
       });
       expect(
-        screen.getByLabelText(/^Lead pick\. 1 of 5\. Spider-Noir\./).props.accessibilityRole,
+        screen.getByLabelText(/^Lead pick\. 1 of 5\. The Four Seasons\./).props
+          .accessibilityRole,
       ).toBe("header");
       expect(
-        screen.getByLabelText(/^Lead pick\. 1 of 5\. Spider-Noir\./).props[
+        screen.getByLabelText(/^Lead pick\. 1 of 5\. The Four Seasons\./).props[
           "aria-level"
         ],
       ).toBeUndefined();
@@ -374,12 +377,12 @@ describe("HomeSurface rendered preview", () => {
       ).toBe(2);
       expect(
         screen.getByLabelText(
-          "Section 04. Watch. Streaming",
+          "Section 04. Settle in. Streaming",
         ).props.accessibilityRole,
       ).toBe("header");
       expect(
         screen.getByLabelText(
-          "Section 04. Watch. Streaming",
+          "Section 04. Settle in. Streaming",
         ).props["aria-level"],
       ).toBe(2);
       expect(screen.getByLabelText("Tonight, 1 release, selected")).toBeTruthy();

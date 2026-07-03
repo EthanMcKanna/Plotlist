@@ -21,6 +21,7 @@ import {
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
+import { slimSeasonPayload, upsertSeasonCacheEntry } from "./season-cache";
 
 const RELEASE_LOOKAHEAD_DAYS = 120;
 const RELEASE_SYNC_TTL_MS = 12 * 60 * 60 * 1000;
@@ -189,6 +190,14 @@ async function refreshReleaseEventsForShow(show: ShowRow, now: number, anchorTod
     const seasonPayloads = await Promise.all(
       seasonNumbers.map((seasonNumber) => tmdb(`/tv/${show.externalId}/season/${seasonNumber}`)),
     );
+    // Warm the up-next season cache from the same responses; the hourly
+    // release cron covers exactly the shows users track.
+    for (const seasonPayload of seasonPayloads) {
+      const slim = slimSeasonPayload(seasonPayload);
+      if (slim) {
+        await upsertSeasonCacheEntry(show.externalId, slim, now).catch(() => {});
+      }
+    }
 
     const nextEvents = buildTmdbReleaseEventsForShow({
       showId: show.id,

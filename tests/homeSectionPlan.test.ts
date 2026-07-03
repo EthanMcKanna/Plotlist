@@ -346,7 +346,8 @@ describe("home section plan", () => {
       "rooms",
       "heat",
     ]);
-    expect(plan).not.toContain("critics");
+    // Signed-in surfaces carry four discovery rails; the weakest one sits out.
+    expect(plan).toContain("critics");
     expect(plan).not.toContain("quick");
     expect(plan.indexOf("contact-sync")).toBeGreaterThan(plan.indexOf("heat"));
     expect(
@@ -466,6 +467,47 @@ describe("home section plan", () => {
         },
       }).slice(0, 2),
     ).toEqual(["quick", "heat"]);
+  });
+
+  it("lets a rotation seed reorder near-tied rails without overriding strong signals", () => {
+    const tiedSignals = {
+      heat: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
+      fresh: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
+      critics: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
+      quick: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
+      rooms: { itemCount: 0, providerRoomCount: 0 },
+    };
+
+    const orders = new Set(
+      Array.from({ length: 24 }, (_, seed) =>
+        getRankedHomeDiscoverySections({
+          sectionSignals: tiedSignals,
+          rotationSeed: seed,
+        }).join(","),
+      ),
+    );
+    expect(orders.size).toBeGreaterThan(1);
+
+    // Deterministic for a fixed seed.
+    expect(
+      getRankedHomeDiscoverySections({ sectionSignals: tiedSignals, rotationSeed: 7 }),
+    ).toEqual(
+      getRankedHomeDiscoverySections({ sectionSignals: tiedSignals, rotationSeed: 7 }),
+    );
+
+    // A rail with a real live signal cannot be jittered out of the lead.
+    const strongFresh = {
+      ...tiedSignals,
+      fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
+    };
+    for (let seed = 0; seed < 24; seed += 1) {
+      expect(
+        getRankedHomeDiscoverySections({
+          sectionSignals: strongFresh,
+          rotationSeed: seed,
+        })[0],
+      ).toBe("fresh");
+    }
   });
 
   it("keeps the personal shelf ahead of provider browsing for signed-in viewers", () => {

@@ -31,50 +31,29 @@ daily top-10 title is missing from active current-demand seeds.
 ## Freshness Evidence
 
 - Current-demand source: `https://www.justwatch.com/us/streaming-charts?ct=daily&t=shows`
-- Checked-in source id: `justwatch_us_daily_streaming_charts_jun1`
-- Checked at: `2026-06-01`
-- Stale at: `2026-06-09`
+- Checked-in source id: `justwatch_us_daily_streaming_charts_jul2`
+- Checked at: `2026-07-02`
+- Stale at: `2026-07-10`
 - Current coverage target: at least 10 active current-demand titles across at
   least 5 platforms and 5 primary genres, with nonfiction/reality/news/talk
   coverage.
-- Current checked-in coverage: 44 active current-demand titles across 11
-  platforms, 10 primary genres, and 3 nonfiction/reality/news/talk titles.
-- Current checked-in daily top 10: Spider-Noir, Widow's Bay, FROM,
-  The Boroughs, Euphoria, Off Campus, The Four Seasons, Hacks, The Terror, and
-  Your Friends & Neighbors.
+- Current checked-in coverage: 19 active current-demand titles across 10
+  platforms, 8 primary genres, and 2 nonfiction/reality/news/talk titles.
+- Current checked-in daily top 10: Widow's Bay, The Bear, I Will Find You,
+  FROM, House of the Dragon, X-Men '97, Maximum Pleasure Guaranteed, Elle,
+  Silo, and The Agency.
 - Known same-day tail-rank jitter: the same primary top 10 has also appeared
-  with Euphoria / The Boroughs swapped in positions 4 and 5, and with Your
-  Friends & Neighbors / The Terror swapped in positions 9 and 10.
-- Known same-day primary tail variant: the same primary source has also appeared
-  with Euphoria / FROM / The Boroughs or Euphoria / The Boroughs / FROM in
-  positions 3 through 5 and Rick and Morty entering position 10 behind Your
-  Friends & Neighbors.
+  with Silo / The Agency swapped in positions 9 and 10.
 - Known same-day primary mid-tail variant: the same primary source has also
-  appeared with Euphoria / The Boroughs / FROM in positions 3 through 5 and
-  Rick and Morty entering position 8 ahead of Hacks and Your Friends &
-  Neighbors.
-- Known same-day primary rank-six variant: the same primary source has also
-  appeared with Euphoria / The Boroughs / FROM in positions 3 through 5 and
-  Rick and Morty entering position 6 ahead of Off Campus, The Four Seasons,
-  Your Friends & Neighbors, and Hacks.
-- Known June 2 tail-cluster variant: the same primary source has also appeared
-  with Spider-Noir / Widow's Bay swapped in positions 1 and 2, Off Campus
-  rising to position 4, Love Island USA entering position 6, Rick and Morty at
-  position 8, and The Beauty / FROM occupying positions 9 and 10 across
-  observed rank flips. A later fast refresh put Love Island USA at position 3
-  and Not Suitable for Work at position 8. All titles in those observed orders
-  are already active, source-backed current-demand seeds.
-- Known June 2 tail-cluster variant: the same primary source has also appeared
-  with Euphoria / The Boroughs in positions 3 and 4, The Four Seasons entering
-  position 5, Rick and Morty in position 7, Your Friends & Neighbors in
-  position 8, FROM in position 9, and Hacks in position 10.
-- Known same-day JustWatch edge variant: FROM, Off Campus, Your Friends &
-  Neighbors, Rick and Morty, The Boys, World War II with Tom Hanks, Condor, The
-  Madison, Invincible, and Pluribus. Those titles are source-covered so the live
-  audit does not fail on an already-researched June 1 CDN/cache variant.
+  appeared with House of the Dragon / FROM swapped in positions 4 and 5.
+- Known same-day live churn: a July 2 evening refresh replaced The Agency with
+  Cape Fear at position 10. Cape Fear remains an active, source-backed
+  current-demand seed, so the live audit accepts that variant without a new
+  snapshot.
 
 The release gate fails when the daily chart is stale, when the live JustWatch
-top-10 order drifts outside the checked-in accepted June 1 orders, when source
+top-10 order drifts outside the checked-in accepted July 2 orders (or includes
+a title that is not an active source-backed current-demand seed), when source
 metadata is missing, or when editorial coverage gets too thin across active
 titles, platforms, primary genres, or nonfiction/reality/news/talk lanes.
 

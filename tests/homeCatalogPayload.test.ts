@@ -98,7 +98,7 @@ describe("home catalog payload", () => {
           tmdbVoteAverage: 8.2,
           homeSignal: null,
         }),
-        "2026-06-29",
+        "2026-07-13",
       ),
     ).toBe("8.2 TMDB");
   });
@@ -111,7 +111,7 @@ describe("home catalog payload", () => {
     });
 
     expect(toRailItem(from, "2026-05-30")?.signal).toBe("MGM+ S4 airing now");
-    expect(toRailItem(from, "2026-06-29")?.signal).toBe("8.2 TMDB");
+    expect(toRailItem(from, "2026-07-13")?.signal).toBe("8.2 TMDB");
   });
 
   it("builds ordered provider rooms only from substantial, recent, editorial candidates", () => {

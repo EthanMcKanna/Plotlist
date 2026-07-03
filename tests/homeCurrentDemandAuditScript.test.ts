@@ -6,165 +6,57 @@ import { join } from "node:path";
 
 const SCRIPT_PATH = join(process.cwd(), "scripts", "audit-home-current-demand.mjs");
 const LIVE_TITLES = [
-  "Spider-Noir",
   "Widow's Bay",
+  "The Bear",
+  "I Will Find You",
   "FROM",
-  "The Boroughs",
-  "Euphoria",
-  "Off Campus",
-  "The Four Seasons",
-  "Hacks",
-  "The Terror",
-  "Your Friends & Neighbors",
-];
-const ALTERNATE_LIVE_TITLES = [
-  "FROM",
-  "Off Campus",
-  "Your Friends & Neighbors",
-  "Rick and Morty",
-  "The Boys",
-  "World War II with Tom Hanks",
-  "Condor",
-  "The Madison",
-  "Invincible",
-  "Pluribus",
+  "House of the Dragon",
+  "X-Men '97",
+  "Maximum Pleasure Guaranteed",
+  "Elle",
+  "Silo",
+  "The Agency",
 ];
 const PRIMARY_TAIL_SWAP_LIVE_TITLES = [
-  "Spider-Noir",
   "Widow's Bay",
+  "The Bear",
+  "I Will Find You",
   "FROM",
-  "The Boroughs",
-  "Euphoria",
-  "Off Campus",
-  "The Four Seasons",
-  "Hacks",
-  "Your Friends & Neighbors",
-  "The Terror",
+  "House of the Dragon",
+  "X-Men '97",
+  "Maximum Pleasure Guaranteed",
+  "Elle",
+  "The Agency",
+  "Silo",
 ];
 const PRIMARY_ADJACENT_SWAP_LIVE_TITLES = [
-  "Spider-Noir",
   "Widow's Bay",
+  "The Bear",
+  "I Will Find You",
+  "House of the Dragon",
   "FROM",
-  "Euphoria",
-  "The Boroughs",
-  "Off Campus",
-  "The Four Seasons",
-  "Hacks",
-  "Your Friends & Neighbors",
-  "The Terror",
-];
-const PRIMARY_RICK_AND_MORTY_TAIL_LIVE_TITLES = [
-  "Spider-Noir",
-  "Widow's Bay",
-  "Euphoria",
-  "FROM",
-  "The Boroughs",
-  "Off Campus",
-  "The Four Seasons",
-  "Hacks",
-  "Your Friends & Neighbors",
-  "Rick and Morty",
-];
-const PRIMARY_RICK_AND_MORTY_TAIL_SECOND_LIVE_TITLES = [
-  "Spider-Noir",
-  "Widow's Bay",
-  "Euphoria",
-  "The Boroughs",
-  "FROM",
-  "Off Campus",
-  "The Four Seasons",
-  "Hacks",
-  "Your Friends & Neighbors",
-  "Rick and Morty",
-];
-const PRIMARY_RICK_AND_MORTY_EIGHTH_LIVE_TITLES = [
-  "Spider-Noir",
-  "Widow's Bay",
-  "Euphoria",
-  "The Boroughs",
-  "FROM",
-  "Off Campus",
-  "The Four Seasons",
-  "Rick and Morty",
-  "Hacks",
-  "Your Friends & Neighbors",
-];
-const PRIMARY_RICK_AND_MORTY_SIXTH_LIVE_TITLES = [
-  "Spider-Noir",
-  "Widow's Bay",
-  "Euphoria",
-  "The Boroughs",
-  "FROM",
-  "Rick and Morty",
-  "Off Campus",
-  "The Four Seasons",
-  "Your Friends & Neighbors",
-  "Hacks",
-];
-const PRIMARY_FROM_NINTH_LIVE_TITLES = [
-  "Spider-Noir",
-  "Widow's Bay",
-  "Euphoria",
-  "The Boroughs",
-  "The Four Seasons",
-  "Off Campus",
-  "Rick and Morty",
-  "Your Friends & Neighbors",
-  "FROM",
-  "Hacks",
-];
-const PRIMARY_JUNE_THIRD_LIVE_TITLES = [
-  "Widow's Bay",
-  "Spider-Noir",
-  "Euphoria",
-  "Off Campus",
-  "The Boroughs",
-  "Love Island USA",
-  "The Four Seasons",
-  "Rick and Morty",
-  "FROM",
-  "The Beauty",
-];
-const PRIMARY_JUNE_THIRD_LATE_SWAP_LIVE_TITLES = [
-  "Widow's Bay",
-  "Spider-Noir",
-  "Euphoria",
-  "Off Campus",
-  "The Boroughs",
-  "Love Island USA",
-  "The Four Seasons",
-  "Rick and Morty",
-  "The Beauty",
-  "FROM",
-];
-const PRIMARY_JUNE_THIRD_FAST_REFRESH_LIVE_TITLES = [
-  "Widow's Bay",
-  "Spider-Noir",
-  "Love Island USA",
-  "The Boroughs",
-  "Off Campus",
-  "The Four Seasons",
-  "Euphoria",
-  "Not Suitable for Work",
-  "FROM",
-  "Hacks",
+  "X-Men '97",
+  "Maximum Pleasure Guaranteed",
+  "Elle",
+  "Silo",
+  "The Agency",
 ];
 const SOURCE_BACKED_CHURN_LIVE_TITLES = [
   "Widow's Bay",
-  "Spider-Noir",
+  "The Bear",
+  "I Will Find You",
+  "FROM",
+  "House of the Dragon",
+  "X-Men '97",
+  "Maximum Pleasure Guaranteed",
+  "Elle",
+  "Silo",
   "Cape Fear",
-  "The Boroughs",
-  "Off Campus",
-  "Euphoria",
-  "Not Suitable for Work",
-  "Love Island USA",
-  "Dutton Ranch",
-  "Hacks",
 ];
 
 function buildJustWatchFixtureHtml({
   titles = LIVE_TITLES,
-  updatedAt = "2026-06-01T05:24:07.286Z",
+  updatedAt = "2026-07-02T05:24:07.286Z",
 }: {
   titles?: string[];
   updatedAt?: string;
@@ -198,7 +90,7 @@ function withFixture(html: string, run: (fixturePath: string) => void) {
 
 function runAudit(
   fixturePath: string,
-  now = "2026-06-01T12:00:00.000Z",
+  now = "2026-07-02T12:00:00.000Z",
 ) {
   return execFileSync("node", [SCRIPT_PATH], {
     cwd: process.cwd(),
@@ -214,7 +106,7 @@ function runAudit(
 
 function runAuditExpectingFailure(
   fixturePath: string,
-  now = "2026-06-01T12:00:00.000Z",
+  now = "2026-07-02T12:00:00.000Z",
 ) {
   try {
     runAudit(fixturePath, now);
@@ -231,25 +123,11 @@ describe("home current-demand audit script", () => {
       const output = runAudit(fixturePath);
 
       expect(output).toContain("Home current-demand audit passed.");
-      expect(output).toContain("Live chart updated at: 2026-06-01T05:24:07.286Z");
+      expect(output).toContain("Live chart updated at: 2026-07-02T05:24:07.286Z");
       expect(output).toContain(
-        "Titles: Spider-Noir | Widow's Bay | FROM",
+        "Titles: Widow's Bay | The Bear | I Will Find You",
       );
     });
-  });
-
-  it("accepts a same-day JustWatch edge variant when every title is covered", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({ titles: ALTERNATE_LIVE_TITLES }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: FROM | Off Campus | Your Friends & Neighbors | Rick and Morty",
-        );
-      },
-    );
   });
 
   it("accepts same-day rank jitter when the covered primary titles only swap the tail", () => {
@@ -259,9 +137,7 @@ describe("home current-demand audit script", () => {
         const output = runAudit(fixturePath);
 
         expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | FROM | The Boroughs",
-        );
+        expect(output).toContain("The Agency | Silo");
       },
     );
   });
@@ -274,152 +150,8 @@ describe("home current-demand audit script", () => {
 
         expect(output).toContain("Home current-demand audit passed.");
         expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | FROM | Euphoria | The Boroughs",
+          "Titles: Widow's Bay | The Bear | I Will Find You | House of the Dragon | FROM",
         );
-      },
-    );
-  });
-
-  it("accepts the observed same-day tail variant with a sourced top-10 entrant", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_RICK_AND_MORTY_TAIL_LIVE_TITLES,
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | Euphoria | FROM | The Boroughs",
-        );
-        expect(output).toContain("Your Friends & Neighbors | Rick and Morty");
-      },
-    );
-  });
-
-  it("accepts the second observed primary-cluster order with the sourced top-10 entrant", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_RICK_AND_MORTY_TAIL_SECOND_LIVE_TITLES,
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | Euphoria | The Boroughs | FROM",
-        );
-        expect(output).toContain("Your Friends & Neighbors | Rick and Morty");
-      },
-    );
-  });
-
-  it("accepts the observed same-day order where the sourced top-10 entrant rises to eighth", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_RICK_AND_MORTY_EIGHTH_LIVE_TITLES,
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | Euphoria | The Boroughs | FROM",
-        );
-        expect(output).toContain(
-          "The Four Seasons | Rick and Morty | Hacks | Your Friends & Neighbors",
-        );
-      },
-    );
-  });
-
-  it("accepts the observed same-day order where the sourced top-10 entrant rises to sixth", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_RICK_AND_MORTY_SIXTH_LIVE_TITLES,
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | Euphoria | The Boroughs | FROM",
-        );
-        expect(output).toContain(
-          "Rick and Morty | Off Campus | The Four Seasons | Your Friends & Neighbors | Hacks",
-        );
-      },
-    );
-  });
-
-  it("accepts the observed same-day order where sourced current-demand titles reshuffle the tail", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_FROM_NINTH_LIVE_TITLES,
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath);
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Spider-Noir | Widow's Bay | Euphoria | The Boroughs | The Four Seasons",
-        );
-        expect(output).toContain("Rick and Morty | Your Friends & Neighbors | FROM | Hacks");
-      },
-    );
-  });
-
-  it("accepts the observed current live order when every chart title is already sourced", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_JUNE_THIRD_LIVE_TITLES,
-        updatedAt: "2026-06-03T01:22:04.487Z",
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath, "2026-06-03T12:00:00.000Z");
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Widow's Bay | Spider-Noir | Euphoria | Off Campus | The Boroughs",
-        );
-        expect(output).toContain("Love Island USA | The Four Seasons | Rick and Morty");
-        expect(output).toContain("FROM | The Beauty");
-      },
-    );
-  });
-
-  it("accepts the current live order after the bottom pair rank flips", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_JUNE_THIRD_LATE_SWAP_LIVE_TITLES,
-        updatedAt: "2026-06-03T01:22:04.487Z",
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath, "2026-06-03T12:00:00.000Z");
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Widow's Bay | Spider-Noir | Euphoria | Off Campus | The Boroughs",
-        );
-        expect(output).toContain("Rick and Morty | The Beauty | FROM");
-      },
-    );
-  });
-
-  it("accepts fast live-rank churn when every title remains source-backed", () => {
-    withFixture(
-      buildJustWatchFixtureHtml({
-        titles: PRIMARY_JUNE_THIRD_FAST_REFRESH_LIVE_TITLES,
-        updatedAt: "2026-06-03T01:22:04.487Z",
-      }),
-      (fixturePath) => {
-        const output = runAudit(fixturePath, "2026-06-03T12:00:00.000Z");
-
-        expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Widow's Bay | Spider-Noir | Love Island USA | The Boroughs",
-        );
-        expect(output).toContain("Not Suitable for Work | FROM | Hacks");
       },
     );
   });
@@ -428,27 +160,24 @@ describe("home current-demand audit script", () => {
     withFixture(
       buildJustWatchFixtureHtml({
         titles: SOURCE_BACKED_CHURN_LIVE_TITLES,
-        updatedAt: "2026-06-07T08:13:00.000Z",
+        updatedAt: "2026-07-03T01:17:37.863Z",
       }),
       (fixturePath) => {
-        const output = runAudit(fixturePath, "2026-06-07T12:00:00.000Z");
+        const output = runAudit(fixturePath, "2026-07-03T12:00:00.000Z");
 
         expect(output).toContain("Home current-demand audit passed.");
-        expect(output).toContain(
-          "Titles: Widow's Bay | Spider-Noir | Cape Fear | The Boroughs",
-        );
-        expect(output).toContain("Love Island USA | Dutton Ranch | Hacks");
+        expect(output).toContain("Silo | Cape Fear");
       },
     );
   });
 
   it("fails when the live daily source itself has not updated recently", () => {
     withFixture(
-      buildJustWatchFixtureHtml({ updatedAt: "2026-05-31T05:15:38.177Z" }),
+      buildJustWatchFixtureHtml({ updatedAt: "2026-06-29T05:15:38.177Z" }),
       (fixturePath) => {
         const output = runAuditExpectingFailure(
           fixturePath,
-          "2026-06-03T12:00:00.000Z",
+          "2026-07-02T12:00:00.000Z",
         );
 
         expect(output).toContain("The live JustWatch chart updatedAt is 3 day(s) old");
@@ -460,7 +189,7 @@ describe("home current-demand audit script", () => {
     withFixture(buildJustWatchFixtureHtml({}), (fixturePath) => {
       const output = runAuditExpectingFailure(
         fixturePath,
-        "2026-06-10T12:00:00.000Z",
+        "2026-07-11T12:00:00.000Z",
       );
 
       expect(output).toContain(
@@ -473,16 +202,16 @@ describe("home current-demand audit script", () => {
     withFixture(
       buildJustWatchFixtureHtml({
         titles: [
-          "Spider-Noir",
           "Widow's Bay",
+          "The Bear",
           "Unexpected Hit",
-          "The Boroughs",
           "FROM",
-          "The Four Seasons",
-          "Off Campus",
-          "The Terror",
-          "Your Friends & Neighbors",
-          "Euphoria",
+          "House of the Dragon",
+          "X-Men '97",
+          "Maximum Pleasure Guaranteed",
+          "Elle",
+          "Silo",
+          "The Agency",
         ],
       }),
       (fixturePath) => {

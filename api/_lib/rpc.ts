@@ -61,6 +61,14 @@ import {
   type ReleaseCalendarShowSource,
 } from "../../lib/releaseCalendar";
 import { getReleaseAwareUpNextEpisode } from "../../lib/upNextReleaseMerge";
+import {
+  fetchAndCacheSeason,
+  findCachedSeasonEpisode,
+  readSeasonCacheEntries,
+  seasonCacheKey,
+  slimSeasonPayload,
+  upsertSeasonCacheEntry,
+} from "./season-cache";
 import { buildWatchStats } from "../../lib/watchStats";
 import {
   getEpisodeProgressState,
@@ -223,6 +231,104 @@ function readSeasonSummaries(payload: unknown): SeasonSummary[] {
       })
       .filter((season): season is SeasonSummary => Boolean(season)),
   );
+}
+
+type UpNextEnrichableEntry = {
+  externalSource: string | null;
+  externalId: string | null;
+  isCaughtUp: boolean;
+  isUpcoming: boolean;
+  nextSeasonNumber: number;
+  nextEpisodeNumber: number;
+  nextEpisodeName: string | null;
+  nextEpisodeStillUrl: string | null;
+  nextEpisodeOverview: string | null;
+  nextEpisodeRuntime: number | null;
+  nextAirDate: number | null;
+  nextReleaseDate: number | null;
+  nextEpisodeReleasedToday: boolean;
+  sortTimestamp: number;
+};
+
+const MAX_INLINE_SEASON_FETCHES = 3;
+
+// Fill next-episode metadata (name, still, overview, runtime, air date) from
+// the season cache. At most a few stale seasons are refreshed from TMDB per
+// request; everything else serves stale-if-available and heals on later calls,
+// keeping the handler inside the Workers subrequest budget.
+async function enrichUpNextEntriesWithSeasonMetadata(
+  entries: UpNextEnrichableEntry[],
+  { now, today }: { now: number; today: string },
+) {
+  const targets = entries.filter(
+    (entry) =>
+      entry.externalSource === "tmdb" &&
+      typeof entry.externalId === "string" &&
+      !entry.isCaughtUp &&
+      entry.nextSeasonNumber >= 1 &&
+      entry.nextEpisodeNumber >= 1,
+  );
+  if (targets.length === 0) {
+    return;
+  }
+
+  const cached = await readSeasonCacheEntries(
+    targets.map((entry) => ({
+      externalId: entry.externalId as string,
+      seasonNumber: entry.nextSeasonNumber,
+    })),
+  );
+
+  const staleByKey = new Map<string, UpNextEnrichableEntry>();
+  for (const entry of targets) {
+    const key = seasonCacheKey(entry.externalId as string, entry.nextSeasonNumber);
+    const cacheEntry = cached.get(key);
+    if ((!cacheEntry || cacheEntry.expiresAt <= now) && !staleByKey.has(key)) {
+      staleByKey.set(key, entry);
+    }
+  }
+  const fetchTargets = Array.from(staleByKey.entries())
+    .sort(([, left], [, right]) => right.sortTimestamp - left.sortTimestamp)
+    .slice(0, MAX_INLINE_SEASON_FETCHES);
+  const fetchedPayloads = await Promise.all(
+    fetchTargets.map(([, entry]) =>
+      fetchAndCacheSeason(entry.externalId as string, entry.nextSeasonNumber, now),
+    ),
+  );
+  fetchTargets.forEach(([key], index) => {
+    const payload = fetchedPayloads[index];
+    if (payload) {
+      cached.set(key, { payload, fetchedAt: now, expiresAt: now });
+    }
+  });
+
+  for (const entry of targets) {
+    const key = seasonCacheKey(entry.externalId as string, entry.nextSeasonNumber);
+    const episode = findCachedSeasonEpisode(cached.get(key)?.payload, entry.nextEpisodeNumber);
+    if (!episode) {
+      continue;
+    }
+    entry.nextEpisodeName = episode.name ?? entry.nextEpisodeName;
+    entry.nextEpisodeStillUrl = episode.stillUrl ?? entry.nextEpisodeStillUrl;
+    entry.nextEpisodeOverview = episode.overview;
+    entry.nextEpisodeRuntime = episode.runtime;
+
+    // Air-date refinement only applies when release events had nothing to
+    // say — they are the fresher source when present.
+    if (
+      !entry.nextReleaseDate &&
+      !entry.nextEpisodeReleasedToday &&
+      episode.airDate &&
+      isDateOnlyString(episode.airDate)
+    ) {
+      if (episode.airDate > today) {
+        entry.nextAirDate = entry.nextAirDate ?? getDateOnlyStartTimestamp(episode.airDate);
+        entry.isUpcoming = true;
+      } else if (episode.airDate === today) {
+        entry.nextEpisodeReleasedToday = true;
+      }
+    }
+  }
 }
 
 function isShowEnded(payload: unknown): boolean {
@@ -2277,7 +2383,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
       progressByShow.set(entry.showId, current);
     }
 
-    return rows
+    const rankedEntries = rows
       .map((row) => {
         const show = showById.get(row.showId);
         if (!show) return null;
@@ -2382,26 +2488,41 @@ export const queryHandlers: Record<string, RpcHandler> = {
         return {
           showId: show.id,
           show: showToDoc(show),
+          externalSource: show.externalSource,
+          externalId: show.externalId,
           totalWatched: progressState.totalWatched,
           totalEpisodes: releaseAware.totalEpisodes,
           progressPct: releaseProgressPct,
           nextSeasonNumber: releaseAware.nextSeasonNumber,
           nextEpisodeNumber: releaseAware.nextEpisodeNumber,
-          nextEpisodeName: releaseAware.nextEpisodeName,
-          nextEpisodeStillUrl: releaseAware.nextEpisodeStillUrl,
-          nextAirDate: releaseAware.nextAirDate,
-          nextReleaseDate: releaseAware.nextReleaseDate,
-          nextEpisodeReleasedToday: releaseAware.nextEpisodeReleasedToday,
+          nextEpisodeName: releaseAware.nextEpisodeName ?? null,
+          nextEpisodeStillUrl: releaseAware.nextEpisodeStillUrl ?? null,
+          nextEpisodeOverview: null as string | null,
+          nextEpisodeRuntime: null as number | null,
+          nextAirDate: releaseAware.nextAirDate ?? null,
+          nextReleaseDate: releaseAware.nextReleaseDate ?? null,
+          nextEpisodeReleasedToday: releaseAware.nextEpisodeReleasedToday ?? false,
           isUpcoming: presentAsUpcoming,
           isCaughtUp,
+          lastWatchedAt: progress.latestWatchedAt,
           seasons: progressState.seasons,
           sortTimestamp: releaseAware.sortTimestamp,
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .sort((left, right) => right.sortTimestamp - left.sortTimestamp)
-      .slice(0, 10)
-      .map(({ sortTimestamp: _sortTimestamp, ...entry }) => entry);
+      .slice(0, 10);
+
+    await enrichUpNextEntriesWithSeasonMetadata(rankedEntries, { now, today });
+
+    return rankedEntries.map(
+      ({
+        sortTimestamp: _sortTimestamp,
+        externalSource: _externalSource,
+        externalId: _externalId,
+        ...entry
+      }) => entry,
+    );
   },
   "reviews:getDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
@@ -3350,9 +3471,16 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
     const show = showRows[0];
     if (!show || show.externalSource !== "tmdb") return null;
-    return normalizeTmdbSeasonDetails(
+    const payload = normalizeTmdbSeasonDetails(
       await tmdb(`/tv/${show.externalId}/season/${parsed.seasonNumber}`),
     );
+    // Write-through: keep the up-next season cache warm from the episode
+    // guide so the continue rail has metadata without its own TMDB call.
+    const slim = slimSeasonPayload(payload);
+    if (slim) {
+      await upsertSeasonCacheEntry(show.externalId, slim).catch(() => {});
+    }
+    return payload;
   },
   "embeddings:saveViewerTastePreferences": async ({ args, req }) => {
     const user = await requireAuthUser(req);

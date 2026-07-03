@@ -286,7 +286,7 @@ describe("home preview data", () => {
 
     expect(openingSurfaceItems.map((item) => item.title)).toEqual(
       expect.arrayContaining([
-        "Spider-Noir",
+        "The Four Seasons",
         "Rafa",
         "Rick and Morty",
         "Star City",
@@ -294,7 +294,7 @@ describe("home preview data", () => {
     );
     expect(freshItems.map((item) => item.title)).not.toEqual(
       expect.arrayContaining([
-        "Spider-Noir",
+        "The Four Seasons",
         "Rafa",
         "Rick and Morty",
         "Star City",
@@ -333,8 +333,8 @@ describe("home preview data", () => {
     });
 
     expect(data.heroSlides[0]).toMatchObject({
-      title: "Spider-Noir",
-      signal: "Prime May 27",
+      title: "The Four Seasons",
+      signal: "S2 May 28",
     });
     expect(data.heroSlides.map((item) => item.title)).toEqual(
       expect.arrayContaining(["The Boys", "Euphoria"]),
@@ -403,6 +403,7 @@ describe("home preview data", () => {
       expect.arrayContaining(openingCriticTitles),
     );
     expect(criticsItems.map((item) => item.title)).toEqual([
+      "Avatar: The Last Airbender",
       "Lord of the Flies",
       "The Pitt",
       "Adolescence",

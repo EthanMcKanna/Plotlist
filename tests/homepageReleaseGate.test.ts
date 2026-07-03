@@ -89,13 +89,13 @@ describe("homepage release gate", () => {
     expect(runbook).toContain("/search");
     expect(runbook).toContain("/calendar");
     expect(runbook).toContain("Phone number");
-    expect(runbook).toContain("justwatch_us_daily_streaming_charts_jun1");
+    expect(runbook).toContain("justwatch_us_daily_streaming_charts_jul2");
     expect(runbook).toContain("primary genres");
     expect(runbook).toContain("nonfiction/reality/news/talk lanes");
     expect(runbook).toContain("FROM,");
-    expect(runbook).toContain("The Boroughs, Euphoria");
-    expect(runbook).toContain("The Four Seasons, Hacks, The Terror");
-    expect(runbook).toContain("Your Friends & Neighbors.");
+    expect(runbook).toContain("I Will Find You");
+    expect(runbook).toContain("House of the Dragon, X-Men '97, Maximum Pleasure Guaranteed, Elle");
+    expect(runbook).toContain("The Agency.");
     expect(runbook).toContain("PLOTLIST_HOME_MIN_CURRENT_DEMAND_TITLES");
     expect(runbook).toContain("PLOTLIST_HOME_MIN_ACTIVE_CURRENT_DEMAND_TITLES");
     expect(runbook).toContain("PLOTLIST_HOME_MIN_CURRENT_DEMAND_PLATFORMS");

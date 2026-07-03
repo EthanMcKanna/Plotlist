@@ -11,6 +11,7 @@ import {
   tmdbImportJobs,
   tmdbListCache,
   tmdbSearchCache,
+  tmdbSeasonCache,
 } from "../../db/schema";
 import { db } from "./db";
 import { createId } from "./ids";
@@ -65,7 +66,7 @@ async function latestEpisodeCacheJob() {
 export async function cleanupExpiredTmdbCache() {
   const now = Date.now();
 
-  const [details, search, list] = await Promise.all([
+  const [details, search, list, seasons] = await Promise.all([
     db
       .delete(tmdbDetailsCache)
       .where(lte(tmdbDetailsCache.expiresAt, now))
@@ -78,10 +79,16 @@ export async function cleanupExpiredTmdbCache() {
       .delete(tmdbListCache)
       .where(lte(tmdbListCache.expiresAt, getHomeCatalogCacheCleanupCutoff(now)))
       .returning({ id: tmdbListCache.id }),
+    // Season rows serve stale-if-available for up-next, so only drop entries
+    // that have sat unrefreshed for a week past expiry.
+    db
+      .delete(tmdbSeasonCache)
+      .where(lte(tmdbSeasonCache.expiresAt, now - 7 * 24 * 60 * 60 * 1000))
+      .returning({ id: tmdbSeasonCache.id }),
   ]);
 
   return {
-    removed: details.length + search.length + list.length,
+    removed: details.length + search.length + list.length + seasons.length,
   };
 }
 

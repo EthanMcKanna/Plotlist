@@ -44,6 +44,9 @@ export type ContinueWatchingItem = {
   nextEpisodeReleasedToday?: boolean;
   nextEpisodeStillUrl?: string | null;
   nextEpisodeName?: string | null;
+  nextEpisodeOverview?: string | null;
+  nextEpisodeRuntime?: number | null;
+  lastWatchedAt?: number | null;
   isUpcoming?: boolean;
   isCaughtUp?: boolean;
   optimisticCaughtUp?: boolean;
@@ -56,8 +59,8 @@ type ContinueWatchingRailProps = {
   index?: number;
 };
 
-const CARD_WIDTH = 236;
-const CARD_HEIGHT = (CARD_WIDTH * 9) / 16;
+const CARD_WIDTH = 260;
+const IMAGE_HEIGHT = Math.round((CARD_WIDTH * 9) / 16);
 const ACCENT = "#0EA5E9";
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";
 export const CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET = 44;
@@ -82,6 +85,52 @@ export function getContinueWatchingSubtitle(item: {
   }
   if (watchedCount > 0) return `${watchedCount} watched`;
   return "Ready to start";
+}
+
+export function formatContinueWatchingRuntime(runtime?: number | null) {
+  if (typeof runtime !== "number" || !Number.isFinite(runtime) || runtime <= 0) {
+    return null;
+  }
+  const minutes = Math.round(runtime);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+// The bold first line of the card's meta block: the actual next-episode
+// title when we have it, a plain pointer when we don't.
+export function getContinueWatchingEpisodeTitle(item: {
+  isUpcoming?: boolean;
+  isCaughtUp?: boolean;
+  totalEpisodes?: number;
+  totalWatched?: number;
+  nextEpisodeName?: string | null;
+  nextEpisodeNumber?: number;
+}) {
+  if (isContinueWatchingComplete(item)) {
+    return "All caught up";
+  }
+  const episodeName = item.nextEpisodeName?.trim();
+  if (episodeName) return episodeName;
+  return `Episode ${item.nextEpisodeNumber ?? 1}`;
+}
+
+// The quiet second line: progress plus runtime, or the air date for
+// not-yet-released episodes.
+export function getContinueWatchingMetaLine(item: {
+  isUpcoming?: boolean;
+  nextAirDate?: number | null;
+  nextEpisodeRuntime?: number | null;
+  totalEpisodes?: number;
+  totalWatched?: number;
+  isCaughtUp?: boolean;
+}) {
+  if (isContinueWatchingComplete(item)) {
+    return "You're up to date";
+  }
+  const runtime = formatContinueWatchingRuntime(item.nextEpisodeRuntime);
+  return [getContinueWatchingSubtitle(item), runtime].filter(Boolean).join(" · ");
 }
 
 export function getContinueWatchingContextLine(item: {
@@ -141,6 +190,22 @@ export function isContinueWatchingComplete(item: {
   const totalEpisodes = item.totalEpisodes ?? 0;
   const watchedCount = item.totalWatched ?? 0;
   return !item.isUpcoming && totalEpisodes > 0 && watchedCount >= totalEpisodes;
+}
+
+export function getContinueWatchingProgressRatio(item: {
+  progressPct?: number;
+  totalEpisodes?: number;
+  totalWatched?: number;
+  isUpcoming?: boolean;
+  isCaughtUp?: boolean;
+}) {
+  if (isContinueWatchingComplete(item)) return 1;
+  if (typeof item.progressPct === "number" && Number.isFinite(item.progressPct)) {
+    return Math.min(1, Math.max(0, item.progressPct));
+  }
+  const totalEpisodes = item.totalEpisodes ?? 0;
+  if (totalEpisodes <= 0) return 0;
+  return Math.min(1, Math.max(0, (item.totalWatched ?? 0) / totalEpisodes));
 }
 
 export function getContinueWatchingBadgeLabel(item: {
@@ -257,6 +322,7 @@ export function ContinueWatchingRail({
         showId: item.showId,
         seasonNumber: season,
         episodeNumber: episode,
+        episodeTitle: item.nextEpisodeName ?? undefined,
         createLog: true,
       })
         .catch(() => {})
@@ -423,10 +489,14 @@ function ContinueWatchingCard({
   const season = item.nextSeasonNumber ?? 1;
   const episode = item.nextEpisodeNumber ?? 1;
   const epLabel = getContinueWatchingVisibleBadgeLabel(item);
+  const freshnessLabel = getContinueWatchingFreshnessLabel(item);
   const imageUrl =
     item.nextEpisodeStillUrl ?? item.show.backdropUrl ?? item.show.posterUrl ?? null;
-  const visibleContextLine = getContinueWatchingVisibleContextLine(item);
+  const episodeTitle = getContinueWatchingEpisodeTitle(item);
+  const metaLine = getContinueWatchingMetaLine(item);
+  const progressRatio = getContinueWatchingProgressRatio(item);
   const complete = isContinueWatchingComplete(item);
+  const showProgressBar = !item.isUpcoming && (item.totalEpisodes ?? 0) > 0;
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -461,53 +531,87 @@ function ContinueWatchingCard({
           style={styles.card}
           className="active:opacity-90"
         >
-          {imageUrl ? (
-            <Image
-              source={{ uri: imageUrl }}
-              style={styles.image}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              priority="high"
-              transition={200}
-            />
-          ) : (
-            <HomeArtworkFallback
-              testID={`continue-artwork-fallback-${item.showId}`}
-              title={item.show.title}
-              subtitle={visibleContextLine}
-              accent={ACCENT}
-              compact
-              markVisible={false}
-            />
-          )}
+          <View style={styles.media}>
+            {imageUrl ? (
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.image}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="high"
+                transition={200}
+              />
+            ) : (
+              <HomeArtworkFallback
+                testID={`continue-artwork-fallback-${item.showId}`}
+                title={item.show.title}
+                subtitle={null}
+                accent={ACCENT}
+                compact
+                markVisible={false}
+              />
+            )}
 
-          <LinearGradient
-            colors={["rgba(13,15,20,0.0)", "rgba(13,15,20,0.92)"]}
-            locations={[0.35, 1]}
-            style={[StyleSheet.absoluteFill, styles.pointerNone]}
-          />
+            <LinearGradient
+              colors={["rgba(13,15,20,0.30)", "rgba(13,15,20,0.0)", "rgba(13,15,20,0.55)"]}
+              locations={[0, 0.4, 1]}
+              style={[StyleSheet.absoluteFill, styles.pointerNone]}
+            />
 
-          {imageUrl ? (
-            <View style={styles.imageCopy}>
+            <View style={styles.badgeRow}>
+              <View
+                testID={`continue-episode-chip-${item.showId}`}
+                style={styles.epBadge}
+              >
+                <Text
+                  className="text-[10px] font-bold text-white/85"
+                  style={{ letterSpacing: 0.2 }}
+                >
+                  {epLabel}
+                </Text>
+              </View>
+              {freshnessLabel ? (
+                <View
+                  testID={`continue-freshness-chip-${item.showId}`}
+                  style={styles.freshBadge}
+                >
+                  <Text className="text-[10px] font-black text-white" style={{ letterSpacing: 0.4 }}>
+                    {freshnessLabel}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+
+            {showProgressBar ? (
+              <View
+                testID={`continue-progress-track-${item.showId}`}
+                style={styles.progressTrack}
+              >
+                <View
+                  testID={`continue-progress-fill-${item.showId}`}
+                  style={[styles.progressFill, { width: `${Math.round(progressRatio * 100)}%` }]}
+                />
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.meta}>
+            <View style={styles.metaCopy}>
               <Text
-                className="text-[14px] font-black text-white"
+                className="text-[11px] font-semibold text-text-secondary uppercase"
+                style={{ letterSpacing: 0.6 }}
                 numberOfLines={1}
               >
                 {item.show.title}
               </Text>
-            </View>
-          ) : null}
-
-          <View style={styles.badgeRow}>
-            <View
-              testID={`continue-episode-chip-${item.showId}`}
-              style={styles.epBadge}
-            >
               <Text
-                className="text-[10px] font-bold text-white/80"
-                style={{ letterSpacing: 0 }}
+                className="text-[15px] font-bold text-text-primary mt-0.5"
+                numberOfLines={1}
               >
-                {epLabel}
+                {episodeTitle}
+              </Text>
+              <Text className="text-[12px] text-text-tertiary mt-0.5" numberOfLines={1}>
+                {metaLine}
               </Text>
             </View>
           </View>
@@ -522,6 +626,7 @@ function ContinueWatchingCard({
             className="active:opacity-70"
             accessibilityRole="button"
             accessibilityLabel={getContinueWatchingMarkWatchedLabel(item)}
+            hitSlop={4}
           >
             <View
               testID={`continue-mark-watched-glyph-${item.showId}`}
@@ -529,8 +634,8 @@ function ContinueWatchingCard({
             >
               <Ionicons
                 name="checkmark"
-                size={15}
-                color="#C9D1DA"
+                size={18}
+                color="#FFFFFF"
                 accessible={false}
                 accessibilityElementsHidden
                 aria-hidden={true}
@@ -540,7 +645,6 @@ function ContinueWatchingCard({
           </Pressable>
         ) : null}
       </View>
-
     </Animated.View>
   );
 }
@@ -552,46 +656,71 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   cardWrap: {
-    height: CARD_HEIGHT,
     position: "relative",
     width: CARD_WIDTH,
   },
   card: {
     backgroundColor: "#161A22",
     borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    height: CARD_HEIGHT,
     overflow: "hidden",
     position: "relative",
     width: CARD_WIDTH,
+  },
+  media: {
+    height: IMAGE_HEIGHT,
+    position: "relative",
+    width: "100%",
   },
   image: {
     height: "100%",
     width: "100%",
   },
-  imageCopy: {
-    bottom: 16,
-    left: 13,
-    position: "absolute",
-    right: 48,
-  },
   badgeRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 6,
-    left: 11,
+    left: 10,
     position: "absolute",
-    right: 11,
-    top: 11,
+    right: 10,
+    top: 10,
   },
   epBadge: {
-    backgroundColor: "rgba(13,15,20,0.42)",
+    backgroundColor: "rgba(13,15,20,0.55)",
     borderColor: "rgba(255,255,255,0.10)",
     borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
     paddingVertical: 3,
+  },
+  freshBadge: {
+    backgroundColor: "rgba(14,165,233,0.92)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  progressTrack: {
+    backgroundColor: "rgba(255,255,255,0.22)",
+    bottom: 0,
+    height: 3,
+    left: 0,
+    position: "absolute",
+    right: 0,
+  },
+  progressFill: {
+    backgroundColor: ACCENT,
+    height: "100%",
+  },
+  meta: {
+    alignItems: "center",
+    flexDirection: "row",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  metaCopy: {
+    flex: 1,
+    paddingRight: 44,
   },
   checkButton: {
     alignItems: "center",
@@ -604,13 +733,13 @@ const styles = StyleSheet.create({
   },
   checkButtonGlyph: {
     alignItems: "center",
-    backgroundColor: "rgba(13,15,20,0.26)",
-    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(14,165,233,0.92)",
+    borderColor: "rgba(255,255,255,0.18)",
     borderRadius: 999,
     borderWidth: 1,
-    height: 28,
+    height: 34,
     justifyContent: "center",
-    width: 28,
+    width: 34,
   },
   emptyCard: {
     alignItems: "center",

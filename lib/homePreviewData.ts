@@ -54,6 +54,7 @@ export function buildHomePreviewContinueWatchingItems(): ContinueWatchingItem[] 
       nextSeasonNumber: 2,
       nextEpisodeNumber: 7,
       nextEpisodeName: "Messenger",
+      nextEpisodeRuntime: 48,
       nextEpisodeReleasedToday: true,
       isCaughtUp: false,
       seasons: [
@@ -75,6 +76,7 @@ export function buildHomePreviewContinueWatchingItems(): ContinueWatchingItem[] 
       nextSeasonNumber: 2,
       nextEpisodeNumber: 4,
       nextEpisodeName: "Whodunit",
+      nextEpisodeRuntime: 61,
       isCaughtUp: false,
       seasons: [
         { seasonNumber: 1, episodeCount: 3, airDate: null },

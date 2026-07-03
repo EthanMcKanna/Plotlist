@@ -60,6 +60,37 @@ describe("home hero slides", () => {
     expect(slides.map((slide) => slide.title)).not.toContain("Stale Personal Favorite");
   });
 
+  it("grows the candidate pool past five when a rotation limit is supplied", () => {
+    const trending = Array.from({ length: 10 }, (_, index) =>
+      show({
+        externalId: `trending-${index}`,
+        title: `Trending ${index}`,
+        tmdbPopularity: 400 - index,
+      }),
+    );
+
+    const defaultSlides = buildHeroSlides({
+      forYou: [],
+      trending,
+      premieres: [],
+      airing: [],
+    });
+    const pooledSlides = buildHeroSlides({
+      forYou: [],
+      trending,
+      premieres: [],
+      airing: [],
+      limit: 8,
+    });
+
+    expect(defaultSlides.length).toBeLessThanOrEqual(5);
+    expect(pooledSlides.length).toBeGreaterThan(defaultSlides.length);
+    expect(pooledSlides.length).toBeLessThanOrEqual(8);
+    expect(new Set(pooledSlides.map((slide) => slide.title)).size).toBe(
+      pooledSlides.length,
+    );
+  });
+
   it("keeps a current personalized pick in front when it is fresh enough", () => {
     const freshPersonalPick = show({
       externalId: "fresh-personal",
@@ -192,33 +223,37 @@ describe("home hero slides", () => {
       title: "Spider-Noir",
       eyebrow: "fresh",
       signal: "Prime May 27",
-      reason: "JustWatch #1 today",
+      reason: null,
     });
-    expect(getHeroReasonLabel(slides[0])).toBe("JustWatch #1 today");
+    expect(getHeroReasonLabel(slides[0])).toBeNull();
   });
 
   it("lets the live #1 daily chart title win close same-week hero ties", () => {
-    const now = "2026-05-30T12:00:00.000Z";
-    const spiderNoir = getHomeEditorialSeedItemByTitle("Spider-Noir", now);
-    const fourSeasons = getHomeEditorialSeedItemByTitle("The Four Seasons", now);
+    const now = "2026-07-02T12:00:00.000Z";
+    const widowsBay = getHomeEditorialSeedItemByTitle("Widow's Bay", now);
+    const maximumPleasure = getHomeEditorialSeedItemByTitle(
+      "Maximum Pleasure Guaranteed",
+      now,
+    );
 
-    expect(spiderNoir).not.toBeNull();
-    expect(fourSeasons).not.toBeNull();
+    expect(widowsBay).not.toBeNull();
+    expect(maximumPleasure).not.toBeNull();
 
     const slides = buildHeroSlides({
       forYou: [],
-      trending: [fourSeasons!, spiderNoir!],
-      premieres: [fourSeasons!, spiderNoir!],
+      trending: [maximumPleasure!, widowsBay!],
+      premieres: [maximumPleasure!, widowsBay!],
       airing: [],
       now,
     });
 
     expect(slides[0]).toMatchObject({
-      title: "Spider-Noir",
+      title: "Widow's Bay",
       eyebrow: "fresh",
-      signal: "Prime May 27",
+      signal: "Apple TV+ Apr 29",
       reason: "JustWatch #1 today",
     });
+    expect(getHeroReasonLabel(slides[0])).toBe("JustWatch #1 today");
   });
 
   it("uses ranking confidence instead of source order for the fresh hero lead", () => {
@@ -472,7 +507,7 @@ describe("home hero slides", () => {
         trending: [],
         premieres: [from],
         airing: [],
-        now: "2026-06-29",
+        now: "2026-07-13",
       })[0]?.signal,
     ).toBe("8.2 TMDB");
   });

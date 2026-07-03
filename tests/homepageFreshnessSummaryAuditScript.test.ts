@@ -10,7 +10,7 @@ const SCRIPT_PATH = join(
 const TSX_PATH = join(process.cwd(), "node_modules", ".bin", "tsx");
 
 function runAudit(
-  now = "2026-06-01T12:00:00.000Z",
+  now = "2026-07-02T12:00:00.000Z",
   env: Record<string, string> = {},
 ) {
   return execFileSync(TSX_PATH, [SCRIPT_PATH], {
@@ -26,7 +26,7 @@ function runAudit(
 }
 
 function runAuditExpectingFailure(
-  now = "2026-06-10T12:00:00.000Z",
+  now = "2026-07-11T12:00:00.000Z",
   env: Record<string, string> = {},
 ) {
   try {
@@ -44,14 +44,14 @@ describe("homepage freshness summary audit script", () => {
 
     expect(output).toContain("Home freshness summary audit passed.");
     expect(output).toContain(
-      "Checked-in source id: justwatch_us_daily_streaming_charts_jun1",
+      "Checked-in source id: justwatch_us_daily_streaming_charts_jul2",
     );
-    expect(output).toContain("Stale at: 2026-06-09");
+    expect(output).toContain("Stale at: 2026-07-10");
     expect(output).toContain(
-      "Titles: Spider-Noir | Widow's Bay | FROM | The Boroughs | Euphoria | Off Campus | The Four Seasons | Hacks | The Terror | Your Friends & Neighbors",
+      "Titles: Widow's Bay | The Bear | I Will Find You | FROM | House of the Dragon | X-Men '97 | Maximum Pleasure Guaranteed | Elle | Silo | The Agency",
     );
     expect(output).toContain(
-      "Coverage: 44 active current-demand titles across 11 platform(s), 10 primary genre(s), and 3 nonfiction/reality/news/talk title(s)",
+      "Coverage: 19 active current-demand titles across 10 platform(s), 8 primary genre(s), and 2 nonfiction/reality/news/talk title(s)",
     );
   });
 
@@ -67,35 +67,35 @@ describe("homepage freshness summary audit script", () => {
 
   it("fails when current-demand primary-genre breadth drops below the release minimum", () => {
     const output = runAuditExpectingFailure(
-      "2026-06-01T12:00:00.000Z",
+      "2026-07-02T12:00:00.000Z",
       {
-        PLOTLIST_HOME_MIN_CURRENT_DEMAND_PRIMARY_GENRES: "11",
+        PLOTLIST_HOME_MIN_CURRENT_DEMAND_PRIMARY_GENRES: "9",
       },
     );
 
     expect(output).toContain("Home freshness summary audit failed:");
     expect(output).toContain(
-      "Current-demand coverage spans 10 primary genre(s); expected at least 11",
+      "Current-demand coverage spans 8 primary genre(s); expected at least 9",
     );
   });
 
   it("fails when current-demand nonfiction coverage drops below the release minimum", () => {
     const output = runAuditExpectingFailure(
-      "2026-06-01T12:00:00.000Z",
+      "2026-07-02T12:00:00.000Z",
       {
-        PLOTLIST_HOME_MIN_CURRENT_DEMAND_NONFICTION_ITEMS: "4",
+        PLOTLIST_HOME_MIN_CURRENT_DEMAND_NONFICTION_ITEMS: "3",
       },
     );
 
     expect(output).toContain("Home freshness summary audit failed:");
     expect(output).toContain(
-      "Current-demand coverage has 3 nonfiction/reality/news/talk title(s); expected at least 4",
+      "Current-demand coverage has 2 nonfiction/reality/news/talk title(s); expected at least 3",
     );
   });
 
   it("does not allow release minima overrides to weaken the homepage gate", () => {
     const output = runAuditExpectingFailure(
-      "2026-06-01T12:00:00.000Z",
+      "2026-07-02T12:00:00.000Z",
       {
         PLOTLIST_HOME_MIN_CURRENT_DEMAND_PRIMARY_GENRES: "4",
       },

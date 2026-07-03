@@ -24,6 +24,10 @@ import {
 } from "./homeCurrentSignal";
 import { sortFreshRailItemsByReleaseProximity } from "./homeFreshRail";
 import {
+  rotateHomeRailForEpoch,
+  selectHeroSlidesForEpoch,
+} from "./homeSurfaceRotation";
+import {
   sortProviderRoomItemsForFreshness,
   sortProviderRoomsForFreshness,
 } from "./providerRoomFreshness";
@@ -1430,7 +1434,10 @@ export function buildHeroSlides(args: {
   premieres: CatalogItem[];
   airing: CatalogItem[];
   now?: Date | string | number;
+  /** Candidate pool size; the surface rotates a 5-slide window over it. */
+  limit?: number;
 }): HeroSlide[] {
+  const slideLimit = args.limit ?? 5;
   const rankingNow = getHomeDataGeneratedAt(args.now);
   const seen = new Set<string>();
   const out: HeroSlide[] = [];
@@ -1559,21 +1566,22 @@ export function buildHeroSlides(args: {
   );
   tryAdd(fresh, "fresh");
 
-  // Top up with additional diversified shows so the carousel has 5 slides where possible.
+  // Top up with additional diversified shows so the carousel has enough
+  // candidates for its rotating window.
   for (const item of [...rankedForYou, ...rankedTrending, ...rankedPremieres]) {
-    if (out.length >= 5) break;
+    if (out.length >= slideLimit) break;
     if (!isHeroCarouselCandidate(item, args.now)) continue;
     tryAdd(item, "trending");
   }
 
   // Last resort: tonight.
   for (const item of rankedAiring) {
-    if (out.length >= 5) break;
+    if (out.length >= slideLimit) break;
     if (!isHeroCarouselCandidate(item, args.now)) continue;
     tryAdd(item, "fresh");
   }
 
-  return out.slice(0, 5);
+  return out.slice(0, slideLimit);
 }
 
 export type HomeData = {
@@ -1843,23 +1851,29 @@ export function useHomeData(): HomeData {
     };
   }, [getSimilarTasteUsers, hasProfile, refreshKey]);
 
-  // Build hero slides from a curated blend.
+  // Build hero slides from a curated blend: an 8-candidate pool with a
+  // rotating 5-slide window, so the carousel line-up (including the lead)
+  // changes across visits instead of pinning the same five all day.
   const heroSlides = useMemo(
     () =>
-      buildHeroSlides({
-        trending:
-          trendingRaw.length > 0
-            ? trendingRaw
-            : tmdbDailyTrendingRaw.length > 0
-              ? tmdbDailyTrendingRaw
-              : risingRaw.length > 0
-                ? risingRaw
-                : tmdbTrendingRaw,
-        forYou: forYouRaw,
-        premieres: [...newOrBackSeedRaw, ...premieresRaw],
-        airing: airingRaw,
-        now: editorialSeedNow,
-      }),
+      selectHeroSlidesForEpoch(
+        buildHeroSlides({
+          trending:
+            trendingRaw.length > 0
+              ? trendingRaw
+              : tmdbDailyTrendingRaw.length > 0
+                ? tmdbDailyTrendingRaw
+                : risingRaw.length > 0
+                  ? risingRaw
+                  : tmdbTrendingRaw,
+          forYou: forYouRaw,
+          premieres: [...newOrBackSeedRaw, ...premieresRaw],
+          airing: airingRaw,
+          now: editorialSeedNow,
+          limit: 8,
+        }),
+        { now: editorialSeedNow, count: 5, leadPoolSize: 3 },
+      ),
     [
       trendingRaw,
       tmdbDailyTrendingRaw,
@@ -1874,7 +1888,7 @@ export function useHomeData(): HomeData {
   );
 
   const forYou = useMemo(() => {
-    return buildForYouRailCandidates({
+    const items = buildForYouRailCandidates({
       forYou: forYouRaw,
       fallback: [
         ...(risingRaw as AnyShowItem[]),
@@ -1888,6 +1902,11 @@ export function useHomeData(): HomeData {
       .map((catalog) => toRailItem(catalog, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
       .slice(0, 10);
+    // Keep the strongest personal pick leading; rotate the rest per epoch.
+    return rotateHomeRailForEpoch(items, "for-you", {
+      now: editorialSeedNow,
+      keepTop: 1,
+    });
   }, [
     forYouRaw,
     risingRaw,
@@ -1899,7 +1918,7 @@ export function useHomeData(): HomeData {
   ]);
 
   const heat = useMemo(() => {
-    return buildHeatRailCandidates({
+    const items = buildHeatRailCandidates({
       trending: trendingRaw,
       dailyTrending: tmdbDailyTrendingRaw,
       rising: risingRaw as AnyShowItem[],
@@ -1912,6 +1931,12 @@ export function useHomeData(): HomeData {
       .map((catalog) => toRailItem(catalog, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
       .slice(0, 10);
+    // Heat reads like a chart, so its top three stay anchored; only the tail
+    // rotates through the day.
+    return rotateHomeRailForEpoch(items, "heat", {
+      now: editorialSeedNow,
+      keepTop: 3,
+    });
   }, [
     trendingRaw,
     tmdbDailyTrendingRaw,
@@ -1938,11 +1963,16 @@ export function useHomeData(): HomeData {
       .map((catalog) => toRailItem(catalog as AnyShowItem, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
       .slice(0, 12);
-    return appendFreshEditorialTopUpRailItems(
+    const items = appendFreshEditorialTopUpRailItems(
       primary,
       newOrBackSeedRaw as AnyShowItem[],
       editorialSeedNow,
     ).slice(0, 12);
+    // The nearest releases stay up front; the longer tail rotates per epoch.
+    return rotateHomeRailForEpoch(items, "fresh", {
+      now: editorialSeedNow,
+      keepTop: 2,
+    });
   }, [
     premieresRaw,
     airingRaw,
@@ -1956,7 +1986,7 @@ export function useHomeData(): HomeData {
   ]);
 
   const critics = useMemo(() => {
-    return buildQualityRailCandidates({
+    const items = buildQualityRailCandidates({
       critics: criticsRaw as AnyShowItem[],
       qualitySeeds: qualitySeedRaw as AnyShowItem[],
       weeklyTrending: tmdbTrendingRaw as AnyShowItem[],
@@ -1971,6 +2001,10 @@ export function useHomeData(): HomeData {
       .map((catalog) => toRailItem(catalog as AnyShowItem, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
       .slice(0, 12);
+    return rotateHomeRailForEpoch(items, "critics", {
+      now: editorialSeedNow,
+      keepTop: 1,
+    });
   }, [
     criticsRaw,
     tmdbTrendingRaw,
@@ -1987,7 +2021,7 @@ export function useHomeData(): HomeData {
   ]);
 
   const quick = useMemo(() => {
-    return buildQuickRailItems({
+    const items = buildQuickRailItems({
       quickRaw: quickRaw as AnyShowItem[],
       quickSeedRaw: quickSeedRaw as AnyShowItem[],
       risingRaw: risingRaw as AnyShowItem[],
@@ -1998,6 +2032,10 @@ export function useHomeData(): HomeData {
       fresh,
       critics,
       now: editorialSeedNow,
+    });
+    return rotateHomeRailForEpoch(items, "quick", {
+      now: editorialSeedNow,
+      keepTop: 1,
     });
   }, [
     quickRaw,
