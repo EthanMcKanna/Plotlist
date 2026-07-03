@@ -121,7 +121,7 @@ describe("AuthGate", () => {
     expect(screen.queryByText("Protected content")).toBeTruthy();
   });
 
-  it("sends authenticated users to their onboarding step", async () => {
+  it("sends users with incomplete onboarding to the onboarding wizard", async () => {
     mockUseAuth.mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -134,9 +134,46 @@ describe("AuthGate", () => {
     await flushProfileBootstrap();
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith("/onboarding/follow");
+      expect(mockReplace).toHaveBeenCalledWith("/onboarding");
     });
     expect(mockEnsureProfile).toHaveBeenCalledWith({});
+  });
+
+  it("sends brand-new users to the onboarding wizard", async () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    mockUseQuery.mockReturnValue({
+      onboardingStep: "profile",
+    });
+
+    renderAuthGate();
+    await flushProfileBootstrap();
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("/onboarding");
+    });
+  });
+
+  it("lets fully onboarded users replay the welcome tour", async () => {
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    mockUseSegments.mockReturnValue(["onboarding", "welcome"]);
+    mockUsePathname.mockReturnValue("/onboarding/welcome");
+    mockUseQuery.mockReturnValue({
+      onboardingStep: "complete",
+    });
+
+    renderAuthGate();
+    await flushProfileBootstrap();
+
+    await waitFor(() => {
+      expect(mockEnsureProfile).toHaveBeenCalledWith({});
+    });
+    expect(mockReplace).not.toHaveBeenCalledWith("/home");
   });
 
   it("does not fight the user while they advance inside onboarding", async () => {
@@ -144,8 +181,8 @@ describe("AuthGate", () => {
       isAuthenticated: true,
       isLoading: false,
     });
-    mockUseSegments.mockReturnValue(["onboarding", "follow"]);
-    mockUsePathname.mockReturnValue("/onboarding/follow");
+    mockUseSegments.mockReturnValue(["onboarding"]);
+    mockUsePathname.mockReturnValue("/onboarding");
     mockUseQuery.mockReturnValue({
       onboardingStep: "profile",
     });
@@ -156,7 +193,7 @@ describe("AuthGate", () => {
     await waitFor(() => {
       expect(mockEnsureProfile).toHaveBeenCalledWith({});
     });
-    expect(mockReplace).not.toHaveBeenCalledWith("/onboarding/profile");
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("clears tokens and returns to sign-in when profile bootstrap reports auth failure", async () => {

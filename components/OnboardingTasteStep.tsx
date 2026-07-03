@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
-import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
-import { useRouter } from "expo-router";
 
-import { Screen } from "../../components/Screen";
-import { EmptyState } from "../../components/EmptyState";
-import { PrimaryButton } from "../../components/PrimaryButton";
-import { SectionHeader } from "../../components/SectionHeader";
-import { SearchResultRow } from "../../components/SearchResultRow";
-import { OnboardingHeader } from "../../components/OnboardingHeader";
-import { api } from "../../lib/plotlist/api";
-import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
+import { EmptyState } from "./EmptyState";
+import { FlashList } from "./FlashList";
+import { PrimaryButton } from "./PrimaryButton";
+import { SearchResultRow } from "./SearchResultRow";
+import { SectionHeader } from "./SectionHeader";
+import { api } from "../lib/plotlist/api";
+import { useAction, useQuery } from "../lib/plotlist/react";
 
 const STARTER_THEMES = [
   "slow-burn sci-fi",
@@ -39,12 +35,14 @@ type ListItem =
   | { type: "empty"; title: string; description?: string }
   | { type: "loading"; label: string };
 
-export default function OnboardingShows() {
-  const router = useRouter();
+export function OnboardingTasteStep({
+  onComplete,
+}: {
+  onComplete: () => Promise<void>;
+}) {
   const searchCatalog = useAction(api.shows.searchCatalog);
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
   const saveViewerTastePreferences = useAction(api.embeddings.saveViewerTastePreferences);
-  const setOnboardingStep = useMutation(api.users.setOnboardingStep);
   const trending = useQuery(api.trending.shows, { windowHours: 96, limit: 10 }) ?? [];
   const savedPreferences = useQuery(api.embeddings.getViewerTastePreferences, {}) ?? {
     favoriteShowIds: [],
@@ -239,23 +237,13 @@ export default function OnboardingShows() {
         favoriteShowIds: selectedShows.map((show) => show.showId as any),
         favoriteThemes: selectedThemes,
       });
-      const result = await setOnboardingStep({ step: "complete" });
-      cacheOnboardingStep(result?.userId, "complete");
-      markOnboardingStep("complete");
-      router.replace("/home");
+      await onComplete();
     } catch (error) {
       Alert.alert("Could not save your taste", String(error));
     } finally {
       setIsSaving(false);
     }
-  }, [hasTasteSignal, router, saveViewerTastePreferences, selectedShows, selectedThemes, setOnboardingStep]);
-
-  const handleSkip = useCallback(async () => {
-    const result = await setOnboardingStep({ step: "complete" });
-    cacheOnboardingStep(result?.userId, "complete");
-    markOnboardingStep("complete");
-    router.replace("/home");
-  }, [router, setOnboardingStep]);
+  }, [hasTasteSignal, onComplete, saveViewerTastePreferences, selectedShows, selectedThemes]);
 
   const data: ListItem[] = useMemo(() => {
     const items: ListItem[] = [];
@@ -364,7 +352,7 @@ export default function OnboardingShows() {
   );
 
   return (
-    <Screen>
+    <View className="flex-1">
       <FlashList
         data={data}
         renderItem={renderItem}
@@ -372,15 +360,17 @@ export default function OnboardingShows() {
         estimatedItemSize={120}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 24 }}
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <>
-            <OnboardingHeader
-              step={3}
-              totalSteps={3}
-              title="Teach Plotlist your taste"
-              description="Pick a favorite show or a theme so your Home feed starts strong."
-              onSkip={handleSkip}
-            />
+            <View className="gap-3 px-6 pt-4">
+              <Text className="text-3xl font-bold tracking-tight text-text-primary">
+                Teach Plotlist your taste
+              </Text>
+              <Text className="text-sm text-text-tertiary">
+                Pick a favorite show or a theme so your Home feed starts strong.
+              </Text>
+            </View>
 
             <View className="px-6 pt-6">
               <View className="rounded-3xl border border-dark-border bg-dark-card p-4">
@@ -512,6 +502,6 @@ export default function OnboardingShows() {
           disabled={!hasTasteSignal}
         />
       </View>
-    </Screen>
+    </View>
   );
 }

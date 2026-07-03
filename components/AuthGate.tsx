@@ -27,16 +27,10 @@ function isAuthFailure(error: unknown): boolean {
 const FORCE_CLEAR_TOKENS = false;
 let hasCleared = false;
 
-const ONBOARDING_ROUTES = {
-  profile: "/onboarding/profile",
-  follow: "/onboarding/follow",
-  shows: "/onboarding/shows",
-} as const;
+const ONBOARDING_ROUTE = "/onboarding";
+const WELCOME_TOUR_ROUTE = "/onboarding/welcome";
 
-type AuthRoute =
-  | "/sign-in"
-  | "/home"
-  | (typeof ONBOARDING_ROUTES)[keyof typeof ONBOARDING_ROUTES];
+type AuthRoute = "/sign-in" | "/home" | typeof ONBOARDING_ROUTE;
 
 function replaceRoute(router: ReturnType<typeof useRouter>, href: AuthRoute) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -99,10 +93,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const atRoot = pathname === "/";
     const cachedOnboardingStep = getCachedOnboardingStep(me?._id ?? me?.id);
     const effectiveOnboardingStep = cachedOnboardingStep ?? me?.onboardingStep;
-    const onboardingStep: keyof typeof ONBOARDING_ROUTES =
-      isAuthenticated && effectiveOnboardingStep && effectiveOnboardingStep !== "complete"
-        ? effectiveOnboardingStep
-        : "profile";
     const needsOnboarding =
       isAuthenticated && (effectiveOnboardingStep ?? "profile") !== "complete";
 
@@ -112,11 +102,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
 
     if (isAuthenticated && needsOnboarding && !inOnboardingGroup) {
-      replaceRoute(router, ONBOARDING_ROUTES[onboardingStep]);
+      // The wizard resumes at the right stage (tour, profile, follow, taste)
+      // from the server-side step and the device-level tour flag.
+      replaceRoute(router, ONBOARDING_ROUTE);
       return;
     }
 
-    if (isAuthenticated && !needsOnboarding && inOnboardingGroup) {
+    const inWelcomeTour = pathname?.startsWith(WELCOME_TOUR_ROUTE) ?? false;
+    if (isAuthenticated && !needsOnboarding && inOnboardingGroup && !inWelcomeTour) {
       replaceRoute(router, "/home");
       return;
     }

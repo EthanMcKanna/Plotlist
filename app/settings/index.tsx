@@ -24,6 +24,7 @@ import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import { sanitizeUsername, validateUsername } from "../../lib/username";
 
 function formatPhone(raw?: string | null): string {
   if (!raw) return "Unknown number";
@@ -33,19 +34,6 @@ function formatPhone(raw?: string | null): string {
     return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`;
   }
   return raw;
-}
-
-function sanitizeUsername(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20);
-}
-
-function validateUsername(value: string): string | undefined {
-  if (!value) return undefined;
-  if (value.length < 3) return "Must be at least 3 characters";
-  if (value.length > 20) return "Must be 20 characters or fewer";
-  if (/^[0-9_]/.test(value)) return "Must start with a letter";
-  if (/__/.test(value)) return "No consecutive underscores";
-  return undefined;
 }
 
 function SettingsRow({
@@ -571,6 +559,19 @@ export default function SettingsScreen() {
               }
             />
           </View>
+        </View>
+
+        {/* ── Help ── */}
+        <View className="mt-10">
+          <SectionHeader title="Help" />
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <SettingsRow
+              icon="sparkles-outline"
+              iconColor="#0ea5e9"
+              label="Replay the welcome tour"
+              onPress={() => router.push("/onboarding/welcome")}
+            />
+          </GlassSurface>
         </View>
 
         {/* ── Account ── */}

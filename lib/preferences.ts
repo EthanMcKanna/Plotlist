@@ -1,7 +1,12 @@
 import { Platform } from "react-native";
 
 const KEY_CONTACTS_SYNC_DISMISSED = "contactsSyncDismissed";
+const KEY_WELCOME_TOUR_SEEN = "welcomeTourSeen";
 const nativeFallbackStorage = new Map<string, string>();
+
+// Kept in sync with storage so AuthGate can read it synchronously inside its
+// routing effect without waiting on SecureStore between navigations.
+let welcomeTourSeenCache: boolean | null = null;
 
 async function getStorage(): Promise<{
   getItem: (key: string) => Promise<string | null>;
@@ -65,5 +70,29 @@ export async function setContactsSyncDismissed(dismissed: boolean): Promise<void
     await storage.setItem(KEY_CONTACTS_SYNC_DISMISSED, "true");
   } else {
     await storage.removeItem(KEY_CONTACTS_SYNC_DISMISSED);
+  }
+}
+
+export async function getWelcomeTourSeen(): Promise<boolean> {
+  if (welcomeTourSeenCache !== null) {
+    return welcomeTourSeenCache;
+  }
+  const storage = await getStorage();
+  const value = await storage.getItem(KEY_WELCOME_TOUR_SEEN);
+  welcomeTourSeenCache = value === "true";
+  return welcomeTourSeenCache;
+}
+
+export function getWelcomeTourSeenCached(): boolean | null {
+  return welcomeTourSeenCache;
+}
+
+export async function setWelcomeTourSeen(seen: boolean): Promise<void> {
+  welcomeTourSeenCache = seen;
+  const storage = await getStorage();
+  if (seen) {
+    await storage.setItem(KEY_WELCOME_TOUR_SEEN, "true");
+  } else {
+    await storage.removeItem(KEY_WELCOME_TOUR_SEEN);
   }
 }

@@ -1,25 +1,23 @@
 import { useState } from "react";
-import { Alert, Platform, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { Alert, Platform, ScrollView, Text, View } from "react-native";
 
-import { ContactsSyncCard } from "../../components/ContactsSyncCard";
-import { Screen } from "../../components/Screen";
-import { EmptyState } from "../../components/EmptyState";
-import { PrimaryButton } from "../../components/PrimaryButton";
-import { UserRow } from "../../components/UserRow";
-import { OnboardingHeader } from "../../components/OnboardingHeader";
-import { api } from "../../lib/plotlist/api";
-import { getContactSyncAlertCopy } from "../../lib/contactSync";
-import { loadDeviceContacts } from "../../lib/deviceContacts";
-import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
-import { setContactsSyncDismissed } from "../../lib/preferences";
-import { cacheOnboardingStep, markOnboardingStep } from "../../lib/onboardingCache";
+import { ContactsSyncCard } from "./ContactsSyncCard";
+import { EmptyState } from "./EmptyState";
+import { PrimaryButton } from "./PrimaryButton";
+import { UserRow } from "./UserRow";
+import { api } from "../lib/plotlist/api";
+import { getContactSyncAlertCopy } from "../lib/contactSync";
+import { loadDeviceContacts } from "../lib/deviceContacts";
+import { setContactsSyncDismissed } from "../lib/preferences";
+import { useAction, useQuery } from "../lib/plotlist/react";
 
-export default function OnboardingFollow() {
-  const router = useRouter();
+export function OnboardingFollowStep({
+  onAdvance,
+}: {
+  onAdvance: () => Promise<void>;
+}) {
   const me = useQuery(api.users.me);
   const hasProfile = Boolean(me?._id);
-  const setOnboardingStep = useMutation(api.users.setOnboardingStep);
   const syncContacts = useAction(api.contacts.syncSnapshot);
   const contactStatus = useQuery(api.contacts.getStatus, hasProfile ? {} : "skip") ?? null;
   const contactMatches =
@@ -29,20 +27,16 @@ export default function OnboardingFollow() {
     ) ?? [];
   const suggested = useQuery(api.users.suggested, hasProfile ? { limit: 10 } : "skip") ?? [];
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
   const isWeb = Platform.OS === "web";
 
   const handleContinue = async () => {
-    const result = await setOnboardingStep({ step: "shows" });
-    cacheOnboardingStep(result?.userId, "shows");
-    markOnboardingStep("shows");
-    router.replace("/onboarding/shows");
-  };
-
-  const handleSkip = async () => {
-    const result = await setOnboardingStep({ step: "complete" });
-    cacheOnboardingStep(result?.userId, "complete");
-    markOnboardingStep("complete");
-    router.replace("/home");
+    setAdvancing(true);
+    try {
+      await onAdvance();
+    } finally {
+      setAdvancing(false);
+    }
   };
 
   const handleSyncContacts = async () => {
@@ -61,18 +55,17 @@ export default function OnboardingFollow() {
   };
 
   return (
-    <Screen scroll>
-      <OnboardingHeader
-        step={2}
-        totalSteps={3}
-        title="Find your people"
-        description={
-          isWeb
+    <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 32 }}>
+      <View className="gap-3 px-6 pt-4">
+        <Text className="text-3xl font-bold tracking-tight text-text-primary">
+          Find your people
+        </Text>
+        <Text className="text-sm text-text-tertiary">
+          {isWeb
             ? "Follow a few people so your feed feels alive right away. You can sync contacts later from the mobile app."
-            : "Sync contacts first, then follow a few people so your feed feels alive right away."
-        }
-        onSkip={handleSkip}
-      />
+            : "Sync contacts first, then follow a few people so your feed feels alive right away."}
+        </Text>
+      </View>
 
       {!isWeb ? (
         <View className="px-6 pt-6">
@@ -91,7 +84,7 @@ export default function OnboardingFollow() {
         </View>
       ) : null}
 
-      <View className="px-6 pb-10">
+      <View className="px-6 pb-4">
         {contactMatches.length > 0 ? (
           <View className="mt-8">
             <Text className="text-sm font-semibold text-text-primary">From your contacts</Text>
@@ -146,9 +139,13 @@ export default function OnboardingFollow() {
         </View>
 
         <View className="mt-8">
-          <PrimaryButton label="Continue" onPress={handleContinue} />
+          <PrimaryButton
+            label="Continue"
+            onPress={handleContinue}
+            loading={advancing}
+          />
         </View>
       </View>
-    </Screen>
+    </ScrollView>
   );
 }
