@@ -19,16 +19,6 @@ function notifyError(title: string, message: string) {
   Alert.alert(title, message);
 }
 
-function replaceHome(router: ReturnType<typeof useRouter>) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    if (window.location.pathname !== "/home") {
-      window.location.replace("/home");
-    }
-    return;
-  }
-  router.replace("/home");
-}
-
 function readErrorMessage(error: unknown): string {
   if (error instanceof PlotlistApiError && error.code === "internal_error") {
     return "Something went wrong on our side. Please try again in a moment.";
@@ -38,7 +28,6 @@ function readErrorMessage(error: unknown): string {
   return "Something went wrong. Please try again.";
 }
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -65,7 +54,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../lib/plotlist/api";
 import { formatPhoneNumber, normalizePhoneNumber } from "../../lib/phone";
 import { useAuthActions } from "../../lib/plotlist/auth";
-import { useAction, useAuth } from "../../lib/plotlist/react";
+import { useAction } from "../../lib/plotlist/react";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -404,8 +393,6 @@ function CodeCells({
 export default function SignInScreen() {
   const { signIn } = useAuthActions();
   const startVerification = useAction(api.phone.startVerification);
-  const { isAuthenticated } = useAuth();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const DismissContainer = Platform.OS === "web" ? View : Pressable;
   const dismissContainerProps =
@@ -419,10 +406,6 @@ export default function SignInScreen() {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const verifyingRef = useRef(false);
-
-  useEffect(() => {
-    if (isAuthenticated) replaceHome(router);
-  }, [isAuthenticated, router]);
 
   useEffect(() => {
     if (secondsRemaining <= 0) return;
@@ -481,9 +464,9 @@ export default function SignInScreen() {
           "That code was invalid or expired. Request a new code and try again.";
         setErrorMessage(message);
         notifyError("Verification failed", message);
-      } else {
-        replaceHome(router);
       }
+      // On success AuthGate routes to onboarding or home once the profile
+      // loads, so we stay put instead of flashing an intermediate screen.
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       const message = readErrorMessage(e);

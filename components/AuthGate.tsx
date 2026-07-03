@@ -11,6 +11,7 @@ import { api } from "../lib/plotlist/api";
 import { PlotlistApiError } from "../lib/api/client";
 import { clearStoredSession } from "../lib/api/session";
 import { getCachedOnboardingStep } from "../lib/onboardingCache";
+import { getWelcomeTourSeen } from "../lib/preferences";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 
 function isAuthFailure(error: unknown): boolean {
@@ -78,6 +79,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       hasCleared = true;
       void clearStoredSession();
     }
+  }, []);
+
+  // Warm the welcome-tour flag from storage so the onboarding wizard can
+  // resolve its starting stage synchronously instead of showing a loader.
+  useEffect(() => {
+    void getWelcomeTourSeen().catch(() => undefined);
   }, []);
 
   const isProfileLoading = isAuthenticated && (me === undefined || isEnsuringProfile);

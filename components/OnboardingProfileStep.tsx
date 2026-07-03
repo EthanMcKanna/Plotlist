@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 
 import { PrimaryButton } from "./PrimaryButton";
 import { TextField } from "./TextField";
@@ -12,9 +20,11 @@ import { sanitizeUsername, validateUsername } from "../lib/username";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 
 export function OnboardingProfileStep({
-  onAdvance,
+  onComplete,
+  onSkip,
 }: {
-  onAdvance: () => Promise<void>;
+  onComplete: () => Promise<void>;
+  onSkip: () => Promise<void>;
 }) {
   const me = useQuery(api.users.me);
   const updateProfile = useMutation(api.users.updateProfile);
@@ -28,6 +38,7 @@ export function OnboardingProfileStep({
   const [username, setUsername] = useState("");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
 
   useEffect(() => {
     if (me && displayName === "") {
@@ -40,15 +51,15 @@ export function OnboardingProfileStep({
 
   const usernameError = useMemo(() => validateUsername(username), [username]);
 
-  const handleContinue = async () => {
-    if (usernameError) return;
+  const handleFinish = async () => {
+    if (usernameError || saving) return;
     setSaving(true);
     try {
       await updateProfile({
         displayName: displayName || undefined,
         username: username || undefined,
       });
-      await onAdvance();
+      await onComplete();
     } catch (error) {
       const msg = String(error);
       if (msg.toLowerCase().includes("username already taken")) {
@@ -58,6 +69,18 @@ export function OnboardingProfileStep({
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (skipping) return;
+    setSkipping(true);
+    try {
+      await onSkip();
+    } catch (error) {
+      Alert.alert("Could not skip", String(error));
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -92,61 +115,77 @@ export function OnboardingProfileStep({
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: 32 }}
     >
-      <View className="gap-3 px-6 pt-4">
+      <View className="flex-row justify-end px-6 pt-2">
+        <Pressable
+          onPress={handleSkip}
+          disabled={skipping}
+          accessibilityRole="button"
+          accessibilityLabel="Skip profile setup for now"
+          hitSlop={12}
+          className="rounded-full px-3 py-1.5 active:opacity-80"
+        >
+          <Text className="text-sm font-semibold text-text-tertiary">
+            {skipping ? "Skipping..." : "Skip for now"}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View className="gap-3 px-6 pt-2">
         <Text className="text-3xl font-bold tracking-tight text-text-primary">
           Set up your profile
         </Text>
         <Text className="text-sm text-text-tertiary">
-          Add a display name and username so friends can find you.
+          Add a display name and username so friends can find you. You can change
+          everything later in Settings.
         </Text>
       </View>
 
-      <View className="px-6 pt-6">
-        <View className="flex-row items-center gap-4">
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              handlePickAvatar();
-            }}
-            disabled={uploading}
-            accessibilityRole="button"
-            accessibilityLabel="Choose a profile photo"
-          >
-            {avatarUrl ? (
-              <Image
-                source={{ uri: avatarUrl }}
-                style={{ width: 72, height: 72, borderRadius: 36 }}
-                contentFit="cover"
-              />
-            ) : (
-              <View
-                className="items-center justify-center rounded-full border border-dashed border-dark-border bg-dark-card"
-                style={{ width: 72, height: 72 }}
-              >
-                <Text className="text-2xl font-semibold text-text-tertiary">
-                  {(displayName || me?.displayName || me?.name || "?")[0]?.toUpperCase()}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-          <View className="flex-1 gap-1">
-            <Text className="text-sm font-semibold text-text-primary">Avatar</Text>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                handlePickAvatar();
-              }}
-              disabled={uploading}
-              className="self-start rounded-full border border-dark-border bg-dark-card px-4 py-2"
+      {/* Avatar */}
+      <View className="items-center gap-1.5 pt-8">
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            handlePickAvatar();
+          }}
+          disabled={uploading}
+          accessibilityRole="button"
+          accessibilityLabel="Choose a profile photo"
+          className="relative"
+        >
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={{ width: 96, height: 96, borderRadius: 48 }}
+              contentFit="cover"
+            />
+          ) : (
+            <View
+              className="items-center justify-center rounded-full bg-dark-elevated"
+              style={{ width: 96, height: 96 }}
             >
-              <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                {uploading ? "Uploading..." : avatarUrl ? "Change photo" : "Choose photo"}
+              <Text className="text-2xl font-semibold text-text-secondary">
+                {(displayName || me?.displayName || me?.name || "?")[0]?.toUpperCase()}
               </Text>
-            </Pressable>
+            </View>
+          )}
+          <View
+            className="absolute items-center justify-center rounded-full border-2 border-dark-bg bg-brand-500"
+            style={{ width: 30, height: 30, bottom: 0, right: 0 }}
+          >
+            {uploading ? (
+              <ActivityIndicator size={12} color="#fff" />
+            ) : (
+              <Ionicons name="camera" size={15} color="#fff" />
+            )}
           </View>
-        </View>
+        </Pressable>
+        <Text className="text-xs text-text-tertiary">
+          {uploading ? "Uploading..." : "Tap to add a photo"}
+        </Text>
+      </View>
 
-        <View className="mt-6 gap-5">
+      <View className="px-6 pt-8">
+        <View className="gap-5">
           <TextField
             label="Display name"
             value={displayName}
@@ -175,8 +214,8 @@ export function OnboardingProfileStep({
 
         <View className="mt-8">
           <PrimaryButton
-            label="Continue"
-            onPress={handleContinue}
+            label="Get started"
+            onPress={handleFinish}
             loading={saving}
             disabled={Boolean(usernameError)}
           />
