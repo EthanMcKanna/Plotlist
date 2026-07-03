@@ -398,6 +398,56 @@ async function syncWatchStateAfterEpisodeChange(
     });
 }
 
+async function readShowSeasonSummaries(showId: string) {
+  const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
+  const show = showRows[0];
+  if (!show || show.externalSource !== "tmdb") return null;
+  const detailRows = await db
+    .select()
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, "tmdb"),
+        eq(tmdbDetailsCache.externalId, show.externalId),
+      ),
+    )
+    .limit(1);
+  const seasons = readSeasonSummaries(detailRows[0]?.payload);
+  return seasons.length > 0 ? seasons : null;
+}
+
+// A mark may only land on an episode we can prove exists: either the season
+// metadata contains it, or a release event names it (covers fresh episodes
+// that TMDB's cached counts lag on). Shows without metadata stay
+// unrestricted. Without this, repeated marks used to walk progress into
+// announced-but-empty seasons (e.g. a Severance S3 with zero episodes).
+async function assertEpisodeExistsForMark(
+  showId: string,
+  seasonNumber: number,
+  episodeNumber: number,
+) {
+  const seasons = await readShowSeasonSummaries(showId);
+  if (!seasons) return;
+  if (isEpisodeVerified({ seasonNumber, episodeNumber }, seasons)) return;
+  const eventRows = await db
+    .select()
+    .from(releaseEvents)
+    .where(
+      and(
+        eq(releaseEvents.showId, showId),
+        eq(releaseEvents.seasonNumber, seasonNumber),
+        eq(releaseEvents.episodeNumber, episodeNumber),
+      ),
+    )
+    .limit(1);
+  if (eventRows[0]) return;
+  throw new ApiError(
+    400,
+    "episode_not_available",
+    `Season ${seasonNumber} episode ${episodeNumber} isn't in this show's episode list yet`,
+  );
+}
+
 async function insertEpisodeProgressOnce(args: {
   userId: string;
   showId: string;
@@ -3255,6 +3305,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
       return false;
     }
+    await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
     const created = await insertEpisodeProgressOnce({
       userId: user.id,
       showId: parsed.showId,
@@ -3274,6 +3325,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), createLog: z.boolean().optional() }).parse(args ?? {});
     const now = Date.now();
+    await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
     const created = await insertEpisodeProgressOnce({
       userId: user.id,
       showId: parsed.showId,
@@ -3293,7 +3345,18 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodes: z.array(z.object({ episodeNumber: z.number(), title: z.string().optional() })), createLog: z.boolean().optional() }).parse(args ?? {});
     const now = Date.now();
-    for (const episode of parsed.episodes) {
+    // Bulk marks silently skip episodes the metadata can't confirm rather
+    // than failing the whole season.
+    const seasonSummaries = await readShowSeasonSummaries(parsed.showId);
+    const markableEpisodes = seasonSummaries
+      ? parsed.episodes.filter((episode) =>
+          isEpisodeVerified(
+            { seasonNumber: parsed.seasonNumber, episodeNumber: episode.episodeNumber },
+            seasonSummaries,
+          ),
+        )
+      : parsed.episodes;
+    for (const episode of markableEpisodes) {
       await insertEpisodeProgressOnce({
         userId: user.id,
         showId: parsed.showId,
