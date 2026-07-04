@@ -88,8 +88,10 @@ export const api = {
     deleteLog: ref("mutation", "watchLogs:deleteLog"),
     listActivityForUser: ref("query", "watchLogs:listActivityForUser"),
   },
+  watchStats: {
+    getInsights: ref("query", "watchStats:getInsights"),
+  },
   episodeProgress: {
-    getStats: ref("query", "episodeProgress:getStats"),
     getUpNext: ref("query", "episodeProgress:getUpNext"),
     getProgressForShow: ref("query", "episodeProgress:getProgressForShow"),
     markEpisodeWatched: ref("mutation", "episodeProgress:markEpisodeWatched"),

@@ -540,6 +540,22 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* ── Streaming ── */}
+        <View className="mt-10">
+          <SectionHeader title="Streaming" />
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <SettingsRow
+              icon="tv-outline"
+              iconColor="#38bdf8"
+              label="My streaming services"
+              onPress={() => router.push("/settings/streaming")}
+            />
+          </GlassSurface>
+          <Text className="mt-2 text-xs leading-4 text-text-tertiary">
+            Home and search filter streaming rooms and lean picks toward services you have.
+          </Text>
+        </View>
+
         {/* ── Contacts ── */}
         <View className="mt-10">
           <SectionHeader title="Contacts" />

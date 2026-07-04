@@ -39,7 +39,6 @@ export type HeroSlide = {
   backdropUrl?: string | null;
   posterUrl?: string | null;
   year?: number | null;
-  tmdbVoteAverage?: number | null;
   genreIds?: number[] | null;
   signal?: string | null;
   eyebrow: HeroEyebrow;
@@ -107,28 +106,32 @@ function normalizeHeroMetaKey(value: string | null | undefined) {
   return value?.trim().toLowerCase() || null;
 }
 
+// Rating-shaped signals ("8.4 TMDB", "8.4") never render in the hero — the
+// carousel shows editorial/recency context only, never TMDB scores.
+function isRatingShapedSignal(value: string | null | undefined) {
+  return Boolean(value && /^\d+(?:\.\d+)?(?:\s+TMDB)?$/i.test(value.trim()));
+}
+
 export function buildHeroMeta(slide: HeroSlide): string[] {
   const parts: string[] = [];
   const firstGenre = slide.genreIds?.[0];
   const genreLabel = firstGenre ? GENRE_LABELS[firstGenre] : null;
   const yearLabel = slide.year ? String(slide.year) : null;
-  const ratingLabel =
-    typeof slide.tmdbVoteAverage === "number" && slide.tmdbVoteAverage > 0
-      ? `${slide.tmdbVoteAverage.toFixed(1)} TMDB`
+  const rawSignalLabel =
+    slide.signal && !isRatingShapedSignal(slide.signal)
+      ? formatHomeDatedSignalLabel(slide.signal)
       : null;
-  const signalLabel = slide.signal ? formatHomeDatedSignalLabel(slide.signal) : null;
+  const signalLabel = isRatingShapedSignal(rawSignalLabel) ? null : rawSignalLabel;
   const signalKey = normalizeHeroMetaKey(signalLabel);
   const signalAddsContext = Boolean(
     signalKey &&
       signalKey !== normalizeHeroMetaKey(genreLabel) &&
-      signalKey !== normalizeHeroMetaKey(yearLabel) &&
-      signalKey !== normalizeHeroMetaKey(ratingLabel),
+      signalKey !== normalizeHeroMetaKey(yearLabel),
   );
 
   pushUniqueMetaLabel(parts, genreLabel);
   pushUniqueMetaLabel(parts, signalLabel);
   if (!signalAddsContext) {
-    pushUniqueMetaLabel(parts, ratingLabel);
     pushUniqueMetaLabel(parts, yearLabel);
   }
   return parts.slice(0, 3);

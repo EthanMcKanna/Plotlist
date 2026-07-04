@@ -4,6 +4,7 @@ import {
   getCatalogSearchViewState,
   getTrimmedSearchQuery,
   isSearchQueryReady,
+  sortCatalogResults,
 } from "../lib/searchExperience";
 
 describe("search experience helpers", () => {
@@ -115,5 +116,44 @@ describe("search experience helpers", () => {
     expect(getTrimmedSearchQuery("  the bear  ")).toBe("the bear");
     expect(isSearchQueryReady("  se  ", 3)).toBe(false);
     expect(isSearchQueryReady("  sev  ", 3)).toBe(true);
+  });
+});
+
+describe("sortCatalogResults", () => {
+  const results = [
+    { title: "Beta", year: 2020, tmdbPopularity: 50, tmdbVoteCount: 100 },
+    { title: "alpha", year: 2024, tmdbPopularity: 10, tmdbVoteCount: 900 },
+    { title: "Gamma", year: 2022, tmdbPopularity: 80, tmdbVoteCount: 40 },
+  ];
+
+  it("keeps relevance order for the default sort and does not mutate input", () => {
+    const input = [...results];
+    expect(sortCatalogResults(input, "match")).toEqual(results);
+    expect(sortCatalogResults(input, "popular")).not.toEqual(results);
+    expect(input).toEqual(results);
+  });
+
+  it("sorts by popularity, recency, and title", () => {
+    expect(sortCatalogResults(results, "popular").map((item) => item.title)).toEqual([
+      "Gamma",
+      "Beta",
+      "alpha",
+    ]);
+    expect(sortCatalogResults(results, "newest").map((item) => item.title)).toEqual([
+      "alpha",
+      "Gamma",
+      "Beta",
+    ]);
+    expect(sortCatalogResults(results, "title").map((item) => item.title)).toEqual([
+      "alpha",
+      "Beta",
+      "Gamma",
+    ]);
+  });
+
+  it("keeps relevance order among items missing sort fields", () => {
+    const sparse = [{ title: "One" }, { title: "Two" }, { title: "Three" }];
+    expect(sortCatalogResults(sparse, "popular")).toEqual(sparse);
+    expect(sortCatalogResults(sparse, "newest")).toEqual(sparse);
   });
 });

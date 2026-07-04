@@ -91,6 +91,8 @@ describe("home catalog payload", () => {
         "2026-05-30",
       ),
     ).toBe("MGM+ S4 airing now");
+    // Once the researched signal expires, the fallback never exposes a TMDB
+    // score — popularity keeps a generic "Trending" label instead.
     expect(
       getHomeShowSignal(
         show("FROM", {
@@ -100,7 +102,7 @@ describe("home catalog payload", () => {
         }),
         "2026-07-13",
       ),
-    ).toBe("8.2 TMDB");
+    ).toBe("Trending");
   });
 
   it("projects rail item signals with the supplied homepage timestamp", () => {
@@ -111,7 +113,7 @@ describe("home catalog payload", () => {
     });
 
     expect(toRailItem(from, "2026-05-30")?.signal).toBe("MGM+ S4 airing now");
-    expect(toRailItem(from, "2026-07-13")?.signal).toBe("8.2 TMDB");
+    expect(toRailItem(from, "2026-07-13")?.signal).toBe("Trending");
   });
 
   it("builds ordered provider rooms only from substantial, recent, editorial candidates", () => {

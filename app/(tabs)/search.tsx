@@ -46,13 +46,19 @@ import {
   buildSearchDiscoverSections,
   getSearchDiscoverCacheKey,
   getSearchDiscoverFetchPlan,
+  getSearchDiscoverSectionsForProviders,
   getDailyDiscoverPage,
   type SearchDiscoverSection,
 } from "../../lib/searchDiscover";
 import {
+  CATALOG_SORT_OPTIONS,
   getCatalogSearchViewState,
   getTrimmedSearchQuery,
+  sortCatalogResults,
+  type CatalogSortKey,
 } from "../../lib/searchExperience";
+import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
+import { queryClient } from "../../lib/queryClient";
 
 const SHOW_QUERY_MIN_LENGTH = 3;
 const PEOPLE_QUERY_MIN_LENGTH = 2;
@@ -244,7 +250,12 @@ export default function SearchScreen() {
     Record<string, string>
   >({});
   const [isFocused, setIsFocused] = useState(false);
+  const [sortKey, setSortKey] = useState<CatalogSortKey>("match");
   const deferredCatalogResults = useDeferredValue(catalogResults);
+  const sortedCatalogResults = useMemo(
+    () => sortCatalogResults(deferredCatalogResults, sortKey),
+    [deferredCatalogResults, sortKey],
+  );
 
   const catalogViewState = useMemo(
     () =>
@@ -287,6 +298,15 @@ export default function SearchScreen() {
     if (modeParam === "people") setMode("people");
     else if (modeParam === "shows") setMode("shows");
   }, [modeParam]);
+
+  // Entry points (e.g. the home top bar) pass a fresh `focus` value so the
+  // keyboard opens as soon as the screen settles.
+  const focusParam = typeof params.focus === "string" ? params.focus : undefined;
+  useEffect(() => {
+    if (!focusParam) return;
+    const handle = setTimeout(() => inputRef.current?.focus(), 350);
+    return () => clearTimeout(handle);
+  }, [focusParam]);
 
   /* ── Queries ───────────────────────────────────────────────── */
 
@@ -390,8 +410,8 @@ export default function SearchScreen() {
       })
       .catch((error) => {
         if (active) {
-          setCatalogResults([]);
-          setCatalogResultsQuery(requestQuery);
+          // Keep whatever results are on screen; the error banner renders
+          // above them instead of blanking the list.
           setCatalogError({
             query: requestQuery,
             message:
@@ -426,15 +446,24 @@ export default function SearchScreen() {
 
   /* ── Fetch TMDB discover sections when idle ─────────────────── */
 
+  // Provider rails collapse to the user's streaming services when set.
+  const discoverDefinitions = useMemo(
+    () =>
+      getSearchDiscoverSectionsForProviders(
+        SEARCH_DISCOVER_SECTIONS,
+        normalizeStreamingProviderKeys(me?.streamingProviders),
+      ),
+    [me?.streamingProviders],
+  );
+
   useEffect(() => {
     if (!showDiscover) {
-      setDiscoverSections([]);
       setIsLoadingDiscover(false);
       return;
     }
     let cancelled = false;
 
-    const cacheKey = getSearchDiscoverCacheKey(SEARCH_DISCOVER_SECTIONS);
+    const cacheKey = getSearchDiscoverCacheKey(discoverDefinitions);
     if (searchDiscoverCache?.key === cacheKey) {
       setDiscoverSections(searchDiscoverCache.sections);
       setIsLoadingDiscover(false);
@@ -466,7 +495,7 @@ export default function SearchScreen() {
       });
 
       const sectionsToRender = buildSearchDiscoverSections(
-        SEARCH_DISCOVER_SECTIONS,
+        discoverDefinitions,
         resultsByKey,
       );
 
@@ -479,9 +508,7 @@ export default function SearchScreen() {
       return sectionsToRender;
     };
 
-    const { primary, secondary } = getSearchDiscoverFetchPlan(
-      SEARCH_DISCOVER_SECTIONS,
-    );
+    const { primary, secondary } = getSearchDiscoverFetchPlan(discoverDefinitions);
 
     void (async () => {
       const primarySections = await loadSections(primary);
@@ -500,7 +527,7 @@ export default function SearchScreen() {
     return () => {
       cancelled = true;
     };
-  }, [showDiscover, getTmdbList]);
+  }, [showDiscover, getTmdbList, discoverDefinitions]);
 
   /* ── Handlers ──────────────────────────────────────────────── */
 
@@ -526,7 +553,28 @@ export default function SearchScreen() {
           year: item.year,
           overview: item.overview,
           posterUrl: item.posterUrl,
+          backdropUrl: item.backdropUrl,
+          genreIds: item.genreIds,
         });
+        // Seed the show query so the detail screen paints its hero
+        // immediately, then mark it stale so full data refetches on mount.
+        const showQueryKey = ["plotlist-rpc", "query", "shows:get", { showId }];
+        if (!queryClient.getQueryData(showQueryKey)) {
+          queryClient.setQueryData(showQueryKey, {
+            _id: showId,
+            id: showId,
+            externalSource: item.externalSource ?? "tmdb",
+            externalId: String(item.externalId ?? ""),
+            title: item.title,
+            year: item.year ?? null,
+            overview: item.overview ?? null,
+            posterUrl: item.posterUrl ?? null,
+            backdropUrl: item.backdropUrl ?? null,
+            genreIds: item.genreIds ?? null,
+            extendedDetails: null,
+          });
+          void queryClient.invalidateQueries({ queryKey: showQueryKey });
+        }
         guardedPush(`/show/${showId}`);
       } catch (error) {
         Alert.alert("Could not add show", String(error));
@@ -725,20 +773,63 @@ export default function SearchScreen() {
         {showCatalogPanel && (
           <View className="mt-4 px-5">
             <SectionLine
-              label={
-                catalogViewState.surface === "loading"
-                  ? "Searching"
-                  : catalogViewState.surface === "results"
-                    ? "Best Matches"
-                    : "Catalog Search"
-              }
+              label="Results"
               count={
                 catalogViewState.surface === "results" &&
-                deferredCatalogResults.length > 0
-                  ? deferredCatalogResults.length
+                sortedCatalogResults.length > 0
+                  ? sortedCatalogResults.length
                   : undefined
               }
             />
+
+            {catalogViewState.surface === "results" && (
+              <View className="mb-2 flex-row flex-wrap gap-2">
+                {CATALOG_SORT_OPTIONS.map((option) => {
+                  const isActive = option.key === sortKey;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      onPress={() => {
+                        if (!isActive) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setSortKey(option.key);
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive }}
+                      className="rounded-full px-3 py-1.5"
+                      style={{
+                        backgroundColor: isActive
+                          ? "rgba(56,189,248,0.16)"
+                          : "rgba(255,255,255,0.06)",
+                        borderColor: isActive
+                          ? "rgba(56,189,248,0.55)"
+                          : "rgba(255,255,255,0.09)",
+                        borderWidth: StyleSheet.hairlineWidth,
+                      }}
+                    >
+                      <Text
+                        className="text-xs font-semibold"
+                        style={{ color: isActive ? "#38BDF8" : "#9BA1B0" }}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {catalogViewState.surface === "results" &&
+              catalogError?.query === debouncedQuery && (
+                <View className="mb-3">
+                  <SearchErrorCard
+                    title="Couldn't refresh results"
+                    description="Showing your last results. Retry keeps your query in place."
+                    onRetry={handleRetryCatalogSearch}
+                  />
+                </View>
+              )}
 
             {catalogViewState.surface === "sign-in" ? (
               <EmptyState
@@ -757,9 +848,9 @@ export default function SearchScreen() {
                 onRetry={handleRetryCatalogSearch}
               />
             ) : catalogViewState.surface === "results" ? (
-              <Animated.View entering={FadeInDown.duration(300)}>
+              <View style={{ opacity: catalogViewState.isShowingPreviousResults ? 0.6 : 1 }}>
                 <FlashList
-                  data={deferredCatalogResults}
+                  data={sortedCatalogResults}
                   renderItem={renderCatalogItem}
                   keyExtractor={(item: any) =>
                     `${item.externalSource ?? "catalog"}:${item.externalId}`
@@ -769,7 +860,7 @@ export default function SearchScreen() {
                   keyboardShouldPersistTaps="always"
                   scrollEnabled={false}
                 />
-              </Animated.View>
+              </View>
             ) : (
               <EmptyState
                 title="No catalog results"

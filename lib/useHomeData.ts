@@ -32,6 +32,12 @@ import {
   sortProviderRoomsForFreshness,
 } from "./providerRoomFreshness";
 import { getHomepageCatalogDiagnostics } from "./homepageCatalogHealth";
+import {
+  buildStreamingAvailabilityIndex,
+  filterSectionsToStreamingProviders,
+  leanItemsToStreamingAvailability,
+  normalizeStreamingProviderKeys,
+} from "./streamingProviders";
 import { toHomeFeedItem } from "./homeFeedItems";
 import { getHomeRailIdentityKeys } from "./homeRailIdentity";
 import { shouldLoadEditorialSeedRail } from "./homeRailHealth";
@@ -529,9 +535,8 @@ export function getHomeShowSignal(
     if ((item.statusCount ?? 0) > 0)
       return pluralize(item.statusCount ?? 0, "save");
   }
-  if (typeof show?.tmdbVoteAverage === "number" && show.tmdbVoteAverage > 0) {
-    return `${show.tmdbVoteAverage.toFixed(1)} TMDB`;
-  }
+  // TMDB scores are never surfaced as user-facing signals; ratings shown in
+  // the app come from IMDb on the show screen.
   if (typeof show?.tmdbPopularity === "number" && show.tmdbPopularity > 0) {
     return "Trending";
   }
@@ -1464,7 +1469,6 @@ export function buildHeroSlides(args: {
       backdropUrl: show.backdropUrl ?? null,
       posterUrl: show.posterUrl ?? null,
       year: show.year ?? null,
-      tmdbVoteAverage: show.tmdbVoteAverage ?? null,
       genreIds: show.genreIds ?? null,
       signal,
       eyebrow: eyebrow === "trending" && hasFreshHomeSignal(show) ? "current" : eyebrow,
@@ -1822,14 +1826,26 @@ export function useHomeData(): HomeData {
     setQuickSeedRaw(payload.quickSeeds);
   }, [editorialSeedNow, isAuthenticated]);
 
+  const streamingProviderKeys = useMemo(
+    () => normalizeStreamingProviderKeys(me?.streamingProviders),
+    [me?.streamingProviders],
+  );
+  const streamingAvailability = useMemo(
+    () => buildStreamingAvailabilityIndex(providerCatalogProviders, streamingProviderKeys),
+    [providerCatalogProviders, streamingProviderKeys],
+  );
+
   const providerSections = useMemo(
     () =>
       isAuthenticated && providerCatalogProviders
-        ? buildProviderSectionsFromCatalog(providerCatalogProviders, {
-            now: editorialSeedNow,
-          })
+        ? filterSectionsToStreamingProviders(
+            buildProviderSectionsFromCatalog(providerCatalogProviders, {
+              now: editorialSeedNow,
+            }),
+            streamingProviderKeys,
+          )
         : [],
-    [editorialSeedNow, isAuthenticated, providerCatalogProviders],
+    [editorialSeedNow, isAuthenticated, providerCatalogProviders, streamingProviderKeys],
   );
 
   // Similar taste users (only for authenticated users with profile).
@@ -1888,7 +1904,7 @@ export function useHomeData(): HomeData {
   );
 
   const forYou = useMemo(() => {
-    const items = buildForYouRailCandidates({
+    const candidates = buildForYouRailCandidates({
       forYou: forYouRaw,
       fallback: [
         ...(risingRaw as AnyShowItem[]),
@@ -1898,7 +1914,15 @@ export function useHomeData(): HomeData {
       ],
       heroSlides,
       now: editorialSeedNow,
-    })
+    });
+    // Picks lean toward the user's streaming services: candidates known to
+    // stream on them come first, relative order otherwise preserved.
+    const items = leanItemsToStreamingAvailability(
+      candidates,
+      streamingAvailability,
+      (catalog) =>
+        (catalog?.externalSource ?? "tmdb") === "tmdb" ? catalog?.externalId : null,
+    )
       .map((catalog) => toRailItem(catalog, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
       .slice(0, 10);
@@ -1915,6 +1939,7 @@ export function useHomeData(): HomeData {
     tmdbTrendingRaw,
     heroSlides,
     editorialSeedNow,
+    streamingAvailability,
   ]);
 
   const heat = useMemo(() => {

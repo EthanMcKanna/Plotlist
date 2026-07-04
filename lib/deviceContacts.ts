@@ -8,6 +8,11 @@ export type DeviceContactEntry = {
   phone: string;
 };
 
+// The sync endpoint processes at most this many entries; capping here keeps
+// huge address books from producing oversized request payloads that would be
+// truncated server-side anyway.
+export const DEVICE_CONTACTS_SYNC_LIMIT = 2000;
+
 export async function loadDeviceContacts() {
   const permission = await Contacts.requestPermissionsAsync();
   if (permission.status !== "granted") {
@@ -47,5 +52,5 @@ export async function loadDeviceContacts() {
     });
   }
 
-  return Array.from(deduped.values());
+  return Array.from(deduped.values()).slice(0, DEVICE_CONTACTS_SYNC_LIMIT);
 }

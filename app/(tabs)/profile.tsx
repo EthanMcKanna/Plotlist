@@ -8,16 +8,26 @@ import { api } from "../../lib/plotlist/api";
 import { Screen } from "../../components/Screen";
 import { Avatar } from "../../components/Avatar";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
-import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
+import { formatWatchTimeLabel } from "../../lib/format";
+import { useQuery } from "../../lib/plotlist/react";
+import type { WatchInsights } from "../../lib/watchInsights";
 
 type MenuItemDef = {
   icon: keyof typeof Ionicons.glyphMap;
   iconBg: string;
   iconColor: string;
   label: string;
+  sublabel?: string;
   route: string;
   count?: number;
 };
+
+function pressWithHaptic(action: () => void) {
+  return () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    action();
+  };
+}
 
 function StatButton({
   label,
@@ -30,30 +40,57 @@ function StatButton({
 }) {
   const content = (
     <>
-      <Text className="text-lg font-bold text-text-primary">{value}</Text>
-      <Text className="text-xs text-text-tertiary">{label}</Text>
+      <Text className="text-lg font-bold tabular-nums text-text-primary">
+        {value.toLocaleString()}
+      </Text>
+      <Text className="mt-0.5 text-[11px] uppercase tracking-wide text-text-tertiary">
+        {label}
+      </Text>
     </>
   );
 
   if (onPress) {
     return (
       <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onPress();
-        }}
-        className="flex-1 items-center py-2 active:opacity-70"
+        onPress={pressWithHaptic(onPress)}
+        className="flex-1 items-center py-3 active:opacity-70"
       >
         {content}
       </Pressable>
     );
   }
-
-  return <View className="flex-1 items-center py-2">{content}</View>;
+  return <View className="flex-1 items-center py-3">{content}</View>;
 }
 
 function StatDivider() {
-  return <View className="w-px self-stretch bg-dark-border" />;
+  return <View className="my-3 w-px self-stretch bg-dark-border" />;
+}
+
+function MenuRow({ item, isLast, onPress }: { item: MenuItemDef; isLast: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={pressWithHaptic(onPress)}
+      className={`flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover ${
+        isLast ? "" : "border-b border-dark-border"
+      }`}
+    >
+      <View className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}>
+        <Ionicons name={item.icon} size={17} color={item.iconColor} />
+      </View>
+      <View className="flex-1">
+        <Text className="text-[15px] font-medium text-text-primary">{item.label}</Text>
+        {item.sublabel ? (
+          <Text className="mt-0.5 text-xs text-text-tertiary">{item.sublabel}</Text>
+        ) : null}
+      </View>
+      {item.count !== undefined && item.count > 0 ? (
+        <Text className="mr-1 text-sm tabular-nums text-text-tertiary">
+          {item.count.toLocaleString()}
+        </Text>
+      ) : null}
+      <Ionicons name="chevron-forward" size={15} color="#5A6070" />
+    </Pressable>
+  );
 }
 
 export default function ProfileTab() {
@@ -63,49 +100,25 @@ export default function ProfileTab() {
     api.storage.getUrl,
     me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
   );
-  const counts = useQuery(api.watchStates.getCounts, me ? {} : "skip");
-  const watchStateItems = useQuery(api.watchStates.listForUser, me ? {} : "skip");
-  const { results: reviewItems, status: reviewStatus } = usePaginatedQuery(
-    api.reviews.listForUserDetailed,
-    me?._id ? { userId: me._id } : "skip",
-    { initialNumItems: 100 },
-  );
-  const { results: listItems, status: listStatus } = usePaginatedQuery(
-    api.lists.listForUser,
-    me?._id ? { userId: me._id } : "skip",
-    { initialNumItems: 100 },
-  );
-  const episodeStats = useQuery(api.episodeProgress.getStats, me ? {} : "skip");
+  const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
+  const insights = useQuery(
+    api.watchStats.getInsights,
+    me ? { utcOffsetMinutes } : "skip",
+  ) as WatchInsights | undefined;
 
-  const followers = me?.countsFollowers ?? 0;
-  const following = me?.countsFollowing ?? 0;
-  const derivedWatchCounts = useMemo(() => {
-    if (!Array.isArray(watchStateItems)) {
-      return null;
-    }
-    return watchStateItems.reduce(
-      (acc, item: any) => {
-        const status = item.status as keyof typeof acc;
-        if (status in acc) {
-          acc[status] += 1;
-        }
-        acc.total += 1;
-        return acc;
-      },
-      { watchlist: 0, watching: 0, completed: 0, dropped: 0, total: 0 },
-    );
-  }, [watchStateItems]);
-  const effectiveCounts = derivedWatchCounts ?? {
-    watchlist: counts?.watchlist ?? 0,
-    watching: counts?.watching ?? 0,
-    completed: counts?.completed ?? 0,
-    dropped: counts?.dropped ?? 0,
-    total: counts?.total ?? 0,
+  const counts = {
+    followers: me?.countsFollowers ?? 0,
+    following: me?.countsFollowing ?? 0,
+    shows: me?.countsTotalShows ?? 0,
+    reviews: me?.countsReviews ?? 0,
+    lists: me?.countsLists ?? 0,
+    watchlist: me?.countsWatchlist ?? 0,
+    watching: me?.countsWatching ?? 0,
+    completed: me?.countsCompleted ?? 0,
   };
-  const reviews =
-    reviewStatus === "LoadingFirstPage" ? me?.countsReviews ?? 0 : reviewItems.length;
-  const listCount =
-    listStatus === "LoadingFirstPage" ? me?.countsLists ?? 0 : listItems.length;
+
+  const displayName = me?.displayName ?? me?.name ?? null;
+  const time = insights ? formatWatchTimeLabel(insights.totals.minutes) : null;
 
   const libraryItems: MenuItemDef[] = [
     {
@@ -113,307 +126,160 @@ export default function ProfileTab() {
       iconBg: "bg-green-500/15",
       iconColor: "#22C55E",
       label: "My Shows",
+      sublabel: `${counts.watching.toLocaleString()} watching · ${counts.completed.toLocaleString()} completed`,
       route: "/me/watchlist",
-      count: effectiveCounts.total,
+      count: counts.shows,
     },
     {
       icon: "bookmark",
       iconBg: "bg-brand-500/15",
-      iconColor: "#0ea5e9",
+      iconColor: "#38BDF8",
       label: "Watchlist",
       route: "/me/watchlist?filter=watchlist",
-      count: effectiveCounts.watchlist,
+      count: counts.watchlist,
     },
     {
       icon: "list",
       iconBg: "bg-amber-500/15",
-      iconColor: "#f59e0b",
+      iconColor: "#F59E0B",
       label: "Lists",
       route: "/me/lists",
-      count: listCount,
+      count: counts.lists,
     },
-  ];
-
-  const accountItems: MenuItemDef[] = [
     {
-      icon: "settings-outline",
-      iconBg: "bg-dark-elevated",
-      iconColor: "#9BA1B0",
-      label: "Settings",
-      route: "/settings",
+      icon: "heart",
+      iconBg: "bg-rose-500/15",
+      iconColor: "#FB7185",
+      label: "Favorites",
+      route: "/me/favorites",
     },
   ];
 
   return (
     <Screen scroll hasTabBar>
-      <View className="px-6 pt-6 pb-24">
-        {/* ── Profile hero ── */}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/profile/${me?._id ?? ""}`);
-          }}
-          disabled={!me}
-          className="items-center active:opacity-80"
-        >
-          <Avatar
-            uri={avatarUrl}
-            label={me?.displayName ?? me?.name}
-            size={88}
-          />
-          <Text className="mt-3 text-xl font-bold text-text-primary">
-            {me?.displayName ?? me?.name ?? "Loading..."}
-          </Text>
-          <Text className="mt-0.5 text-sm text-text-tertiary">
-            @{me?.username ?? "user"}
-          </Text>
-        </Pressable>
-
-        {me?.bio ? (
-          <Text
-            className="mt-3 text-center text-sm leading-5 text-text-secondary"
-            numberOfLines={3}
+      <View className="px-6 pb-24 pt-4">
+        {/* ── Identity ── */}
+        <GlassSurface radius={16} variant="surface" contentStyle={{ padding: 20 }}>
+          <Pressable
+            onPress={pressWithHaptic(() => router.push(`/profile/${me?._id ?? ""}`))}
+            disabled={!me}
+            className="flex-row items-center gap-4 active:opacity-80"
           >
-            {me.bio}
-          </Text>
-        ) : null}
+            <Avatar uri={avatarUrl} label={displayName} size={72} />
+            <View className="flex-1">
+              <Text className="text-xl font-black text-text-primary" numberOfLines={1}>
+                {displayName ?? "Loading..."}
+              </Text>
+              <Text className="mt-0.5 text-sm text-text-tertiary" numberOfLines={1}>
+                @{me?.username ?? "user"}
+              </Text>
+              <View className="mt-2 flex-row items-center gap-1">
+                <Text className="text-xs font-semibold text-brand-400">
+                  View public profile
+                </Text>
+                <Ionicons name="chevron-forward" size={11} color="#38bdf8" />
+              </View>
+            </View>
+          </Pressable>
+          {me?.bio ? (
+            <Text className="mt-4 text-sm leading-5 text-text-secondary" numberOfLines={3}>
+              {me.bio}
+            </Text>
+          ) : null}
+        </GlassSurface>
 
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push(`/profile/${me?._id ?? ""}`);
-          }}
-          disabled={!me}
-          className="mt-3 self-center"
-        >
-          <Text className="text-sm font-medium text-brand-400">
-            View public profile
-          </Text>
-        </Pressable>
-
-        {/* ── Stats bar ── */}
+        {/* ── Social ── */}
         <GlassSurface
-          radius={8}
+          radius={16}
           variant="surface"
-          style={{ marginTop: 24 }}
+          style={{ marginTop: 12 }}
           contentStyle={{ alignItems: "center", flexDirection: "row" }}
         >
           <StatButton
             label="Followers"
-            value={followers}
+            value={counts.followers}
             onPress={() => router.push(`/followers/${me?._id ?? ""}`)}
           />
           <StatDivider />
           <StatButton
             label="Following"
-            value={following}
+            value={counts.following}
             onPress={() => router.push(`/following/${me?._id ?? ""}`)}
           />
           <StatDivider />
-          <StatButton
-            label="Shows"
-            value={effectiveCounts.total}
-          />
+          <StatButton label="Shows" value={counts.shows} />
           <StatDivider />
-          <StatButton
-            label="Reviews"
-            value={reviews}
-          />
+          <StatButton label="Reviews" value={counts.reviews} />
         </GlassSurface>
 
-        {/* ── Activity cards ── */}
-        <View className="mt-6 flex-row gap-3">
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "watching" } });
-            }}
-            className="flex-1"
-            radius={8}
-            variant="control"
-            contentStyle={{ padding: 16 }}
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-green-500/15">
-                <Ionicons name="eye" size={18} color="#22C55E" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {effectiveCounts.watching}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Watching</Text>
-          </GlassPressable>
-
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "completed" } });
-            }}
-            className="flex-1"
-            radius={8}
-            variant="control"
-            contentStyle={{ padding: 16 }}
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-brand-500/15">
-                <Ionicons name="checkmark-circle" size={18} color="#0ea5e9" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {effectiveCounts.completed}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Completed</Text>
-          </GlassPressable>
-
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({ pathname: "/me/watchlist", params: { filter: "dropped" } });
-            }}
-            className="flex-1"
-            radius={8}
-            variant="control"
-            contentStyle={{ padding: 16 }}
-          >
-            <View className="flex-row items-center justify-between">
-              <View className="h-9 w-9 items-center justify-center rounded-full bg-amber-500/15">
-                <Ionicons name="close-circle" size={18} color="#F59E0B" />
-              </View>
-              <Text className="text-2xl font-bold text-text-primary">
-                {effectiveCounts.dropped}
-              </Text>
-            </View>
-            <Text className="mt-2.5 text-sm text-text-tertiary">Dropped</Text>
-          </GlassPressable>
-        </View>
-
         {/* ── Watch stats ── */}
-        {episodeStats && episodeStats.totalEpisodes > 0 && (() => {
-          const hrs = Math.floor(episodeStats.totalMinutes / 60);
-          const mins = episodeStats.totalMinutes % 60;
-          const days = Math.floor(hrs / 24);
-          const remHrs = hrs % 24;
-          const timeLabel =
-            days > 0
-              ? `${days}d ${remHrs}h`
-              : hrs > 0
-                ? `${hrs}h ${mins}m`
-                : `${mins}m`;
-          return (
-            <GlassPressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push("/me/watch-stats");
-              }}
-              className="mt-6"
-              radius={8}
-              variant="surface"
-              contentStyle={{ padding: 16 }}
-            >
-              <View className="mb-3 flex-row items-center justify-between">
-                <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                  Watch Stats
+        {insights && insights.totals.episodes > 0 && time ? (
+          <GlassPressable
+            onPress={pressWithHaptic(() => router.push("/me/stats"))}
+            radius={16}
+            variant="prominent"
+            style={{ marginTop: 12 }}
+            contentStyle={{ padding: 18 }}
+          >
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
+                Watch stats
+              </Text>
+              <View className="flex-row items-center gap-1">
+                <Text className="text-xs font-semibold text-sky-100">See all</Text>
+                <Ionicons name="chevron-forward" size={13} color="#E0F2FE" />
+              </View>
+            </View>
+            <View className="mt-3 flex-row items-end justify-between">
+              <View>
+                <Text className="text-3xl font-black text-white">{time.value}</Text>
+                <Text className="mt-1 text-xs text-sky-100/70">watched all time</Text>
+              </View>
+              <View className="items-end">
+                <Text className="text-sm font-semibold text-sky-100">
+                  {insights.totals.episodes.toLocaleString()} episodes
                 </Text>
-                <View className="flex-row items-center gap-1">
-                  <Text className="text-xs font-semibold text-brand-400">
-                    Details
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color="#38bdf8" />
-                </View>
+                <Text className="mt-0.5 text-xs text-sky-100/70">
+                  {insights.streaks.current > 0
+                    ? `${insights.streaks.current}-day streak`
+                    : `${insights.totals.shows.toLocaleString()} shows tracked`}
+                </Text>
               </View>
-              <View className="flex-row">
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-brand-400">
-                    {episodeStats.totalEpisodes.toLocaleString()}
-                  </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Episodes
-                  </Text>
-                </View>
-                <View className="w-px self-stretch bg-dark-border" />
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-purple-400">
-                    {timeLabel}
-                  </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Time Watched
-                  </Text>
-                </View>
-                <View className="w-px self-stretch bg-dark-border" />
-                <View className="flex-1 items-center">
-                  <Text className="text-2xl font-bold text-green-400">
-                    {episodeStats.showsWithProgress}
-                  </Text>
-                  <Text className="mt-0.5 text-xs text-text-tertiary">
-                    Shows Tracked
-                  </Text>
-                </View>
-              </View>
-            </GlassPressable>
-          );
-        })()}
+            </View>
+          </GlassPressable>
+        ) : null}
 
         {/* ── Library ── */}
         <View className="mt-8">
           <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
             Library
           </Text>
-          <GlassSurface radius={8} variant="surface">
+          <GlassSurface radius={16} variant="surface">
             {libraryItems.map((item, index) => (
-              <Pressable
+              <MenuRow
                 key={item.route}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(item.route as any);
-                }}
-                className={`flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover ${
-                  index !== libraryItems.length - 1
-                    ? "border-b border-dark-border"
-                    : ""
-                }`}
-              >
-                <View
-                  className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}
-                >
-                  <Ionicons name={item.icon} size={18} color={item.iconColor} />
-                </View>
-                <Text className="flex-1 text-base font-medium text-text-primary">
-                  {item.label}
-                </Text>
-                {item.count !== undefined && item.count > 0 ? (
-                  <Text className="mr-1 text-sm tabular-nums text-text-tertiary">
-                    {item.count}
-                  </Text>
-                ) : null}
-                <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-              </Pressable>
+                item={item}
+                isLast={index === libraryItems.length - 1}
+                onPress={() => router.push(item.route as any)}
+              />
             ))}
           </GlassSurface>
         </View>
 
         {/* ── Account ── */}
         <View className="mt-6">
-          <GlassSurface radius={8} variant="surface">
-            {accountItems.map((item) => (
-              <Pressable
-                key={item.route}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.push(item.route as any);
-                }}
-                className="flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover"
-              >
-                <View
-                  className={`h-9 w-9 items-center justify-center rounded-xl ${item.iconBg}`}
-                >
-                  <Ionicons name={item.icon} size={18} color={item.iconColor} />
-                </View>
-                <Text className="flex-1 text-base font-medium text-text-primary">
-                  {item.label}
-                </Text>
-                <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-              </Pressable>
-            ))}
+          <GlassSurface radius={16} variant="surface">
+            <MenuRow
+              item={{
+                icon: "settings-outline",
+                iconBg: "bg-dark-elevated",
+                iconColor: "#9BA1B0",
+                label: "Settings",
+                route: "/settings",
+              }}
+              isLast
+              onPress={() => router.push("/settings")}
+            />
           </GlassSurface>
         </View>
       </View>

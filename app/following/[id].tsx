@@ -40,6 +40,7 @@ export default function FollowingScreen() {
         isMutualFollow={item.isMutualFollow}
         mutualCount={item.mutualCount}
         inContacts={item.inContacts}
+        showFollowButton={!item.isSelf}
       />
     ),
     [],

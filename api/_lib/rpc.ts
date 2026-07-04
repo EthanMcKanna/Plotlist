@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 
-import { and, asc, count, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import { chunkForSqlParams, ilike } from "./sql-dialect";
 import { z } from "zod";
@@ -38,6 +39,7 @@ import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social
 import { sendPhoneVerificationCode } from "./twilio";
 import { createUploadToken, getRequestOrigin } from "./uploads";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
+import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
   isHomeCatalogCacheFresh,
   isHomeCatalogCacheUsableAfterError,
@@ -70,7 +72,7 @@ import {
   upsertSeasonCacheEntry,
 } from "./season-cache";
 import { getImdbRatings } from "./imdb-ratings";
-import { buildWatchStats } from "../../lib/watchStats";
+import { getWatchInsightsForUser } from "./watch-insights";
 import {
   getEpisodeProgressState,
   isEpisodeVerified,
@@ -100,6 +102,7 @@ const updateProfileArgs = z.object({
       selectedProviders: z.array(z.string()),
     })
     .optional(),
+  streamingProviders: z.array(z.string().max(40)).max(20).optional(),
 });
 
 const setOnboardingStepArgs = z.object({
@@ -575,25 +578,51 @@ async function buildUserProfile(
 ) {
   const viewerId = viewer?.id ?? null;
   const isOwnProfile = viewerId === profileUser.id;
-  const [viewerFollowingRows, viewerFollowerRows, viewerContactRows] = viewerId
-    ? await Promise.all([
-        db.select().from(follows).where(eq(follows.followerId, viewerId)),
-        db.select().from(follows).where(eq(follows.followeeId, viewerId)),
-        db.select().from(contactSyncEntries).where(eq(contactSyncEntries.ownerId, viewerId)),
-      ])
-    : [[], [], []];
 
-  const viewerFolloweeIds = new Set(viewerFollowingRows.map((row) => row.followeeId));
-  const viewerFollowerIds = new Set(viewerFollowerRows.map((row) => row.followerId));
-  const isFollowing = viewerFolloweeIds.has(profileUser.id);
-  const profileFollowsViewer = viewerFollowerIds.has(profileUser.id);
+  // Relationship facts come from point lookups and one aggregated join —
+  // never from loading either side's full follow graph.
+  const viewerFollowsAlias = alias(follows, "viewer_follows");
+  const [isFollowingRows, followsViewerRows, mutualRows, contactRows] =
+    viewerId && !isOwnProfile
+      ? await Promise.all([
+          db
+            .select({ id: follows.id })
+            .from(follows)
+            .where(and(eq(follows.followerId, viewerId), eq(follows.followeeId, profileUser.id)))
+            .limit(1),
+          db
+            .select({ id: follows.id })
+            .from(follows)
+            .where(and(eq(follows.followerId, profileUser.id), eq(follows.followeeId, viewerId)))
+            .limit(1),
+          db
+            .select({ value: sql<number>`count(*)` })
+            .from(follows)
+            .innerJoin(
+              viewerFollowsAlias,
+              and(
+                eq(viewerFollowsAlias.followeeId, follows.followerId),
+                eq(viewerFollowsAlias.followerId, viewerId),
+              ),
+            )
+            .where(eq(follows.followeeId, profileUser.id)),
+          db
+            .select({ id: contactSyncEntries.id })
+            .from(contactSyncEntries)
+            .where(
+              and(
+                eq(contactSyncEntries.ownerId, viewerId),
+                eq(contactSyncEntries.matchedUserId, profileUser.id),
+              ),
+            )
+            .limit(1),
+        ])
+      : [[], [], [], []];
 
-  const profileFollowerRows = await db
-    .select()
-    .from(follows)
-    .where(eq(follows.followeeId, profileUser.id));
-  const mutualCount = profileFollowerRows.filter((row) => viewerFolloweeIds.has(row.followerId)).length;
-  const inContacts = viewerContactRows.some((entry) => entry.matchedUserId === profileUser.id);
+  const isFollowing = isFollowingRows.length > 0;
+  const profileFollowsViewer = followsViewerRows.length > 0;
+  const mutualCount = Number(mutualRows[0]?.value ?? 0);
+  const inContacts = contactRows.length > 0;
 
   const visibility = getProfileVisibility(profileUser);
   const permissions = {
@@ -611,18 +640,16 @@ async function buildUserProfile(
     }),
   };
 
-  const reviewRows = await db
-    .select()
+  const ratingAggRows = await db
+    .select({
+      average: sql<number | null>`avg(${reviews.rating})`,
+      total: sql<number>`count(*)`,
+    })
     .from(reviews)
-    .where(eq(reviews.authorId, profileUser.id))
-    .orderBy(desc(reviews.createdAt));
+    .where(eq(reviews.authorId, profileUser.id));
   const averageRating =
-    reviewRows.length > 0
-      ? Number(
-          (
-            reviewRows.reduce((sum, review) => sum + review.rating, 0) / reviewRows.length
-          ).toFixed(1),
-        )
+    Number(ratingAggRows[0]?.total ?? 0) > 0 && ratingAggRows[0]?.average != null
+      ? Number(Number(ratingAggRows[0].average).toFixed(1))
       : null;
 
   const favoriteShowIds = permissions.favorites ? profileUser.favoriteShowIds ?? [] : [];
@@ -636,10 +663,12 @@ async function buildUserProfile(
     .filter((show): show is typeof shows.$inferSelect => Boolean(show))
     .map(toShowPreview);
 
-  const topRatedRows = reviewRows
-    .filter((review) => review.rating !== null)
-    .sort((left, right) => right.rating - left.rating || right.createdAt - left.createdAt)
-    .slice(0, 12);
+  const topRatedRows = await db
+    .select()
+    .from(reviews)
+    .where(eq(reviews.authorId, profileUser.id))
+    .orderBy(desc(reviews.rating), desc(reviews.createdAt))
+    .limit(12);
   const topRatedShowRows =
     topRatedRows.length > 0
       ? await db.select().from(shows).where(inArray(shows.id, topRatedRows.map((row) => row.showId)))
@@ -1648,55 +1677,6 @@ async function getContactStatus(userId: string) {
   };
 }
 
-async function getEpisodeStats(userId: string) {
-  const [episodeRows, stateRows, reviewRows] = await Promise.all([
-    db
-      .select()
-      .from(episodeProgress)
-      .where(eq(episodeProgress.userId, userId))
-      .orderBy(desc(episodeProgress.watchedAt)),
-    db.select().from(watchStates).where(eq(watchStates.userId, userId)),
-    db.select().from(reviews).where(eq(reviews.authorId, userId)),
-  ]);
-
-  const showIds = Array.from(
-    new Set([
-      ...episodeRows.map((row) => row.showId),
-      ...reviewRows.map((row) => row.showId),
-    ]),
-  );
-  const showRows =
-    showIds.length > 0 ? await db.select().from(shows).where(inArray(shows.id, showIds)) : [];
-  const tmdbShowRows = showRows.filter((show) => show.externalSource === "tmdb");
-  const detailRows =
-    tmdbShowRows.length > 0
-      ? await db
-          .select()
-          .from(tmdbDetailsCache)
-          .where(
-            and(
-              eq(tmdbDetailsCache.externalSource, "tmdb"),
-              inArray(
-                tmdbDetailsCache.externalId,
-                tmdbShowRows.map((show) => show.externalId),
-              ),
-            ),
-          )
-      : [];
-
-  return buildWatchStats({
-    episodes: episodeRows,
-    watchStates: stateRows,
-    reviews: reviewRows,
-    shows: showRows,
-    runtimePayloads: detailRows.map((row) => ({
-      externalSource: row.externalSource,
-      externalId: row.externalId,
-      payload: row.payload,
-    })),
-  });
-}
-
 async function setContactSnapshot(
   userId: string,
   entries: Array<{
@@ -1759,17 +1739,20 @@ async function getSuggestedUsers(userId: string, limit: number) {
   );
 
   const contactEntries = await db
-    .select()
+    .select({ matchedUserId: contactSyncEntries.matchedUserId })
     .from(contactSyncEntries)
-    .where(eq(contactSyncEntries.ownerId, userId))
-    .orderBy(desc(contactSyncEntries.updatedAt));
+    .where(
+      and(
+        eq(contactSyncEntries.ownerId, userId),
+        isNotNull(contactSyncEntries.matchedUserId),
+      ),
+    )
+    .orderBy(desc(contactSyncEntries.updatedAt))
+    .limit(60);
   const contactUserIds = Array.from(
     new Set(contactEntries.flatMap((entry) => (entry.matchedUserId ? [entry.matchedUserId] : []))),
   );
-  const contactUsers =
-    contactUserIds.length > 0
-      ? await db.select().from(users).where(inArray(users.id, contactUserIds))
-      : [];
+  const contactUsers = contactUserIds.length > 0 ? await getUsersByIdsChunked(contactUserIds) : [];
 
   const previews = await buildPersonPreviews(userId, [
     ...contactUsers.filter((candidate) => Boolean(candidate.username)),
@@ -1856,10 +1839,12 @@ async function getSimilarTasteUserPreviews(userId: string, limit: number) {
   }
 
   const candidateIds = candidateRows.map((candidate) => candidate.id);
-  const candidateWatchRows = await db
-    .select()
-    .from(watchStates)
-    .where(inArray(watchStates.userId, candidateIds));
+  const candidateWatchRows: Array<typeof watchStates.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(candidateIds, 1, 80)) {
+    candidateWatchRows.push(
+      ...(await db.select().from(watchStates).where(inArray(watchStates.userId, chunk))),
+    );
+  }
   const watchedShowIdsByUser = new Map<string, Set<string>>();
   for (const row of candidateWatchRows) {
     const showIds = watchedShowIdsByUser.get(row.userId) ?? new Set<string>();
@@ -1939,10 +1924,16 @@ async function getSimilarTasteUserPreviews(userId: string, limit: number) {
 
 async function getContactMatches(userId: string, limit: number) {
   const entries = await db
-    .select()
+    .select({ matchedUserId: contactSyncEntries.matchedUserId })
     .from(contactSyncEntries)
-    .where(eq(contactSyncEntries.ownerId, userId))
-    .orderBy(desc(contactSyncEntries.updatedAt));
+    .where(
+      and(
+        eq(contactSyncEntries.ownerId, userId),
+        isNotNull(contactSyncEntries.matchedUserId),
+      ),
+    )
+    .orderBy(desc(contactSyncEntries.updatedAt))
+    .limit(limit * 2);
   const userIds = Array.from(
     new Set(entries.flatMap((entry) => (entry.matchedUserId ? [entry.matchedUserId] : []))),
   ).slice(0, limit);
@@ -1950,7 +1941,7 @@ async function getContactMatches(userId: string, limit: number) {
     return [];
   }
 
-  const candidates = await db.select().from(users).where(inArray(users.id, userIds));
+  const candidates = await getUsersByIdsChunked(userIds);
   return await buildPersonPreviews(userId, candidates);
 }
 
@@ -1959,8 +1950,44 @@ async function deleteAccount(userId: string) {
   const ownedListIds = ownedLists.map((item) => item.id);
 
   if (ownedListIds.length > 0) {
-    await db.delete(listItems).where(inArray(listItems.listId, ownedListIds));
-    await db.delete(lists).where(inArray(lists.id, ownedListIds));
+    for (const chunk of chunkForSqlParams(ownedListIds, 1, 80)) {
+      await db.delete(listItems).where(inArray(listItems.listId, chunk));
+      await db.delete(lists).where(inArray(lists.id, chunk));
+    }
+  }
+
+  // Before removing follow edges, repair the denormalized counters on the
+  // other side of each edge so surviving accounts don't keep phantom
+  // followers/following.
+  const [followingRows, followerRows] = await Promise.all([
+    db
+      .select({ followeeId: follows.followeeId })
+      .from(follows)
+      .where(eq(follows.followerId, userId)),
+    db
+      .select({ followerId: follows.followerId })
+      .from(follows)
+      .where(eq(follows.followeeId, userId)),
+  ]);
+  for (const chunk of chunkForSqlParams(
+    Array.from(new Set(followingRows.map((row) => row.followeeId))),
+    1,
+    80,
+  )) {
+    await db
+      .update(users)
+      .set({ countsFollowers: sql`max(0, ${users.countsFollowers} - 1)` })
+      .where(inArray(users.id, chunk));
+  }
+  for (const chunk of chunkForSqlParams(
+    Array.from(new Set(followerRows.map((row) => row.followerId))),
+    1,
+    80,
+  )) {
+    await db
+      .update(users)
+      .set({ countsFollowing: sql`max(0, ${users.countsFollowing} - 1)` })
+      .where(inArray(users.id, chunk));
   }
 
   await Promise.all([
@@ -1974,8 +2001,10 @@ async function deleteAccount(userId: string) {
     db.delete(follows).where(eq(follows.followeeId, userId)),
     db.delete(reports).where(eq(reports.reporterId, userId)),
     db.delete(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
-    db.delete(users).where(eq(users.id, userId)),
+    db.delete(feedItems).where(eq(feedItems.ownerId, userId)),
+    db.delete(feedItems).where(eq(feedItems.actorId, userId)),
   ]);
+  await db.delete(users).where(eq(users.id, userId));
 
   return { success: true };
 }
@@ -2127,8 +2156,75 @@ async function buildWatchLogActivity(userId: string, args: any) {
   };
 }
 
+function parsePaginationWindow(args: any) {
+  const parsed = paginationArgs.parse(args ?? {});
+  const offset = Math.max(0, Number(parsed.paginationOpts?.cursor ?? 0) || 0);
+  const numItems = Math.min(Math.max(1, parsed.paginationOpts?.numItems ?? 20), 100);
+  return { offset, numItems };
+}
+
+async function getUsersByIdsChunked(userIds: string[]) {
+  const uniqueIds = Array.from(new Set(userIds));
+  const rows: Array<typeof users.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(uniqueIds, 1, 80)) {
+    rows.push(...(await db.select().from(users).where(inArray(users.id, chunk))));
+  }
+  return rows;
+}
+
+// Follower/following pages are cut in SQL (LIMIT/OFFSET via the numeric
+// cursor the client already sends) so large accounts never pull their whole
+// edge list into worker memory. Relationship flags are computed for the
+// authenticated viewer; self rows stay in the list flagged isSelf.
+async function listFollowsPage(input: {
+  args: any;
+  column: "followerId" | "followeeId";
+  userId: string;
+  viewerId: string;
+}) {
+  const { offset, numItems } = parsePaginationWindow(input.args);
+  const matchColumn = input.column === "followeeId" ? follows.followeeId : follows.followerId;
+  const otherColumn = input.column === "followeeId" ? follows.followerId : follows.followeeId;
+
+  const rows = await db
+    .select({ otherId: otherColumn, createdAt: follows.createdAt })
+    .from(follows)
+    .where(eq(matchColumn, input.userId))
+    .orderBy(desc(follows.createdAt))
+    .limit(numItems + 1)
+    .offset(offset);
+
+  const pageEdges = rows.slice(0, numItems);
+  const userRows = pageEdges.length > 0 ? await getUsersByIdsChunked(pageEdges.map((row) => row.otherId)) : [];
+  const userById = new Map(userRows.map((row) => [row.id, row] as const));
+  const orderedUsers = pageEdges
+    .map((edge) => userById.get(edge.otherId))
+    .filter((row): row is typeof users.$inferSelect => Boolean(row));
+
+  const previews = await buildPersonPreviews(input.viewerId, orderedUsers, {
+    includeViewer: true,
+  });
+
+  return {
+    page: previews,
+    results: previews,
+    continueCursor: String(offset + pageEdges.length),
+    isDone: rows.length <= numItems,
+  };
+}
+
+const FEED_FANOUT_MAX_FOLLOWERS = 400;
+
 async function addFeedForFollowers(actorId: string, type: "review" | "log", targetId: string, showId: string, timestamp: number) {
-  const followerRows = await db.select().from(follows).where(eq(follows.followeeId, actorId));
+  // Fan-out is capped to the most recent followers so a popular account
+  // can't blow the request past D1 write limits; everyone still sees the
+  // activity on the actor's profile.
+  const followerRows = await db
+    .select({ followerId: follows.followerId })
+    .from(follows)
+    .where(eq(follows.followeeId, actorId))
+    .orderBy(desc(follows.createdAt))
+    .limit(FEED_FANOUT_MAX_FOLLOWERS);
   const ownerIds = Array.from(new Set([actorId, ...followerRows.map((row) => row.followerId)]));
   if (ownerIds.length === 0) {
     return;
@@ -2243,17 +2339,25 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .limit(1);
     return rows.length > 0;
   },
-  "follows:listFollowersDetailed": async ({ args }) => {
+  "follows:listFollowersDetailed": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
-    const rows = await db.select().from(follows).where(eq(follows.followeeId, parsed.userId)).orderBy(desc(follows.createdAt));
-    const userRows = rows.length ? await db.select().from(users).where(inArray(users.id, rows.map((row) => row.followerId))) : [];
-    return pageRows(await buildPersonPreviews(parsed.userId, userRows), args);
+    const viewer = await getOptionalAuthUser(req);
+    return await listFollowsPage({
+      args,
+      column: "followeeId",
+      userId: parsed.userId,
+      viewerId: viewer?.id ?? parsed.userId,
+    });
   },
-  "follows:listFollowingDetailed": async ({ args }) => {
+  "follows:listFollowingDetailed": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
-    const rows = await db.select().from(follows).where(eq(follows.followerId, parsed.userId)).orderBy(desc(follows.createdAt));
-    const userRows = rows.length ? await db.select().from(users).where(inArray(users.id, rows.map((row) => row.followeeId))) : [];
-    return pageRows(await buildPersonPreviews(parsed.userId, userRows), args);
+    const viewer = await getOptionalAuthUser(req);
+    return await listFollowsPage({
+      args,
+      column: "followerId",
+      userId: parsed.userId,
+      viewerId: viewer?.id ?? parsed.userId,
+    });
   },
   "likes:getForUserTarget": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -2352,9 +2456,12 @@ export const queryHandlers: Record<string, RpcHandler> = {
     }
     return await buildWatchLogActivity(user.id, args);
   },
-  "episodeProgress:getStats": async ({ req }) => {
+  "watchStats:getInsights": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    return await getEpisodeStats(user.id);
+    const parsed = z
+      .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
+      .parse(args ?? {});
+    return await getWatchInsightsForUser(user.id, parsed.utcOffsetMinutes ?? 0);
   },
   "episodeProgress:getProgressForShow": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -3037,6 +3144,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         profileVisibility: parsed.profileVisibility ?? user.profileVisibility,
         releaseCalendarPreferences:
           parsed.releaseCalendarPreferences ?? user.releaseCalendarPreferences,
+        streamingProviders:
+          parsed.streamingProviders !== undefined
+            ? normalizeStreamingProviderKeys(parsed.streamingProviders)
+            : user.streamingProviders,
         searchText: normalizeSearchText(
           `${parsed.displayName ?? user.displayName ?? ""} ${username ?? ""} ${user.name ?? ""}`,
         ),
@@ -3112,81 +3223,81 @@ export const mutationHandlers: Record<string, RpcHandler> = {
 
     await enforceRateLimit(`follow:${user.id}`, 30, 60_000);
 
-    const existing = await db
-      .select()
-      .from(follows)
-      .where(and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToFollow)))
-      .limit(1);
-    if (existing[0]) {
-      return existing[0].id;
-    }
-
-    const followId = createId("follow");
-    await db.insert(follows).values({
-      id: followId,
-      followerId: user.id,
-      followeeId: parsed.userIdToFollow,
-      createdAt: Date.now(),
-    });
-    await db
-      .update(users)
-      .set({
-        countsFollowing: (user.countsFollowing ?? 0) + 1,
-      })
-      .where(eq(users.id, user.id));
-
     const followeeRows = await db
-      .select()
+      .select({ id: users.id })
       .from(users)
       .where(eq(users.id, parsed.userIdToFollow))
       .limit(1);
-    const followee = followeeRows[0];
-    if (followee) {
-      await db
-        .update(users)
-        .set({
-          countsFollowers: (followee.countsFollowers ?? 0) + 1,
-        })
-        .where(eq(users.id, followee.id));
+    if (!followeeRows[0]) {
+      throw new ApiError(404, "user_not_found", "That account no longer exists");
     }
 
-    return followId;
+    // Concurrent taps race here; the unique (follower, followee) index plus
+    // onConflictDoNothing means exactly one request inserts, and only that
+    // request touches the denormalized counters.
+    const inserted = await db
+      .insert(follows)
+      .values({
+        id: createId("follow"),
+        followerId: user.id,
+        followeeId: parsed.userIdToFollow,
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing({ target: [follows.followerId, follows.followeeId] })
+      .returning({ id: follows.id });
+
+    if (inserted.length === 0) {
+      const existing = await db
+        .select({ id: follows.id })
+        .from(follows)
+        .where(
+          and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToFollow)),
+        )
+        .limit(1);
+      return existing[0]?.id ?? null;
+    }
+
+    await Promise.all([
+      db
+        .update(users)
+        .set({ countsFollowing: sql`${users.countsFollowing} + 1` })
+        .where(eq(users.id, user.id)),
+      db
+        .update(users)
+        .set({ countsFollowers: sql`${users.countsFollowers} + 1` })
+        .where(eq(users.id, parsed.userIdToFollow)),
+    ]);
+
+    return inserted[0].id;
   },
   "follows:unfollow": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = unfollowArgs.parse(args ?? {});
 
-    const existing = await db
-      .select()
-      .from(follows)
-      .where(and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToUnfollow)))
-      .limit(1);
-    if (!existing[0]) {
+    await enforceRateLimit(`unfollow:${user.id}`, 60, 60_000);
+
+    // Delete-by-pair with returning keeps this atomic: whichever concurrent
+    // request removes the row is the only one that decrements the counters.
+    const deleted = await db
+      .delete(follows)
+      .where(
+        and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToUnfollow)),
+      )
+      .returning({ id: follows.id });
+    if (deleted.length === 0) {
       return null;
     }
 
-    await db.delete(follows).where(eq(follows.id, existing[0].id));
-    await db
-      .update(users)
-      .set({
-        countsFollowing: Math.max(0, (user.countsFollowing ?? 0) - 1),
-      })
-      .where(eq(users.id, user.id));
-
-    const followeeRows = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, parsed.userIdToUnfollow))
-      .limit(1);
-    const followee = followeeRows[0];
-    if (followee) {
-      await db
+    await Promise.all([
+      db
         .update(users)
-        .set({
-          countsFollowers: Math.max(0, (followee.countsFollowers ?? 0) - 1),
-        })
-        .where(eq(users.id, followee.id));
-    }
+        .set({ countsFollowing: sql`max(0, ${users.countsFollowing} - 1)` })
+        .where(eq(users.id, user.id)),
+      db
+        .update(users)
+        .set({ countsFollowers: sql`max(0, ${users.countsFollowers} - 1)` })
+        .where(eq(users.id, parsed.userIdToUnfollow)),
+    ]);
 
     return { success: true };
   },
@@ -3552,7 +3663,7 @@ export const actionHandlers: Record<string, RpcHandler> = {
       return null;
     }
     const payload = normalizeTmdbShowDetails(
-      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,external_ids" }),
+      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,recommendations,external_ids" }),
     );
     const now = Date.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
@@ -3755,10 +3866,119 @@ export const actionHandlers: Record<string, RpcHandler> = {
   },
   "embeddings:getSimilarShows": async ({ args }) => {
     const parsed = z.object({ showId: z.string(), limit: z.number().optional() }).parse(args ?? {});
+    const limit = Math.min(parsed.limit ?? 10, 20);
     const sourceRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
     const source = sourceRows[0];
-    const rows = await db.select().from(shows).orderBy(desc(shows.tmdbPopularity), desc(shows.updatedAt)).limit(Math.min((parsed.limit ?? 10) + 1, 30));
-    return rows.filter((show) => show.id !== source?.id).slice(0, parsed.limit ?? 10).map((show, index) => ({ _id: show.id, show: showToDoc(show), score: 1 / (index + 1) }));
+    if (!source || source.externalSource !== "tmdb") {
+      return [];
+    }
+
+    const cachedRows = await db
+      .select()
+      .from(tmdbDetailsCache)
+      .where(
+        and(
+          eq(tmdbDetailsCache.externalSource, "tmdb"),
+          eq(tmdbDetailsCache.externalId, source.externalId),
+        ),
+      )
+      .limit(1);
+    const cachedPayload = cachedRows[0]?.payload as any;
+    const sourceGenres: Array<{ id: number; name: string }> = Array.isArray(cachedPayload?.genres)
+      ? cachedPayload.genres
+      : [];
+
+    let candidates: any[] = Array.isArray(cachedPayload?.recommendations?.results)
+      ? cachedPayload.recommendations.results
+      : [];
+    if (candidates.length === 0) {
+      try {
+        const fetched = await tmdb(`/tv/${source.externalId}/recommendations`);
+        candidates = Array.isArray(fetched?.results) ? fetched.results : [];
+      } catch {
+        candidates = [];
+      }
+    }
+    if (candidates.length === 0 && Array.isArray(cachedPayload?.similar?.results)) {
+      candidates = cachedPayload.similar.results;
+    }
+
+    const seenExternalIds = new Set<string>([source.externalId]);
+    const picks: any[] = [];
+    for (const candidate of candidates) {
+      const externalId = candidate?.id != null ? String(candidate.id) : "";
+      if (!externalId || seenExternalIds.has(externalId) || !candidate?.poster_path) {
+        continue;
+      }
+      seenExternalIds.add(externalId);
+      picks.push(candidate);
+      if (picks.length >= limit) {
+        break;
+      }
+    }
+    if (picks.length === 0) {
+      return [];
+    }
+
+    const localRows = await db
+      .select()
+      .from(shows)
+      .where(
+        and(
+          eq(shows.externalSource, "tmdb"),
+          inArray(shows.externalId, picks.map((candidate) => String(candidate.id))),
+        ),
+      );
+    const localByExternalId = new Map(localRows.map((row) => [row.externalId, row]));
+
+    // Ingest recommendations that aren't local yet so every card navigates
+    // directly to a show id instead of paying an ingest round-trip on tap.
+    const missing = picks.filter((candidate) => !localByExternalId.has(String(candidate.id)));
+    if (missing.length > 0) {
+      try {
+        await upsertShowsFromCatalogBatch(missing.map(catalogFromTmdb));
+        const ingestedRows = await db
+          .select()
+          .from(shows)
+          .where(
+            and(
+              eq(shows.externalSource, "tmdb"),
+              inArray(shows.externalId, missing.map((candidate) => String(candidate.id))),
+            ),
+          );
+        for (const row of ingestedRows) {
+          localByExternalId.set(row.externalId, row);
+        }
+      } catch (error) {
+        console.warn("[similar-shows] Failed to ingest recommended shows.", {
+          showId: source.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return picks.map((candidate) => {
+      const local = localByExternalId.get(String(candidate.id));
+      const genreIds: number[] = Array.isArray(candidate.genre_ids) ? candidate.genre_ids : [];
+      const sharedGenres = sourceGenres
+        .filter((genre) => genreIds.includes(genre.id))
+        .map((genre) => genre.name)
+        .slice(0, 2);
+      return {
+        _id: local?.id ?? `tmdb:${candidate.id}`,
+        showId: local?.id,
+        externalId: String(candidate.id),
+        title: candidate.name ?? candidate.original_name ?? "Untitled",
+        posterUrl: local?.posterUrl ?? tmdbImageUrl(candidate.poster_path, "w500"),
+        voteAverage:
+          typeof candidate.vote_average === "number" && candidate.vote_average > 0
+            ? candidate.vote_average
+            : undefined,
+        overview: candidate.overview ?? null,
+        sharedGenres,
+        show: showToDoc(local) ?? undefined,
+      };
+    });
   },
   "embeddings:getShowTasteSocialProof": async () => {
     return { matchingFriends: [], favoriteMatches: [], themeMatches: [] };

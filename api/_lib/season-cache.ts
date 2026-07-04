@@ -4,6 +4,7 @@ import { tmdbSeasonCache } from "../../db/schema";
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
+import { chunkForSqlParams } from "./sql-dialect";
 
 const SEASON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 // Seasons whose last episode aired long ago effectively never change; give
@@ -126,18 +127,27 @@ export async function readSeasonCacheEntries(
     return results;
   }
 
-  const externalIds = Array.from(new Set(requests.map((request) => request.externalId)));
-  const seasonNumbers = Array.from(new Set(requests.map((request) => request.seasonNumber)));
-  const rows = await db
-    .select()
-    .from(tmdbSeasonCache)
-    .where(
-      and(
-        eq(tmdbSeasonCache.externalSource, "tmdb"),
-        inArray(tmdbSeasonCache.externalId, externalIds),
-        inArray(tmdbSeasonCache.seasonNumber, seasonNumbers),
-      ),
+  // Batches stay under D1's 100-bound-parameter cap even when a caller asks
+  // for hundreds of (show, season) pairs at once.
+  const rows: Array<typeof tmdbSeasonCache.$inferSelect> = [];
+  for (const requestChunk of chunkForSqlParams(requests, 2, 80)) {
+    const externalIds = Array.from(new Set(requestChunk.map((request) => request.externalId)));
+    const seasonNumbers = Array.from(
+      new Set(requestChunk.map((request) => request.seasonNumber)),
     );
+    rows.push(
+      ...(await db
+        .select()
+        .from(tmdbSeasonCache)
+        .where(
+          and(
+            eq(tmdbSeasonCache.externalSource, "tmdb"),
+            inArray(tmdbSeasonCache.externalId, externalIds),
+            inArray(tmdbSeasonCache.seasonNumber, seasonNumbers),
+          ),
+        )),
+    );
+  }
 
   const wanted = new Set(
     requests.map((request) => seasonCacheKey(request.externalId, request.seasonNumber)),

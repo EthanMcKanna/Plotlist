@@ -17,6 +17,60 @@ export function getTrimmedSearchQuery(query: string) {
   return query.trim();
 }
 
+export type CatalogSortKey = "match" | "popular" | "newest" | "title";
+
+export const CATALOG_SORT_OPTIONS: Array<{ key: CatalogSortKey; label: string }> = [
+  { key: "match", label: "Best match" },
+  { key: "popular", label: "Popular" },
+  { key: "newest", label: "Newest" },
+  { key: "title", label: "A–Z" },
+];
+
+type SortableCatalogItem = {
+  title?: string | null;
+  year?: number | null;
+  tmdbPopularity?: number | null;
+  tmdbVoteCount?: number | null;
+};
+
+function readSortNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Sort catalog search results without mutating the source array. "match"
+ * preserves the search engine's relevance order; ties everywhere fall back
+ * to that same order so sorting is stable.
+ */
+export function sortCatalogResults<T extends SortableCatalogItem>(
+  items: T[],
+  sort: CatalogSortKey,
+): T[] {
+  if (sort === "match") {
+    return items;
+  }
+  const decorated = items.map((item, index) => ({ item, index }));
+  decorated.sort((left, right) => {
+    if (sort === "popular") {
+      return (
+        readSortNumber(right.item.tmdbPopularity) - readSortNumber(left.item.tmdbPopularity) ||
+        readSortNumber(right.item.tmdbVoteCount) - readSortNumber(left.item.tmdbVoteCount) ||
+        left.index - right.index
+      );
+    }
+    if (sort === "newest") {
+      return (
+        readSortNumber(right.item.year) - readSortNumber(left.item.year) ||
+        left.index - right.index
+      );
+    }
+    const leftTitle = (left.item.title ?? "").toLocaleLowerCase();
+    const rightTitle = (right.item.title ?? "").toLocaleLowerCase();
+    return leftTitle.localeCompare(rightTitle) || left.index - right.index;
+  });
+  return decorated.map((entry) => entry.item);
+}
+
 export function isSearchQueryReady(query: string, minLength: number) {
   return getTrimmedSearchQuery(query).length >= minLength;
 }

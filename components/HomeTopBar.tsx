@@ -172,7 +172,12 @@ export function HomeTopBar({
           <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/search");
+              // Fresh focus value per tap so the search screen re-focuses
+              // (and opens the keyboard) every time, not just the first.
+              router.push({
+                pathname: "/search",
+                params: { focus: String(Date.now()) },
+              });
             }}
             testID="home-topbar-search"
             accessibilityRole="button"

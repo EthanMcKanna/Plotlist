@@ -448,7 +448,7 @@ describe("home hero slides", () => {
     ).toEqual([]);
   });
 
-  it("dedupes hero meta labels when a fallback signal repeats the rating", () => {
+  it("never renders rating-shaped signals in hero meta", () => {
     expect(
       buildHeroMeta({
         key: "rating-repeat",
@@ -456,10 +456,9 @@ describe("home hero slides", () => {
         eyebrow: "trending",
         genreIds: [18],
         signal: "8.4 TMDB",
-        tmdbVoteAverage: 8.4,
         year: 2025,
       }),
-    ).toEqual(["Drama", "8.4 TMDB", "2025"]);
+    ).toEqual(["Drama", "2025"]);
   });
 
   it("turns dated fresh hero badges into simple recency labels", () => {
@@ -509,6 +508,6 @@ describe("home hero slides", () => {
         airing: [],
         now: "2026-07-13",
       })[0]?.signal,
-    ).toBe("8.2 TMDB");
+    ).toBe("Trending");
   });
 });

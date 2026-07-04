@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `streaming_providers` text;

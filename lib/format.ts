@@ -40,6 +40,22 @@ export function formatRelativeTime(value: number) {
   return formatDistanceToNowStrict(new Date(value), { addSuffix: true });
 }
 
+export function formatWatchTimeLabel(totalMinutes: number) {
+  const minutes = Math.max(0, Math.round(totalMinutes));
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) {
+    return { value: `${days}d ${hours % 24}h`, detail: `${hours.toLocaleString()} hours total` };
+  }
+  if (hours > 0) {
+    return {
+      value: `${hours}h ${minutes % 60}m`,
+      detail: `${minutes.toLocaleString()} minutes total`,
+    };
+  }
+  return { value: `${minutes}m`, detail: "Just getting started" };
+}
+
 export function isCurrentMonth(value: number) {
   return isSameMonth(new Date(value), new Date());
 }

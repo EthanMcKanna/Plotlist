@@ -49,6 +49,27 @@ export const SEARCH_DISCOVER_SECTIONS: SearchDiscoverDefinition[] = [
   { key: "prime_video", category: "prime_video", label: "Prime Video", logoPath: "/pvske1MyAoymrs5bguRfVqYiM9a.jpg", rotatePages: 4 },
 ];
 
+// Provider rails (sections with a logo) collapse to the user's selected
+// streaming services; editorial and genre rails always stay. No selection
+// keeps every rail.
+export function getSearchDiscoverSectionsForProviders(
+  definitions: SearchDiscoverDefinition[],
+  selectedProviderKeys: string[] | null | undefined,
+) {
+  const selected = (selectedProviderKeys ?? []).filter(
+    (key): key is string => typeof key === "string" && key.length > 0,
+  );
+  if (selected.length === 0) {
+    return definitions;
+  }
+  const wanted = new Set(selected);
+  const filtered = definitions.filter(
+    (section) => !section.logoPath || wanted.has(section.key),
+  );
+  const hasProviderRail = filtered.some((section) => Boolean(section.logoPath));
+  return hasProviderRail ? filtered : definitions;
+}
+
 export function getSearchDiscoverFetchPlan(
   definitions: SearchDiscoverDefinition[],
 ) {

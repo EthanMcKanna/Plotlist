@@ -6,6 +6,7 @@ import {
   getDailyDiscoverPage,
   getSearchDiscoverCacheKey,
   getSearchDiscoverFetchPlan,
+  getSearchDiscoverSectionsForProviders,
 } from "../lib/searchDiscover";
 
 describe("search discovery helpers", () => {
@@ -69,5 +70,28 @@ describe("search discovery helpers", () => {
     expect(getSearchDiscoverCacheKey(SEARCH_DISCOVER_SECTIONS, first)).not.toBe(
       getSearchDiscoverCacheKey(SEARCH_DISCOVER_SECTIONS, nextDay),
     );
+  });
+
+  it("collapses provider rails to the user's streaming services", () => {
+    const filtered = getSearchDiscoverSectionsForProviders(SEARCH_DISCOVER_SECTIONS, [
+      "hulu",
+      "max",
+    ]);
+    const providerKeys = filtered
+      .filter((section) => Boolean(section.logoPath))
+      .map((section) => section.key);
+    expect(providerKeys).toEqual(["max", "hulu"]);
+    // Editorial and genre rails always survive.
+    expect(filtered.some((section) => section.key === "trending_day")).toBe(true);
+    expect(filtered.some((section) => section.key === "genre_drama")).toBe(true);
+  });
+
+  it("keeps every rail when no services are selected or none match", () => {
+    expect(getSearchDiscoverSectionsForProviders(SEARCH_DISCOVER_SECTIONS, [])).toEqual(
+      SEARCH_DISCOVER_SECTIONS,
+    );
+    expect(
+      getSearchDiscoverSectionsForProviders(SEARCH_DISCOVER_SECTIONS, ["peacock"]),
+    ).toEqual(SEARCH_DISCOVER_SECTIONS);
   });
 });

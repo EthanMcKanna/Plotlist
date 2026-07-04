@@ -94,7 +94,14 @@ describe("home top bar copy", () => {
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-calendar" }));
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" }));
 
-    expect(router.push).toHaveBeenCalledWith("/search");
+    // Search pushes a fresh focus param so the search input opens the
+    // keyboard on every entry from home.
+    expect(router.push).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/search",
+        params: expect.objectContaining({ focus: expect.any(String) }),
+      }),
+    );
     expect(router.push).toHaveBeenCalledWith("/calendar");
     expect(router.push).toHaveBeenCalledWith("/profile");
   });

@@ -79,6 +79,9 @@ export const users = sqliteTable(
     releaseCalendarPreferences: jsonb("release_calendar_preferences").$type<{
       selectedProviders: string[];
     }>(),
+    // Streaming services the user subscribes to (provider keys, e.g.
+    // "netflix"); used to filter and lean home/search surfaces.
+    streamingProviders: jsonb("streaming_providers").$type<string[]>(),
   },
   (table) => ({
     emailIdx: uniqueIndex("users_email_idx").on(table.email),
