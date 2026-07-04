@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, Share, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, Share, Switch, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -103,6 +103,42 @@ const PRIVACY_OPTIONS = [
   { value: "private", label: "Only me" },
 ] satisfies { value: ProfileVisibilitySetting; label: string }[];
 
+function NotificationToggleRow({
+  label,
+  description,
+  value,
+  onChange,
+  isLast = false,
+}: {
+  label: string;
+  description: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  isLast?: boolean;
+}) {
+  return (
+    <View
+      className={`flex-row items-center gap-3 px-4 py-3.5 ${
+        isLast ? "" : "border-b border-dark-border"
+      }`}
+    >
+      <View className="flex-1">
+        <Text className="text-base font-medium text-text-primary">{label}</Text>
+        <Text className="mt-0.5 text-xs text-text-tertiary">{description}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={(next) => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onChange(next);
+        }}
+        trackColor={{ true: "#0EA5E9", false: "#2A2F3A" }}
+        thumbColor="#F1F3F7"
+      />
+    </View>
+  );
+}
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
@@ -158,6 +194,26 @@ export default function SettingsScreen() {
   const clearSync = useMutation(api.contacts.clearSync);
   const syncContacts = useAction(api.contacts.syncSnapshot);
   const contactStatus = useQuery(api.contacts.getStatus, hasProfile ? {} : "skip");
+  const notificationPrefs = useQuery(
+    api.notifications.getPreferences,
+    hasProfile ? {} : "skip",
+  ) as Record<string, boolean> | undefined;
+  const updateNotificationPrefs = useMutation(api.notifications.updatePreferences);
+  const [notificationOverrides, setNotificationOverrides] = useState<Record<string, boolean>>({});
+  const resolvedNotificationPrefs = {
+    episodes: true,
+    follows: true,
+    likes: true,
+    comments: true,
+    ...(notificationPrefs ?? {}),
+    ...notificationOverrides,
+  };
+  const toggleNotificationPref = (key: string) => (value: boolean) => {
+    setNotificationOverrides((current) => ({ ...current, [key]: value }));
+    void updateNotificationPrefs({ preferences: { [key]: value } }).catch(() => {
+      setNotificationOverrides((current) => ({ ...current, [key]: !value }));
+    });
+  };
   const avatarUrl = useQuery(
     api.storage.getUrl,
     me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
@@ -553,6 +609,42 @@ export default function SettingsScreen() {
           </GlassSurface>
           <Text className="mt-2 text-xs leading-4 text-text-tertiary">
             Home and search filter streaming rooms and lean picks toward services you have.
+          </Text>
+        </View>
+
+        {/* ── Notifications ── */}
+        <View className="mt-10">
+          <SectionHeader title="Notifications" />
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <NotificationToggleRow
+              label="New episodes"
+              description="A heads-up the evening a show you're watching drops an episode."
+              value={resolvedNotificationPrefs.episodes}
+              onChange={toggleNotificationPref("episodes")}
+            />
+            <NotificationToggleRow
+              label="New followers"
+              description="When someone starts following you."
+              value={resolvedNotificationPrefs.follows}
+              onChange={toggleNotificationPref("follows")}
+            />
+            <NotificationToggleRow
+              label="Likes"
+              description="When someone likes your review, log, or list."
+              value={resolvedNotificationPrefs.likes}
+              onChange={toggleNotificationPref("likes")}
+            />
+            <NotificationToggleRow
+              label="Comments"
+              description="When someone comments on your review, log, or list."
+              value={resolvedNotificationPrefs.comments}
+              onChange={toggleNotificationPref("comments")}
+              isLast
+            />
+          </GlassSurface>
+          <Text className="mt-2 text-xs leading-4 text-text-tertiary">
+            Applies to push notifications on this account. Everything still appears in your
+            in-app inbox.
           </Text>
         </View>
 

@@ -8,6 +8,7 @@ import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
 
 import { AuthErrorBoundary } from "../components/AuthErrorBoundary";
 import { AuthGate } from "../components/AuthGate";
+import { NotificationsBridge } from "../components/NotificationsBridge";
 import { QueryProvider } from "../components/QueryProvider";
 import { PlotlistSessionProvider } from "../lib/plotlist/auth";
 
@@ -32,6 +33,7 @@ export default function RootLayout() {
               <StatusBar style="light" />
               <AuthErrorBoundary>
                 <AuthGate>
+                  <NotificationsBridge />
                   <Stack screenOptions={{ headerShown: false }} />
                 </AuthGate>
               </AuthErrorBoundary>

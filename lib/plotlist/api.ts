@@ -153,4 +153,14 @@ export const api = {
     resolve: ref("mutation", "reports:resolve"),
     listOpen: ref("query", "reports:listOpen"),
   },
+  notifications: {
+    list: ref("query", "notifications:list"),
+    getUnreadCount: ref("query", "notifications:getUnreadCount"),
+    getPreferences: ref("query", "notifications:getPreferences"),
+    registerPushToken: ref("mutation", "notifications:registerPushToken"),
+    unregisterPushToken: ref("mutation", "notifications:unregisterPushToken"),
+    markRead: ref("mutation", "notifications:markRead"),
+    markAllRead: ref("mutation", "notifications:markAllRead"),
+    updatePreferences: ref("mutation", "notifications:updatePreferences"),
+  },
 };

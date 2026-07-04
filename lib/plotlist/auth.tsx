@@ -7,6 +7,7 @@ import {
   type StoredSession,
   subscribeToSessionCleared,
 } from "../api/session";
+import { unregisterPushTokenFromServer } from "../pushToken";
 
 type PlotlistSessionContextValue = {
   isApiAuthenticated: boolean;
@@ -125,6 +126,8 @@ export function useAuthActions() {
       throw new Error(`Unsupported sign-in provider: ${provider}`);
     },
     async signOut() {
+      // Runs before logout so the still-valid session can disown the device.
+      await unregisterPushTokenFromServer().catch(() => undefined);
       await authApi.logout().catch(() => undefined);
       await clearStoredSession();
       session.markSignedOut();

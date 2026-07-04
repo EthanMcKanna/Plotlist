@@ -29,6 +29,8 @@ export const watchStatusValues = [
 ] as const;
 
 export const targetTypeValues = ["review", "log", "list"] as const;
+export const notificationTypeValues = ["follow", "like", "comment", "episode"] as const;
+export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log"] as const;
 export const reportStatusValues = ["open", "resolved"] as const;
 export const reportActionValues = ["dismiss", "delete"] as const;
@@ -82,6 +84,10 @@ export const users = sqliteTable(
     // Streaming services the user subscribes to (provider keys, e.g.
     // "netflix"); used to filter and lean home/search surfaces.
     streamingProviders: jsonb("streaming_providers").$type<string[]>(),
+    // Per-category notification opt-outs; a missing key means enabled.
+    notificationPreferences: jsonb("notification_preferences").$type<
+      Record<string, boolean>
+    >(),
   },
   (table) => ({
     emailIdx: uniqueIndex("users_email_idx").on(table.email),
@@ -787,6 +793,74 @@ export const reports = sqliteTable(
       table.reporterId,
       table.createdAt,
     ),
+  }),
+);
+
+export const pushTokens = sqliteTable(
+  "push_tokens",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Expo push token ("ExponentPushToken[...]"); unique so a device that
+    // signs into a different account is reassigned, never double-notified.
+    token: text("token").notNull(),
+    platform: text("platform", { enum: pushPlatformValues }).notNull(),
+    // IANA timezone reported by the device; drives "tonight" digest timing.
+    timezone: text("timezone"),
+    createdAt: timestampMs("created_at").notNull(),
+    updatedAt: timestampMs("updated_at").notNull(),
+  },
+  (table) => ({
+    tokenIdx: uniqueIndex("push_tokens_token_idx").on(table.token),
+    userIdx: index("push_tokens_user_idx").on(table.userId),
+  }),
+);
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type", { enum: notificationTypeValues }).notNull(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "cascade" }),
+    showId: text("show_id").references(() => shows.id, { onDelete: "cascade" }),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    // Structured deep-link payload mirrored into the push message `data`.
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    // Idempotency key per recipient (e.g. "episode:<showId>:<airDate>");
+    // NULL rows are exempt since SQLite unique indexes ignore NULLs.
+    dedupeKey: text("dedupe_key"),
+    readAt: timestampMs("read_at"),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("notifications_user_created_idx").on(table.userId, table.createdAt),
+    userReadIdx: index("notifications_user_read_idx").on(table.userId, table.readAt),
+    userDedupeIdx: uniqueIndex("notifications_user_dedupe_idx").on(
+      table.userId,
+      table.dedupeKey,
+    ),
+  }),
+);
+
+export const pushTickets = sqliteTable(
+  "push_tickets",
+  {
+    id: text("id").primaryKey(),
+    // Expo ticket id returned by /push/send; polled later for receipts.
+    ticketId: text("ticket_id").notNull(),
+    token: text("token").notNull(),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    createdIdx: index("push_tickets_created_idx").on(table.createdAt),
   }),
 );
 

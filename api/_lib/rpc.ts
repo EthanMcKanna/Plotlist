@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { chunkForSqlParams, ilike } from "./sql-dialect";
@@ -15,7 +15,10 @@ import {
   likes,
   lists,
   listItems,
+  notifications,
   phoneVerificationRequests,
+  pushPlatformValues,
+  pushTokens,
   releaseEvents,
   reports,
   reviews,
@@ -72,6 +75,11 @@ import {
   upsertSeasonCacheEntry,
 } from "./season-cache";
 import { getImdbRatings } from "./imdb-ratings";
+import { notifyComment, notifyFollow, notifyLike } from "./notifications";
+import {
+  mergeNotificationPreferences,
+  resolveNotificationPreferences,
+} from "../../lib/notificationContent";
 import { getWatchInsightsForUser } from "./watch-insights";
 import {
   getEpisodeProgressState,
@@ -2003,6 +2011,9 @@ async function deleteAccount(userId: string) {
     db.delete(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
     db.delete(feedItems).where(eq(feedItems.ownerId, userId)),
     db.delete(feedItems).where(eq(feedItems.actorId, userId)),
+    db.delete(pushTokens).where(eq(pushTokens.userId, userId)),
+    db.delete(notifications).where(eq(notifications.userId, userId)),
+    db.delete(notifications).where(eq(notifications.actorId, userId)),
   ]);
   await db.delete(users).where(eq(users.id, userId));
 
@@ -3087,6 +3098,69 @@ export const queryHandlers: Record<string, RpcHandler> = {
       ? parsed.storageId
       : null;
   },
+  "notifications:list": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = paginationArgs.parse(args ?? {});
+    const start = Number(parsed.paginationOpts?.cursor ?? 0) || 0;
+    const numItems = Math.min(parsed.paginationOpts?.numItems ?? 20, 50);
+    const rows = await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, user.id))
+      .orderBy(desc(notifications.createdAt))
+      .limit(numItems)
+      .offset(start);
+
+    const actorIds = Array.from(
+      new Set(rows.map((row) => row.actorId).filter((id): id is string => Boolean(id))),
+    );
+    const showIds = Array.from(
+      new Set(rows.map((row) => row.showId).filter((id): id is string => Boolean(id))),
+    );
+    const [actorRows, showRows] = await Promise.all([
+      actorIds.length > 0 ? db.select().from(users).where(inArray(users.id, actorIds)) : [],
+      showIds.length > 0 ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
+    ]);
+    const actorById = new Map(actorRows.map((actor) => [actor.id, actor] as const));
+    const showById = new Map(showRows.map((show) => [show.id, show] as const));
+
+    const page = rows.map((row) => {
+      const actor = row.actorId ? actorById.get(row.actorId) : null;
+      const show = row.showId ? showById.get(row.showId) : null;
+      return {
+        ...toDoc(row),
+        actor: actor
+          ? {
+              _id: actor.id,
+              username: actor.username,
+              displayName: actor.displayName,
+              avatarUrl: actor.avatarUrl ?? actor.image ?? null,
+            }
+          : null,
+        show: show ? toShowPreview(show) : null,
+      };
+    });
+    const next = start + rows.length;
+    return {
+      page,
+      results: page,
+      continueCursor: String(next),
+      isDone: rows.length < numItems,
+    };
+  },
+  "notifications:getUnreadCount": async ({ req }) => {
+    const user = await getOptionalAuthUser(req);
+    if (!user) return 0;
+    const rows = await db
+      .select({ value: count() })
+      .from(notifications)
+      .where(and(eq(notifications.userId, user.id), isNull(notifications.readAt)));
+    return Number(rows[0]?.value ?? 0);
+  },
+  "notifications:getPreferences": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return resolveNotificationPreferences(user.notificationPreferences);
+  },
 };
 
 export const mutationHandlers: Record<string, RpcHandler> = {
@@ -3268,6 +3342,8 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         .where(eq(users.id, parsed.userIdToFollow)),
     ]);
 
+    await notifyFollow(user, parsed.userIdToFollow);
+
     return inserted[0].id;
   },
   "follows:unfollow": async ({ args, req }) => {
@@ -3315,6 +3391,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     const id = createId("like");
     await db.insert(likes).values({ id, userId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, createdAt: Date.now() });
+    await notifyLike(user, parsed.targetType, parsed.targetId);
     return true;
   },
   "comments:add": async ({ args, req }) => {
@@ -3322,6 +3399,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = targetArgs.extend({ text: z.string().min(1) }).parse(args ?? {});
     const id = createId("comment");
     await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, text: parsed.text, createdAt: Date.now() });
+    await notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text);
     const rows = await db.select().from(comments).where(eq(comments.id, id)).limit(1);
     return rows[0] ? { comment: toDoc(rows[0]), author: toClientUser(user) } : null;
   },
@@ -3548,6 +3626,86 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ reportId: z.string(), action: z.enum(["dismiss", "delete"]) }).parse(args ?? {});
     await db.update(reports).set({ status: "resolved", resolvedAt: Date.now(), resolvedBy: user.id, action: parsed.action }).where(eq(reports.id, parsed.reportId));
     return { success: true };
+  },
+  "notifications:registerPushToken": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        token: z.string().min(1).max(200),
+        platform: z.enum(pushPlatformValues),
+        timezone: z.string().max(64).optional(),
+      })
+      .parse(args ?? {});
+    if (!/^Expo(nent)?PushToken\[.+\]$/.test(parsed.token)) {
+      throw new ApiError(400, "invalid_push_token", "Not a valid Expo push token");
+    }
+    const now = Date.now();
+    // A device that signs into another account moves its token row over so
+    // pushes never reach the previous user.
+    await db
+      .insert(pushTokens)
+      .values({
+        id: createId("pushtoken"),
+        userId: user.id,
+        token: parsed.token,
+        platform: parsed.platform,
+        timezone: parsed.timezone ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [pushTokens.token],
+        set: {
+          userId: user.id,
+          platform: parsed.platform,
+          timezone: parsed.timezone ?? null,
+          updatedAt: now,
+        },
+      });
+    return { success: true };
+  },
+  "notifications:unregisterPushToken": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ token: z.string().min(1).max(200) }).parse(args ?? {});
+    await db
+      .delete(pushTokens)
+      .where(and(eq(pushTokens.token, parsed.token), eq(pushTokens.userId, user.id)));
+    return { success: true };
+  },
+  "notifications:markRead": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ notificationId: z.string().min(1) }).parse(args ?? {});
+    await db
+      .update(notifications)
+      .set({ readAt: Date.now() })
+      .where(
+        and(
+          eq(notifications.id, parsed.notificationId),
+          eq(notifications.userId, user.id),
+          isNull(notifications.readAt),
+        ),
+      );
+    return { success: true };
+  },
+  "notifications:markAllRead": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    await db
+      .update(notifications)
+      .set({ readAt: Date.now() })
+      .where(and(eq(notifications.userId, user.id), isNull(notifications.readAt)));
+    return { success: true };
+  },
+  "notifications:updatePreferences": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    // Unknown keys are ignored by the merge, so a loose record is safe here.
+    const parsed = z
+      .object({
+        preferences: z.record(z.string(), z.boolean()),
+      })
+      .parse(args ?? {});
+    const merged = mergeNotificationPreferences(user.notificationPreferences, parsed.preferences);
+    await db.update(users).set({ notificationPreferences: merged }).where(eq(users.id, user.id));
+    return resolveNotificationPreferences(merged);
   },
 };
 
