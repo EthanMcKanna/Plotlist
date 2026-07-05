@@ -17,6 +17,8 @@ import { syncAppBadgeCount } from "../lib/pushToken";
 
 const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   follow: "person-add",
+  follow_request: "person-add",
+  follow_accepted: "checkmark-circle",
   like: "heart",
   comment: "chatbubble-ellipses",
   episode: "tv",
@@ -24,6 +26,8 @@ const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 const TYPE_ICON_COLORS: Record<string, string> = {
   follow: "#38BDF8",
+  follow_request: "#F59E0B",
+  follow_accepted: "#22C55E",
   like: "#F472B6",
   comment: "#A78BFA",
   episode: "#22C55E",

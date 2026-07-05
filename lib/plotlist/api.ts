@@ -25,6 +25,7 @@ export const api = {
   users: {
     ensureProfile: ref("mutation", "users:ensureProfile"),
     updateProfile: ref("mutation", "users:updateProfile"),
+    updatePrivacy: ref("mutation", "users:updatePrivacy"),
     setOnboardingStep: ref("mutation", "users:setOnboardingStep"),
     deleteAccount: ref("mutation", "users:deleteAccount"),
     me: ref("query", "users:me"),
@@ -51,8 +52,20 @@ export const api = {
     follow: ref("mutation", "follows:follow"),
     unfollow: ref("mutation", "follows:unfollow"),
     isFollowing: ref("query", "follows:isFollowing"),
+    getRelationship: ref("query", "follows:getRelationship"),
     listFollowersDetailed: ref("query", "follows:listFollowersDetailed"),
     listFollowingDetailed: ref("query", "follows:listFollowingDetailed"),
+  },
+  followRequests: {
+    listIncoming: ref("query", "followRequests:listIncoming"),
+    getIncomingCount: ref("query", "followRequests:getIncomingCount"),
+    accept: ref("mutation", "followRequests:accept"),
+    decline: ref("mutation", "followRequests:decline"),
+  },
+  blocks: {
+    list: ref("query", "blocks:list"),
+    block: ref("mutation", "blocks:block"),
+    unblock: ref("mutation", "blocks:unblock"),
   },
   likes: {
     toggle: ref("mutation", "likes:toggle"),

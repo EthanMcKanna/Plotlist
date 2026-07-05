@@ -29,7 +29,15 @@ export const watchStatusValues = [
 ] as const;
 
 export const targetTypeValues = ["review", "log", "list"] as const;
-export const notificationTypeValues = ["follow", "like", "comment", "episode"] as const;
+export const reportTargetTypeValues = ["review", "log", "list", "user"] as const;
+export const notificationTypeValues = [
+  "follow",
+  "follow_request",
+  "follow_accepted",
+  "like",
+  "comment",
+  "episode",
+] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log"] as const;
 export const reportStatusValues = ["open", "resolved"] as const;
@@ -51,8 +59,9 @@ export const users = sqliteTable(
     image: text("image"),
     email: text("email"),
     emailVerificationTime: timestampMs("email_verification_time"),
-    phone: text("phone"),
     phoneVerificationTime: timestampMs("phone_verification_time"),
+    // HMAC-SHA256 of the normalized phone number; the raw number is never
+    // persisted. Auth lookup and contact matching both key off this hash.
     phoneHash: text("phone_hash"),
     isAnonymous: boolean("is_anonymous"),
     isAdmin: boolean("is_admin"),
@@ -78,6 +87,9 @@ export const users = sqliteTable(
     favoriteShowIds: jsonb("favorite_show_ids").$type<string[]>(),
     favoriteGenres: jsonb("favorite_genres").$type<string[]>(),
     profileVisibility: jsonb("profile_visibility").$type<Record<string, unknown>>(),
+    // Private accounts require follower approval; new followers go through
+    // the follow_requests table instead of following directly.
+    isPrivate: boolean("is_private"),
     releaseCalendarPreferences: jsonb("release_calendar_preferences").$type<{
       selectedProviders: string[];
     }>(),
@@ -91,7 +103,6 @@ export const users = sqliteTable(
   },
   (table) => ({
     emailIdx: uniqueIndex("users_email_idx").on(table.email),
-    phoneIdx: uniqueIndex("users_phone_idx").on(table.phone),
     phoneHashIdx: uniqueIndex("users_phone_hash_idx").on(table.phoneHash),
     usernameIdx: uniqueIndex("users_username_idx").on(table.username),
     createdAtIdx: index("users_created_at_idx").on(table.createdAt),
@@ -145,13 +156,15 @@ export const phoneVerificationRequests = sqliteTable(
   "phone_verification_requests",
   {
     id: text("id").primaryKey(),
-    phone: text("phone").notNull(),
+    // Only the phone hash is persisted; the raw number stays in flight
+    // between the client and Twilio.
+    phoneHash: text("phone_hash").notNull(),
     requestedAt: timestampMs("requested_at").notNull(),
     expiresAt: timestampMs("expires_at").notNull(),
     completedAt: timestampMs("completed_at"),
   },
   (table) => ({
-    phoneIdx: index("phone_verification_requests_phone_idx").on(table.phone),
+    phoneHashIdx: index("phone_verification_requests_phone_hash_idx").on(table.phoneHash),
     expiresIdx: index("phone_verification_requests_expires_at_idx").on(table.expiresAt),
   }),
 );
@@ -307,6 +320,48 @@ export const follows = sqliteTable(
     followerIdx: index("follows_follower_created_idx").on(table.followerId, table.createdAt),
     followeeIdx: index("follows_followee_created_idx").on(table.followeeId, table.createdAt),
     pairIdx: uniqueIndex("follows_pair_idx").on(table.followerId, table.followeeId),
+  }),
+);
+
+// One row per block edge. A block in either direction severs the follow
+// relationship and hides each side's content from the other.
+export const blocks = sqliteTable(
+  "blocks",
+  {
+    id: text("id").primaryKey(),
+    blockerId: text("blocker_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedId: text("blocked_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    blockerIdx: index("blocks_blocker_created_idx").on(table.blockerId, table.createdAt),
+    blockedIdx: index("blocks_blocked_idx").on(table.blockedId),
+    pairIdx: uniqueIndex("blocks_pair_idx").on(table.blockerId, table.blockedId),
+  }),
+);
+
+// Pending follow requests for private accounts; accepting one converts it
+// into a follows row.
+export const followRequests = sqliteTable(
+  "follow_requests",
+  {
+    id: text("id").primaryKey(),
+    requesterId: text("requester_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetId: text("target_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    targetIdx: index("follow_requests_target_created_idx").on(table.targetId, table.createdAt),
+    requesterIdx: index("follow_requests_requester_idx").on(table.requesterId),
+    pairIdx: uniqueIndex("follow_requests_pair_idx").on(table.requesterId, table.targetId),
   }),
 );
 
@@ -779,7 +834,7 @@ export const reports = sqliteTable(
     reporterId: text("reporter_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    targetType: text("target_type", { enum: targetTypeValues }).notNull(),
+    targetType: text("target_type", { enum: reportTargetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     reason: text("reason"),
     createdAt: timestampMs("created_at").notNull(),

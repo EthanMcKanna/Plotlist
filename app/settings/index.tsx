@@ -12,11 +12,10 @@ import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
 import { GlassSurface } from "../../components/NativeGlass";
 import { PrimaryButton } from "../../components/PrimaryButton";
-import { SegmentedControl } from "../../components/SegmentedControl";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
 import { api } from "../../lib/plotlist/api";
-import { clearAuthTokens } from "../../lib/authStorage";
+import { clearAuthTokens, getStoredSignInPhone } from "../../lib/authStorage";
 import { uploadAvatarImage } from "../../lib/avatarUpload";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
@@ -26,8 +25,8 @@ import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
 import { sanitizeUsername, validateUsername } from "../../lib/username";
 
-function formatPhone(raw?: string | null): string {
-  if (!raw) return "Unknown number";
+function formatPhone(raw?: string | null): string | null {
+  if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
   const local = digits.startsWith("1") && digits.length === 11 ? digits.slice(1) : digits;
   if (local.length === 10) {
@@ -83,26 +82,6 @@ function SettingsRow({
   );
 }
 
-type ProfileVisibilitySetting = "public" | "following" | "private";
-
-type ProfileVisibilitySettings = {
-  favorites: ProfileVisibilitySetting;
-  currentlyWatching: ProfileVisibilitySetting;
-  watchlist: ProfileVisibilitySetting;
-};
-
-const DEFAULT_PROFILE_VISIBILITY: ProfileVisibilitySettings = {
-  favorites: "public",
-  currentlyWatching: "public",
-  watchlist: "public",
-};
-
-const PRIVACY_OPTIONS = [
-  { value: "public", label: "Public" },
-  { value: "following", label: "Following" },
-  { value: "private", label: "Only me" },
-] satisfies { value: ProfileVisibilitySetting; label: string }[];
-
 function NotificationToggleRow({
   label,
   description,
@@ -144,32 +123,6 @@ function SectionHeader({ title }: { title: string }) {
     <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
       {title}
     </Text>
-  );
-}
-
-function PrivacyCard({
-  title,
-  description,
-  value,
-  onChange,
-}: {
-  title: string;
-  description: string;
-  value: ProfileVisibilitySetting;
-  onChange: (value: ProfileVisibilitySetting) => void;
-}) {
-  return (
-    <GlassSurface radius={8} variant="surface" contentStyle={{ padding: 16 }}>
-      <Text className="text-sm font-semibold text-text-primary">{title}</Text>
-      <Text className="mt-1 text-sm leading-5 text-text-tertiary">{description}</Text>
-      <View className="mt-3">
-        <SegmentedControl
-          options={PRIVACY_OPTIONS}
-          value={value}
-          onChange={(next) => onChange(next as ProfileVisibilitySetting)}
-        />
-      </View>
-    </GlassSurface>
   );
 }
 
@@ -225,15 +178,24 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [syncingContacts, setSyncingContacts] = useState(false);
-  const [privacyLoaded, setPrivacyLoaded] = useState(false);
-  const [profileVisibility, setProfileVisibility] = useState<ProfileVisibilitySettings>(
-    DEFAULT_PROFILE_VISIBILITY,
-  );
   const [cropImage, setCropImage] = useState<{
     uri: string;
     width: number;
     height: number;
   } | null>(null);
+  const [signInPhoneLabel, setSignInPhoneLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getStoredSignInPhone().then((phone) => {
+      if (!cancelled) {
+        setSignInPhoneLabel(formatPhone(phone));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (me && displayName === "") {
@@ -247,16 +209,6 @@ export default function SettingsScreen() {
     }
   }, [bio, displayName, me, username]);
 
-  useEffect(() => {
-    if (me && !privacyLoaded) {
-      setProfileVisibility({
-        ...DEFAULT_PROFILE_VISIBILITY,
-        ...(me.profileVisibility ?? {}),
-      });
-      setPrivacyLoaded(true);
-    }
-  }, [me, privacyLoaded]);
-
   const handleUsernameChange = useCallback((raw: string) => {
     setUsername(sanitizeUsername(raw));
   }, []);
@@ -268,19 +220,8 @@ export default function SettingsScreen() {
     const origName = me.displayName ?? me.name ?? "";
     const origBio = me.bio ?? "";
     const origUsername = me.username ?? "";
-    return (
-      displayName !== origName ||
-      bio !== origBio ||
-      username !== origUsername ||
-      profileVisibility.favorites !==
-        (me.profileVisibility?.favorites ?? DEFAULT_PROFILE_VISIBILITY.favorites) ||
-      profileVisibility.currentlyWatching !==
-        (me.profileVisibility?.currentlyWatching ??
-          DEFAULT_PROFILE_VISIBILITY.currentlyWatching) ||
-      profileVisibility.watchlist !==
-        (me.profileVisibility?.watchlist ?? DEFAULT_PROFILE_VISIBILITY.watchlist)
-    );
-  }, [me, displayName, bio, username, profileVisibility]);
+    return displayName !== origName || bio !== origBio || username !== origUsername;
+  }, [me, displayName, bio, username]);
 
   const canSave = isDirty && !usernameError && !saving;
 
@@ -292,7 +233,6 @@ export default function SettingsScreen() {
         displayName: displayName || undefined,
         bio: bio || undefined,
         username: username || undefined,
-        profileVisibility,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -561,39 +501,19 @@ export default function SettingsScreen() {
 
         <View className="mt-10">
           <SectionHeader title="Privacy" />
-          <Text className="mt-2 text-sm leading-5 text-text-tertiary">
-            Choose what anyone can see on your public profile. Following means only
-            people you follow can see that section.
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <SettingsRow
+              icon={me?.isPrivate ? "lock-closed-outline" : "shield-outline"}
+              iconColor="#38bdf8"
+              label="Privacy & blocked accounts"
+              onPress={() => router.push("/settings/privacy")}
+            />
+          </GlassSurface>
+          <Text className="mt-2 text-xs leading-4 text-text-tertiary">
+            {me?.isPrivate
+              ? "Your account is private — new followers need your approval."
+              : "Private account, per-section profile visibility, and blocked accounts."}
           </Text>
-          <View className="mt-4 gap-3">
-            <PrivacyCard
-              title="Favorite shows"
-              description="Controls your favorite shows and favorite genres on your profile."
-              value={profileVisibility.favorites}
-              onChange={(value) =>
-                setProfileVisibility((current) => ({ ...current, favorites: value }))
-              }
-            />
-            <PrivacyCard
-              title="Currently watching"
-              description="Controls the Now Watching shelf and the watching count on your profile."
-              value={profileVisibility.currentlyWatching}
-              onChange={(value) =>
-                setProfileVisibility((current) => ({
-                  ...current,
-                  currentlyWatching: value,
-                }))
-              }
-            />
-            <PrivacyCard
-              title="Watchlist"
-              description="Controls your public watchlist preview, full watchlist page, and watchlist count."
-              value={profileVisibility.watchlist}
-              onChange={(value) =>
-                setProfileVisibility((current) => ({ ...current, watchlist: value }))
-              }
-            />
-          </View>
         </View>
 
         {/* ── Streaming ── */}
@@ -725,7 +645,9 @@ export default function SettingsScreen() {
 
         {/* Footer */}
         <Text className="mt-8 text-center text-xs text-text-tertiary">
-          Signed in as {formatPhone(me?.phone)}
+          {signInPhoneLabel
+            ? `Signed in as ${signInPhoneLabel}`
+            : `Signed in as @${me?.username ?? "you"} with phone verification`}
         </Text>
       </View>
     </Screen>

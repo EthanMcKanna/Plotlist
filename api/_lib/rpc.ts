@@ -7,10 +7,12 @@ import { chunkForSqlParams, ilike } from "./sql-dialect";
 import { z } from "zod";
 
 import {
+  blocks,
   comments,
   contactSyncEntries,
   episodeProgress,
   feedItems,
+  followRequests,
   follows,
   likes,
   lists,
@@ -75,7 +77,26 @@ import {
   upsertSeasonCacheEntry,
 } from "./season-cache";
 import { getImdbRatings } from "./imdb-ratings";
-import { notifyComment, notifyFollow, notifyLike } from "./notifications";
+import {
+  notifyComment,
+  notifyFollow,
+  notifyFollowAccepted,
+  notifyFollowRequest,
+  notifyLike,
+  resolveTargetOwner,
+} from "./notifications";
+import {
+  getBlockedEitherWayIdSet,
+  getBlockStatus,
+  getProfileAudience,
+  isBlockedEitherWay,
+} from "./privacy";
+import {
+  canViewProfileSection,
+  canViewPrivateProfileContent,
+  PROFILE_VISIBILITY_VALUES,
+  resolveProfileVisibility,
+} from "../../lib/profilePrivacy";
 import {
   mergeNotificationPreferences,
   resolveNotificationPreferences,
@@ -97,6 +118,15 @@ const ensureProfileArgs = z.object({
   displayName: z.string().optional(),
 });
 
+// "following" is accepted from older clients and normalized to "followers".
+const profileVisibilityValueArg = z.enum(["public", "followers", "private", "following"]);
+
+const profileVisibilityArgs = z.object({
+  favorites: profileVisibilityValueArg.optional(),
+  currentlyWatching: profileVisibilityValueArg.optional(),
+  watchlist: profileVisibilityValueArg.optional(),
+});
+
 const updateProfileArgs = z.object({
   username: z.string().optional(),
   displayName: z.string().optional(),
@@ -104,7 +134,7 @@ const updateProfileArgs = z.object({
   favoriteShowIds: z.array(z.string()).optional(),
   favoriteGenres: z.array(z.string()).optional(),
   avatarStorageId: z.string().optional(),
-  profileVisibility: z.record(z.string(), z.any()).optional(),
+  profileVisibility: profileVisibilityArgs.optional(),
   releaseCalendarPreferences: z
     .object({
       selectedProviders: z.array(z.string()),
@@ -490,29 +520,8 @@ async function insertEpisodeProgressOnce(args: {
   return rows.length > 0;
 }
 
-type ProfileVisibilitySetting = "public" | "following" | "private";
-
-const DEFAULT_PROFILE_VISIBILITY = {
-  favorites: "public",
-  currentlyWatching: "public",
-  watchlist: "public",
-} satisfies Record<string, ProfileVisibilitySetting>;
-
 function getProfileVisibility(user: typeof users.$inferSelect) {
-  return {
-    ...DEFAULT_PROFILE_VISIBILITY,
-    ...(user.profileVisibility ?? {}),
-  } as typeof DEFAULT_PROFILE_VISIBILITY;
-}
-
-function canViewProfileSection(
-  setting: unknown,
-  context: { isOwnProfile: boolean; profileFollowsViewer: boolean },
-) {
-  if (context.isOwnProfile || setting === "public") {
-    return true;
-  }
-  return setting === "following" && context.profileFollowsViewer;
+  return resolveProfileVisibility(user.profileVisibility);
 }
 
 function toShowPreview(show: typeof shows.$inferSelect) {
@@ -587,10 +596,16 @@ async function buildUserProfile(
   const viewerId = viewer?.id ?? null;
   const isOwnProfile = viewerId === profileUser.id;
 
+  const block = await getBlockStatus(viewerId, profileUser.id);
+  // Someone who blocked the viewer simply doesn't exist for them.
+  if (block.hasBlockedViewer) {
+    return null;
+  }
+
   // Relationship facts come from point lookups and one aggregated join —
   // never from loading either side's full follow graph.
   const viewerFollowsAlias = alias(follows, "viewer_follows");
-  const [isFollowingRows, followsViewerRows, mutualRows, contactRows] =
+  const [isFollowingRows, followsViewerRows, pendingRequestRows, mutualRows, contactRows] =
     viewerId && !isOwnProfile
       ? await Promise.all([
           db
@@ -602,6 +617,16 @@ async function buildUserProfile(
             .select({ id: follows.id })
             .from(follows)
             .where(and(eq(follows.followerId, profileUser.id), eq(follows.followeeId, viewerId)))
+            .limit(1),
+          db
+            .select({ id: followRequests.id })
+            .from(followRequests)
+            .where(
+              and(
+                eq(followRequests.requesterId, viewerId),
+                eq(followRequests.targetId, profileUser.id),
+              ),
+            )
             .limit(1),
           db
             .select({ value: sql<number>`count(*)` })
@@ -625,28 +650,69 @@ async function buildUserProfile(
             )
             .limit(1),
         ])
-      : [[], [], [], []];
+      : [[], [], [], [], []];
 
   const isFollowing = isFollowingRows.length > 0;
   const profileFollowsViewer = followsViewerRows.length > 0;
+  const hasPendingRequest = pendingRequestRows.length > 0;
   const mutualCount = Number(mutualRows[0]?.value ?? 0);
   const inContacts = contactRows.length > 0;
 
+  const relationship = viewerId
+    ? {
+        inContacts,
+        isFollowing,
+        followsYou: profileFollowsViewer,
+        isMutualFollow: isFollowing && profileFollowsViewer,
+        mutualCount,
+        hasPendingRequest,
+        blockedByViewer: block.blockedByViewer,
+      }
+    : null;
+
+  const viewContext = { isOwnProfile, viewerFollowsProfile: isFollowing };
+  // Private accounts hide every content surface from non-followers; a block
+  // by the viewer hides everything too and the client renders an unblock
+  // state instead.
+  const contentLocked =
+    block.blockedByViewer ||
+    !canViewPrivateProfileContent(profileUser.isPrivate, viewContext);
+
   const visibility = getProfileVisibility(profileUser);
-  const permissions = {
-    favorites: canViewProfileSection(visibility.favorites, {
-      isOwnProfile,
-      profileFollowsViewer,
-    }),
-    currentlyWatching: canViewProfileSection(visibility.currentlyWatching, {
-      isOwnProfile,
-      profileFollowsViewer,
-    }),
-    watchlist: canViewProfileSection(visibility.watchlist, {
-      isOwnProfile,
-      profileFollowsViewer,
-    }),
-  };
+  const permissions = contentLocked
+    ? { favorites: false, currentlyWatching: false, watchlist: false }
+    : {
+        favorites: canViewProfileSection(visibility.favorites, viewContext),
+        currentlyWatching: canViewProfileSection(visibility.currentlyWatching, viewContext),
+        watchlist: canViewProfileSection(visibility.watchlist, viewContext),
+      };
+
+  if (contentLocked) {
+    return {
+      user: toClientUser(profileUser),
+      avatarUrl: profileUser.avatarUrl ?? profileUser.image ?? null,
+      memberSince: profileUser.createdAt,
+      counts: {
+        followers: profileUser.countsFollowers ?? 0,
+        following: profileUser.countsFollowing ?? 0,
+        reviews: null,
+        lists: null,
+        shows: null,
+        completed: null,
+        watching: null,
+        watchlist: null,
+      },
+      averageRating: null,
+      permissions,
+      contentLocked: true,
+      relationship,
+      favoriteShows: [],
+      favoriteGenres: [],
+      currentlyWatching: [],
+      watchlistPreview: [],
+      topRated: [],
+    };
+  }
 
   const ratingAggRows = await db
     .select({
@@ -705,15 +771,8 @@ async function buildUserProfile(
     },
     averageRating,
     permissions,
-    relationship: viewerId
-      ? {
-          inContacts,
-          isFollowing,
-          followsYou: profileFollowsViewer,
-          isMutualFollow: isFollowing && profileFollowsViewer,
-          mutualCount,
-        }
-      : null,
+    contentLocked: false,
+    relationship,
     favoriteShows,
     favoriteGenres: permissions.favorites ? profileUser.favoriteGenres ?? [] : [],
     currentlyWatching,
@@ -2007,6 +2066,10 @@ async function deleteAccount(userId: string) {
     db.delete(comments).where(eq(comments.authorId, userId)),
     db.delete(follows).where(eq(follows.followerId, userId)),
     db.delete(follows).where(eq(follows.followeeId, userId)),
+    db.delete(followRequests).where(eq(followRequests.requesterId, userId)),
+    db.delete(followRequests).where(eq(followRequests.targetId, userId)),
+    db.delete(blocks).where(eq(blocks.blockerId, userId)),
+    db.delete(blocks).where(eq(blocks.blockedId, userId)),
     db.delete(reports).where(eq(reports.reporterId, userId)),
     db.delete(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
     db.delete(feedItems).where(eq(feedItems.ownerId, userId)),
@@ -2093,11 +2156,14 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
 }
 
 async function buildFeed(userId: string, args: any) {
-  const feedRows = await db
+  const allFeedRows = await db
     .select()
     .from(feedItems)
     .where(eq(feedItems.ownerId, userId))
     .orderBy(desc(feedItems.timestamp));
+  // Rows fanned out before a block was created stay in the table but never
+  // render for either side.
+  const feedRows = await filterRowsByBlockedAuthors(userId, allFeedRows, (row) => row.actorId);
   const actorIds = Array.from(new Set(feedRows.map((row) => row.actorId)));
   const showIds = Array.from(new Set(feedRows.map((row) => row.showId)));
   const reviewIds = feedRows.filter((row) => row.type === "review").map((row) => row.targetId);
@@ -2181,6 +2247,141 @@ async function getUsersByIdsChunked(userIds: string[]) {
     rows.push(...(await db.select().from(users).where(inArray(users.id, chunk))));
   }
   return rows;
+}
+
+// Shared gate for "list things belonging to user X" endpoints: resolves the
+// profile user and returns null when the viewer may not see their content
+// (blocked either way, or private account without an approved follow).
+async function getVisibleProfileAudience(viewerId: string | null, userId: string) {
+  const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const profileUser = rows[0];
+  if (!profileUser) {
+    return null;
+  }
+  const audience = await getProfileAudience(viewerId, profileUser);
+  return audience.canViewContent ? { profileUser, audience } : null;
+}
+
+const EMPTY_PAGE = {
+  page: [],
+  results: [],
+  continueCursor: "0",
+  isDone: true,
+};
+
+// Drops rows authored by users with a block in either direction relative to
+// the viewer. Signed-out viewers see everything.
+async function filterRowsByBlockedAuthors<T>(
+  viewerId: string | null,
+  rows: T[],
+  getAuthorId: (row: T) => string,
+): Promise<T[]> {
+  if (!viewerId || rows.length === 0) {
+    return rows;
+  }
+  const blockedIds = await getBlockedEitherWayIdSet(viewerId, rows.map(getAuthorId));
+  if (blockedIds.size === 0) {
+    return rows;
+  }
+  return rows.filter((row) => !blockedIds.has(getAuthorId(row)));
+}
+
+// Interacting with someone's content is refused once a block exists in
+// either direction. Reads the same as a deleted target so blocks stay quiet.
+async function assertTargetOwnerNotBlocked(
+  viewerId: string,
+  targetType: string,
+  targetId: string,
+) {
+  const target = await resolveTargetOwner(targetType, targetId);
+  if (!target || target.ownerId === viewerId) {
+    return;
+  }
+  const block = await getBlockStatus(viewerId, target.ownerId);
+  if (isBlockedEitherWay(block)) {
+    throw new ApiError(404, "target_not_found", "That content is no longer available");
+  }
+}
+
+// Clears the "wants to follow you" inbox row once its request is withdrawn,
+// declined, accepted, or severed by a block.
+async function removeFollowRequestNotification(targetUserId: string, requesterId: string) {
+  await db
+    .delete(notifications)
+    .where(
+      and(
+        eq(notifications.userId, targetUserId),
+        eq(notifications.dedupeKey, `follow_request:${requesterId}`),
+      ),
+    );
+}
+
+// Converts a pending follow request into a follow edge. Deleting the request
+// row first (with returning) makes concurrent accepts idempotent: only the
+// call that removed the row creates the edge and touches counters.
+async function acceptFollowRequestEdge(
+  target: typeof users.$inferSelect,
+  requesterId: string,
+) {
+  const deletedRequest = await db
+    .delete(followRequests)
+    .where(
+      and(eq(followRequests.requesterId, requesterId), eq(followRequests.targetId, target.id)),
+    )
+    .returning({ id: followRequests.id });
+  await removeFollowRequestNotification(target.id, requesterId);
+  if (deletedRequest.length === 0) {
+    return false;
+  }
+
+  const inserted = await db
+    .insert(follows)
+    .values({
+      id: createId("follow"),
+      followerId: requesterId,
+      followeeId: target.id,
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing({ target: [follows.followerId, follows.followeeId] })
+    .returning({ id: follows.id });
+  if (inserted.length === 0) {
+    return false;
+  }
+
+  await Promise.all([
+    db
+      .update(users)
+      .set({ countsFollowing: sql`${users.countsFollowing} + 1` })
+      .where(eq(users.id, requesterId)),
+    db
+      .update(users)
+      .set({ countsFollowers: sql`${users.countsFollowers} + 1` })
+      .where(eq(users.id, target.id)),
+  ]);
+  await notifyFollowAccepted(target, requesterId);
+  return true;
+}
+
+// Removes a follow edge in one direction, keeping the denormalized counters
+// honest. Used when a block severs the relationship.
+async function severFollowEdge(followerId: string, followeeId: string) {
+  const deleted = await db
+    .delete(follows)
+    .where(and(eq(follows.followerId, followerId), eq(follows.followeeId, followeeId)))
+    .returning({ id: follows.id });
+  if (deleted.length === 0) {
+    return;
+  }
+  await Promise.all([
+    db
+      .update(users)
+      .set({ countsFollowing: sql`max(0, ${users.countsFollowing} - 1)` })
+      .where(eq(users.id, followerId)),
+    db
+      .update(users)
+      .set({ countsFollowers: sql`max(0, ${users.countsFollowers} - 1)` })
+      .where(eq(users.id, followeeId)),
+  ]);
 }
 
 // Follower/following pages are cut in SQL (LIMIT/OFFSET via the numeric
@@ -2350,9 +2551,113 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .limit(1);
     return rows.length > 0;
   },
+  "follows:getRelationship": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ userId: z.string() }).parse(args ?? {});
+    const [followingRows, requestRows, block] = await Promise.all([
+      db
+        .select({ id: follows.id })
+        .from(follows)
+        .where(and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userId)))
+        .limit(1),
+      db
+        .select({ id: followRequests.id })
+        .from(followRequests)
+        .where(
+          and(eq(followRequests.requesterId, user.id), eq(followRequests.targetId, parsed.userId)),
+        )
+        .limit(1),
+      getBlockStatus(user.id, parsed.userId),
+    ]);
+    return {
+      isFollowing: followingRows.length > 0,
+      hasPendingRequest: requestRows.length > 0,
+      blockedByViewer: block.blockedByViewer,
+    };
+  },
+  "followRequests:listIncoming": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const { offset, numItems } = parsePaginationWindow(args);
+    const rows = await db
+      .select()
+      .from(followRequests)
+      .where(eq(followRequests.targetId, user.id))
+      .orderBy(desc(followRequests.createdAt))
+      .limit(numItems + 1)
+      .offset(offset);
+    const pageEdges = rows.slice(0, numItems);
+    const requesterRows =
+      pageEdges.length > 0
+        ? await getUsersByIdsChunked(pageEdges.map((row) => row.requesterId))
+        : [];
+    const requesterById = new Map(requesterRows.map((row) => [row.id, row] as const));
+    const orderedRequesters = pageEdges
+      .map((edge) => requesterById.get(edge.requesterId))
+      .filter((row): row is typeof users.$inferSelect => Boolean(row));
+    const previews = await buildPersonPreviews(user.id, orderedRequesters);
+    const previewByUserId = new Map(previews.map((preview) => [preview.user._id, preview]));
+    const page = pageEdges.flatMap((edge) => {
+      const preview = previewByUserId.get(edge.requesterId);
+      return preview ? [{ ...preview, requestedAt: edge.createdAt }] : [];
+    });
+    return {
+      page,
+      results: page,
+      continueCursor: String(offset + pageEdges.length),
+      isDone: rows.length <= numItems,
+    };
+  },
+  "followRequests:getIncomingCount": async ({ req }) => {
+    const user = await getOptionalAuthUser(req);
+    if (!user) return 0;
+    const rows = await db
+      .select({ value: count() })
+      .from(followRequests)
+      .where(eq(followRequests.targetId, user.id));
+    return Number(rows[0]?.value ?? 0);
+  },
+  "blocks:list": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const { offset, numItems } = parsePaginationWindow(args);
+    const rows = await db
+      .select()
+      .from(blocks)
+      .where(eq(blocks.blockerId, user.id))
+      .orderBy(desc(blocks.createdAt))
+      .limit(numItems + 1)
+      .offset(offset);
+    const pageEdges = rows.slice(0, numItems);
+    const blockedRows =
+      pageEdges.length > 0
+        ? await getUsersByIdsChunked(pageEdges.map((row) => row.blockedId))
+        : [];
+    const blockedById = new Map(blockedRows.map((row) => [row.id, row] as const));
+    const page = pageEdges.flatMap((edge) => {
+      const blocked = blockedById.get(edge.blockedId);
+      if (!blocked) {
+        return [];
+      }
+      return [
+        {
+          user: toClientUser(blocked),
+          avatarUrl: blocked.avatarUrl ?? blocked.image ?? null,
+          blockedAt: edge.createdAt,
+        },
+      ];
+    });
+    return {
+      page,
+      results: page,
+      continueCursor: String(offset + pageEdges.length),
+      isDone: rows.length <= numItems,
+    };
+  },
   "follows:listFollowersDetailed": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
     const viewer = await getOptionalAuthUser(req);
+    if (!(await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId))) {
+      return EMPTY_PAGE;
+    }
     return await listFollowsPage({
       args,
       column: "followeeId",
@@ -2363,6 +2668,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "follows:listFollowingDetailed": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
     const viewer = await getOptionalAuthUser(req);
+    if (!(await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId))) {
+      return EMPTY_PAGE;
+    }
     return await listFollowsPage({
       args,
       column: "followerId",
@@ -2390,13 +2698,15 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .limit(Math.min(parsed.limit ?? 100, 200));
     return rows.map(toDoc);
   },
-  "comments:listForTarget": async ({ args }) => {
+  "comments:listForTarget": async ({ args, req }) => {
+    const viewer = await getOptionalAuthUser(req);
     const parsed = targetArgs.passthrough().parse(args ?? {});
-    const rows = await db
+    const allRows = await db
       .select()
       .from(comments)
       .where(and(eq(comments.targetType, parsed.targetType), eq(comments.targetId, parsed.targetId)))
       .orderBy(asc(comments.createdAt));
+    const rows = await filterRowsByBlockedAuthors(viewer?.id ?? null, allRows, (row) => row.authorId);
     const authorRows = rows.length
       ? await db.select().from(users).where(inArray(users.id, rows.map((row) => row.authorId)))
       : [];
@@ -2455,8 +2765,19 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     return await detailedWatchStates(user.id, args);
   },
-  "watchStates:listPublicWatchlistDetailed": async ({ args }) => {
+  "watchStates:listPublicWatchlistDetailed": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
+    const viewer = await getOptionalAuthUser(req);
+    const visible = await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId);
+    if (
+      !visible ||
+      !canViewProfileSection(getProfileVisibility(visible.profileUser).watchlist, {
+        isOwnProfile: visible.audience.isSelf,
+        viewerFollowsProfile: visible.audience.viewerFollowsProfile,
+      })
+    ) {
+      return EMPTY_PAGE;
+    }
     return await detailedWatchStates(parsed.userId, { ...args, status: "watchlist" }, true);
   },
   "watchLogs:listActivityForUser": async ({ args, req }) => {
@@ -2750,7 +3071,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const viewer = await getOptionalAuthUser(req);
     const parsed = z.object({ showId: z.string() }).passthrough().parse(args ?? {});
     const rows = await db.select().from(reviews).where(eq(reviews.showId, parsed.showId)).orderBy(desc(reviews.createdAt));
-    return pageRows(await buildReviewDetails(rows, viewer?.id), args);
+    const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
+    return pageRows(await buildReviewDetails(visibleRows, viewer?.id), args);
   },
   "reviews:listForEpisodeDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
@@ -2760,11 +3082,15 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .from(reviews)
       .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)))
       .orderBy(desc(reviews.createdAt));
-    return pageRows(await buildReviewDetails(rows, viewer?.id), args);
+    const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
+    return pageRows(await buildReviewDetails(visibleRows, viewer?.id), args);
   },
   "reviews:listForUserDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
+    if (!(await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId))) {
+      return EMPTY_PAGE;
+    }
     const rows = await db.select().from(reviews).where(eq(reviews.authorId, parsed.userId)).orderBy(desc(reviews.createdAt));
     return pageRows(await buildReviewDetails(rows, viewer?.id), args);
   },
@@ -2803,8 +3129,12 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const rows = await db.select().from(lists).where(eq(lists.ownerId, userId)).orderBy(desc(lists.updatedAt));
     return pageRows(rows.map(listToDoc), args);
   },
-  "lists:listPublicForUser": async ({ args }) => {
+  "lists:listPublicForUser": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
+    const viewer = await getOptionalAuthUser(req);
+    if (!(await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId))) {
+      return EMPTY_PAGE;
+    }
     const rows = await db.select().from(lists).where(and(eq(lists.ownerId, parsed.userId), eq(lists.isPublic, true))).orderBy(desc(lists.updatedAt));
     return pageRows(rows.map(listToDoc), args);
   },
@@ -3167,8 +3497,6 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "users:ensureProfile": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = ensureProfileArgs.parse(args ?? {});
-    const normalizedPhone = user.phone ? normalizePhoneNumber(user.phone) : null;
-    const phoneHash = normalizedPhone ? hashPhoneNumber(normalizedPhone) : null;
     const providedUsername = parsed.username
       ? parsed.username.toLowerCase().replace(/[^a-z0-9_]+/g, "")
       : user.username;
@@ -3186,8 +3514,6 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         searchText: normalizeSearchText(
           `${nextDisplayName ?? ""} ${providedUsername ?? ""} ${user.name ?? ""}`,
         ),
-        phone: normalizedPhone ?? user.phone,
-        phoneHash,
         lastSeenAt: Date.now(),
       })
       .where(eq(users.id, user.id));
@@ -3215,7 +3541,12 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         favoriteShowIds: parsed.favoriteShowIds ?? user.favoriteShowIds,
         favoriteGenres: parsed.favoriteGenres ?? user.favoriteGenres,
         avatarUrl: parsed.avatarStorageId ?? user.avatarUrl,
-        profileVisibility: parsed.profileVisibility ?? user.profileVisibility,
+        profileVisibility: parsed.profileVisibility
+          ? resolveProfileVisibility({
+              ...(user.profileVisibility ?? {}),
+              ...parsed.profileVisibility,
+            })
+          : user.profileVisibility,
         releaseCalendarPreferences:
           parsed.releaseCalendarPreferences ?? user.releaseCalendarPreferences,
         streamingProviders:
@@ -3298,12 +3629,53 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     await enforceRateLimit(`follow:${user.id}`, 30, 60_000);
 
     const followeeRows = await db
-      .select({ id: users.id })
+      .select({ id: users.id, isPrivate: users.isPrivate })
       .from(users)
       .where(eq(users.id, parsed.userIdToFollow))
       .limit(1);
     if (!followeeRows[0]) {
       throw new ApiError(404, "user_not_found", "That account no longer exists");
+    }
+
+    const block = await getBlockStatus(user.id, parsed.userIdToFollow);
+    if (isBlockedEitherWay(block)) {
+      // A blocked-by-them viewer gets the same message as a deleted account
+      // so blocks stay undetectable.
+      throw new ApiError(
+        block.blockedByViewer ? 403 : 404,
+        block.blockedByViewer ? "user_blocked" : "user_not_found",
+        block.blockedByViewer
+          ? "Unblock this account to follow them"
+          : "That account no longer exists",
+      );
+    }
+
+    // Private accounts collect requests instead of followers; the follow row
+    // is only created when the owner approves.
+    if (followeeRows[0].isPrivate) {
+      const alreadyFollowing = await db
+        .select({ id: follows.id })
+        .from(follows)
+        .where(and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToFollow)))
+        .limit(1);
+      if (alreadyFollowing[0]) {
+        return { status: "following", followId: alreadyFollowing[0].id };
+      }
+
+      const requested = await db
+        .insert(followRequests)
+        .values({
+          id: createId("followreq"),
+          requesterId: user.id,
+          targetId: parsed.userIdToFollow,
+          createdAt: Date.now(),
+        })
+        .onConflictDoNothing({ target: [followRequests.requesterId, followRequests.targetId] })
+        .returning({ id: followRequests.id });
+      if (requested.length > 0) {
+        await notifyFollowRequest(user, parsed.userIdToFollow);
+      }
+      return { status: "requested" };
     }
 
     // Concurrent taps race here; the unique (follower, followee) index plus
@@ -3328,7 +3700,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
           and(eq(follows.followerId, user.id), eq(follows.followeeId, parsed.userIdToFollow)),
         )
         .limit(1);
-      return existing[0]?.id ?? null;
+      return existing[0] ? { status: "following", followId: existing[0].id } : null;
     }
 
     await Promise.all([
@@ -3344,13 +3716,25 @@ export const mutationHandlers: Record<string, RpcHandler> = {
 
     await notifyFollow(user, parsed.userIdToFollow);
 
-    return inserted[0].id;
+    return { status: "following", followId: inserted[0].id };
   },
   "follows:unfollow": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = unfollowArgs.parse(args ?? {});
 
     await enforceRateLimit(`unfollow:${user.id}`, 60, 60_000);
+
+    // Unfollow also withdraws a pending request so the client's "Requested"
+    // button can cancel through the same mutation.
+    await db
+      .delete(followRequests)
+      .where(
+        and(
+          eq(followRequests.requesterId, user.id),
+          eq(followRequests.targetId, parsed.userIdToUnfollow),
+        ),
+      );
+    await removeFollowRequestNotification(parsed.userIdToUnfollow, user.id);
 
     // Delete-by-pair with returning keeps this atomic: whichever concurrent
     // request removes the row is the only one that decrements the counters.
@@ -3377,6 +3761,138 @@ export const mutationHandlers: Record<string, RpcHandler> = {
 
     return { success: true };
   },
+  "followRequests:accept": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ requesterId: z.string().min(1) }).parse(args ?? {});
+    const accepted = await acceptFollowRequestEdge(user, parsed.requesterId);
+    return { success: true, accepted };
+  },
+  "followRequests:decline": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ requesterId: z.string().min(1) }).parse(args ?? {});
+    await db
+      .delete(followRequests)
+      .where(
+        and(
+          eq(followRequests.requesterId, parsed.requesterId),
+          eq(followRequests.targetId, user.id),
+        ),
+      );
+    await removeFollowRequestNotification(user.id, parsed.requesterId);
+    return { success: true };
+  },
+  "blocks:block": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ userId: z.string().min(1) }).parse(args ?? {});
+    if (parsed.userId === user.id) {
+      throw new ApiError(400, "cannot_block_self", "You can't block yourself");
+    }
+
+    await enforceRateLimit(`block:${user.id}`, 30, 60_000);
+
+    const targetRows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, parsed.userId))
+      .limit(1);
+    if (!targetRows[0]) {
+      throw new ApiError(404, "user_not_found", "That account no longer exists");
+    }
+
+    await db
+      .insert(blocks)
+      .values({
+        id: createId("block"),
+        blockerId: user.id,
+        blockedId: parsed.userId,
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing({ target: [blocks.blockerId, blocks.blockedId] });
+
+    // Blocking severs the relationship in both directions: follows, pending
+    // requests, their inbox rows, and any feed items fanned out either way.
+    await Promise.all([
+      severFollowEdge(user.id, parsed.userId),
+      severFollowEdge(parsed.userId, user.id),
+    ]);
+    await db
+      .delete(followRequests)
+      .where(
+        or(
+          and(eq(followRequests.requesterId, user.id), eq(followRequests.targetId, parsed.userId)),
+          and(eq(followRequests.requesterId, parsed.userId), eq(followRequests.targetId, user.id)),
+        ),
+      );
+    await Promise.all([
+      removeFollowRequestNotification(user.id, parsed.userId),
+      removeFollowRequestNotification(parsed.userId, user.id),
+    ]);
+    await Promise.all([
+      db
+        .delete(feedItems)
+        .where(and(eq(feedItems.ownerId, user.id), eq(feedItems.actorId, parsed.userId))),
+      db
+        .delete(feedItems)
+        .where(and(eq(feedItems.ownerId, parsed.userId), eq(feedItems.actorId, user.id))),
+    ]);
+
+    return { success: true };
+  },
+  "blocks:unblock": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ userId: z.string().min(1) }).parse(args ?? {});
+    await db
+      .delete(blocks)
+      .where(and(eq(blocks.blockerId, user.id), eq(blocks.blockedId, parsed.userId)));
+    return { success: true };
+  },
+  "users:updatePrivacy": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const visibilityValue = z.enum([...PROFILE_VISIBILITY_VALUES, "following"]);
+    const parsed = z
+      .object({
+        isPrivate: z.boolean().optional(),
+        profileVisibility: z
+          .object({
+            favorites: visibilityValue.optional(),
+            currentlyWatching: visibilityValue.optional(),
+            watchlist: visibilityValue.optional(),
+          })
+          .optional(),
+      })
+      .parse(args ?? {});
+
+    const nextVisibility = parsed.profileVisibility
+      ? resolveProfileVisibility({
+          ...(user.profileVisibility ?? {}),
+          ...parsed.profileVisibility,
+        })
+      : user.profileVisibility;
+
+    await db
+      .update(users)
+      .set({
+        isPrivate: parsed.isPrivate ?? user.isPrivate,
+        profileVisibility: nextVisibility,
+        lastSeenAt: Date.now(),
+      })
+      .where(eq(users.id, user.id));
+
+    // Switching to public approves everyone who was waiting, matching what
+    // users expect from other social apps.
+    if (parsed.isPrivate === false && user.isPrivate) {
+      const pending = await db
+        .select({ requesterId: followRequests.requesterId })
+        .from(followRequests)
+        .where(eq(followRequests.targetId, user.id));
+      for (const request of pending) {
+        await acceptFollowRequestEdge(user, request.requesterId);
+      }
+    }
+
+    const rows = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    return rows[0] ? toClientUser(rows[0]) : null;
+  },
   "likes:toggle": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = targetArgs.parse(args ?? {});
@@ -3389,6 +3905,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       await db.delete(likes).where(eq(likes.id, existing[0].id));
       return false;
     }
+    await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("like");
     await db.insert(likes).values({ id, userId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, createdAt: Date.now() });
     await notifyLike(user, parsed.targetType, parsed.targetId);
@@ -3397,6 +3914,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "comments:add": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = targetArgs.extend({ text: z.string().min(1) }).parse(args ?? {});
+    await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("comment");
     await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, text: parsed.text, createdAt: Date.now() });
     await notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text);
@@ -3615,7 +4133,13 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "reports:create": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = targetArgs.extend({ reason: z.string().optional() }).parse(args ?? {});
+    const parsed = z
+      .object({
+        targetType: z.enum(["review", "log", "list", "user"]),
+        targetId: z.string().min(1),
+        reason: z.string().optional(),
+      })
+      .parse(args ?? {});
     const id = createId("report");
     await db.insert(reports).values({ id, reporterId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, reason: parsed.reason ?? null, createdAt: Date.now(), status: "open", resolvedAt: null, resolvedBy: null, action: null });
     return id;
@@ -3725,7 +4249,7 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const now = Date.now();
     await db.insert(phoneVerificationRequests).values({
       id: createId("verifyreq"),
-      phone: normalizedPhone,
+      phoneHash: hashPhoneNumber(normalizedPhone),
       requestedAt: now,
       expiresAt: now + 10 * 60 * 1000,
       completedAt: null,

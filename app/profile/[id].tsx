@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StatusBar, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StatusBar, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -13,10 +13,14 @@ import { EmptyState } from "../../components/EmptyState";
 import { ReviewRow } from "../../components/ReviewRow";
 import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
+import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
+import { ReportModal } from "../../components/ReportModal";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
+import { getFollowButtonState } from "../../lib/profilePrivacy";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
+import { SecondaryButton } from "../../components/SecondaryButton";
 import { Avatar } from "../../components/Avatar";
 import { GlassSurface } from "../../components/NativeGlass";
 import { TasteMatchSummary } from "../../components/TasteMatchSummary";
@@ -151,43 +155,15 @@ export default function ProfileScreen() {
   });
   const getProfileTasteExperience = useAction(api.embeddings.getProfileTasteExperience);
 
-  const isFollowing = useQuery(
-    api.follows.isFollowing,
-    isAuthenticated ? { userId: userIdValue } : "skip",
-  );
+  const follow = useMutation(api.follows.follow);
+  const unfollow = useMutation(api.follows.unfollow);
+  const blockUser = useMutation(api.blocks.block);
+  const unblockUser = useMutation(api.blocks.unblock);
+  const createReport = useMutation(api.reports.create);
 
-  const follow = useMutation(api.follows.follow).withOptimisticUpdate(
-    (localStore, args) => {
-      localStore.setQuery(api.follows.isFollowing, { userId: args.userIdToFollow }, true);
-      const profileQueryArgs = { userId: args.userIdToFollow };
-      const currentProfile = localStore.getQuery(api.users.profile, profileQueryArgs);
-      if (currentProfile) {
-        localStore.setQuery(api.users.profile, profileQueryArgs, {
-          ...currentProfile,
-          counts: {
-            ...currentProfile.counts,
-            followers: currentProfile.counts.followers + 1,
-          },
-        });
-      }
-    },
-  );
-  const unfollow = useMutation(api.follows.unfollow).withOptimisticUpdate(
-    (localStore, args) => {
-      localStore.setQuery(api.follows.isFollowing, { userId: args.userIdToUnfollow }, false);
-      const profileQueryArgs = { userId: args.userIdToUnfollow };
-      const currentProfile = localStore.getQuery(api.users.profile, profileQueryArgs);
-      if (currentProfile) {
-        localStore.setQuery(api.users.profile, profileQueryArgs, {
-          ...currentProfile,
-          counts: {
-            ...currentProfile.counts,
-            followers: Math.max(0, currentProfile.counts.followers - 1),
-          },
-        });
-      }
-    },
-  );
+  const [followPending, setFollowPending] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const {
     results: publicLists,
@@ -246,6 +222,99 @@ export default function ProfileScreen() {
   }, [profile?.relationship]);
 
   const isOwnProfile = me && me._id === userIdValue;
+  const relationship = profile?.relationship ?? null;
+  const isBlockedByViewer = Boolean(relationship?.blockedByViewer);
+  const contentLocked = Boolean(profile?.contentLocked) && !isBlockedByViewer;
+  const followState = getFollowButtonState({
+    isFollowing: Boolean(relationship?.isFollowing),
+    hasPendingRequest: Boolean(relationship?.hasPendingRequest),
+  });
+
+  const handleToggleFollow = useCallback(async () => {
+    if (followPending) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFollowPending(true);
+    try {
+      if (followState === "follow") {
+        await follow({ userIdToFollow: userIdValue });
+      } else {
+        // "following" unfollows; "requested" withdraws the pending request.
+        await unfollow({ userIdToUnfollow: userIdValue });
+      }
+    } catch (error) {
+      console.warn("Failed to update follow", error);
+    } finally {
+      setFollowPending(false);
+    }
+  }, [follow, followPending, followState, unfollow, userIdValue]);
+
+  const handleBlock = useCallback(() => {
+    const name = profile?.user?.displayName ?? profile?.user?.username ?? "this user";
+    Alert.alert(
+      `Block ${name}?`,
+      "They won't be able to follow you or see your activity, and you won't see theirs. Any follow relationship is removed. They aren't notified.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Block",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await blockUser({ userId: userIdValue });
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error) {
+              Alert.alert("Could not block", String(error));
+            }
+          },
+        },
+      ],
+    );
+  }, [blockUser, profile?.user?.displayName, profile?.user?.username, userIdValue]);
+
+  const handleUnblock = useCallback(async () => {
+    try {
+      await unblockUser({ userId: userIdValue });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert("Could not unblock", String(error));
+    }
+  }, [unblockUser, userIdValue]);
+
+  const handleSubmitReport = useCallback(
+    async (reason?: string) => {
+      try {
+        await createReport({ targetType: "user", targetId: userIdValue, reason });
+        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+      } catch (error) {
+        Alert.alert("Could not submit report", String(error));
+      }
+    },
+    [createReport, userIdValue],
+  );
+
+  const menuOptions = useMemo<ActionSheetOption[]>(
+    () => [
+      {
+        label: "Report user",
+        icon: "flag-outline" as const,
+        onPress: () => setReportVisible(true),
+      },
+      isBlockedByViewer
+        ? {
+            label: "Unblock user",
+            icon: "person-add-outline" as const,
+            onPress: () => void handleUnblock(),
+          }
+        : {
+            label: "Block user",
+            icon: "remove-circle-outline" as const,
+            destructive: true,
+            onPress: handleBlock,
+          },
+    ],
+    [handleBlock, handleUnblock, isBlockedByViewer],
+  );
+
   const [tasteExperience, setTasteExperience] = useState<any | null>(null);
   const memberSince = formatMemberSince(profile?.memberSince ?? null);
   const watchActivityCards = useMemo(
@@ -309,9 +378,36 @@ export default function ProfileScreen() {
     };
   }, [getProfileTasteExperience, isAuthenticated, me?._id, userIdValue]);
 
+  // The server returns null when the account doesn't exist or has blocked
+  // the viewer; both read as unavailable.
+  if (profile === null) {
+    return (
+      <View className="flex-1 bg-dark-bg">
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <View className="flex-1 items-center justify-center px-10">
+          <EmptyState
+            title="Profile unavailable"
+            description="This account doesn't exist or can't be viewed."
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-1 bg-dark-bg">
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <ActionSheet
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        title={profile?.user?.username ? `@${profile.user.username}` : undefined}
+        options={menuOptions}
+      />
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        onSubmit={handleSubmitReport}
+      />
       <ScrollView
         contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
@@ -326,6 +422,21 @@ export default function ProfileScreen() {
           end={{ x: 0.5, y: 1 }}
           style={{ paddingTop: insets.top + 16, paddingBottom: 16 }}
         >
+          {me && !isOwnProfile ? (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setMenuVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Profile options"
+              hitSlop={10}
+              className="absolute right-4 z-10 h-9 w-9 items-center justify-center rounded-full bg-black/30 active:bg-black/50"
+              style={{ top: insets.top + 12 }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={18} color="#F1F3F7" />
+            </Pressable>
+          ) : null}
           <View className="items-center px-6">
             <Avatar
               uri={profile?.avatarUrl}
@@ -403,17 +514,62 @@ export default function ProfileScreen() {
             )}
           </GlassSurface>
 
-          {/* ── Follow / Edit Button ── */}
-          {me && !isOwnProfile ? (
+          {/* ── Blocked banner ── */}
+          {isBlockedByViewer ? (
+            <View className="mt-4">
+              <GlassSurface radius={8} variant="surface" contentStyle={{ padding: 16 }}>
+                <View className="flex-row items-center gap-2">
+                  <Ionicons name="remove-circle" size={18} color="#EF4444" />
+                  <Text className="flex-1 text-sm font-semibold text-text-primary">
+                    You blocked this account
+                  </Text>
+                </View>
+                <Text className="mt-1.5 text-sm leading-5 text-text-tertiary">
+                  They can't follow you or see your activity, and their content is hidden
+                  from you.
+                </Text>
+                <SecondaryButton label="Unblock" onPress={handleUnblock} className="mt-3" />
+              </GlassSurface>
+            </View>
+          ) : null}
+
+          {/* ── Follow / Request Button ── */}
+          {me && !isOwnProfile && !isBlockedByViewer ? (
             <View className="mt-4">
               <PrimaryButton
-                label={isFollowing ? "Unfollow" : "Follow"}
-                onPress={() =>
-                  isFollowing
-                    ? unfollow({ userIdToUnfollow: userIdValue })
-                    : follow({ userIdToFollow: userIdValue })
+                label={
+                  followState === "following"
+                    ? "Unfollow"
+                    : followState === "requested"
+                      ? "Requested · Tap to cancel"
+                      : profile?.user?.isPrivate
+                        ? "Request to follow"
+                        : "Follow"
                 }
+                onPress={handleToggleFollow}
+                loading={followPending}
               />
+            </View>
+          ) : null}
+
+          {/* ── Private account lock ── */}
+          {contentLocked ? (
+            <View className="mt-4">
+              <GlassSurface radius={8} variant="surface" contentStyle={{ padding: 20 }}>
+                <View className="items-center">
+                  <View className="h-12 w-12 items-center justify-center rounded-full bg-dark-elevated">
+                    <Ionicons name="lock-closed" size={22} color="#9BA1B0" />
+                  </View>
+                  <Text className="mt-3 text-base font-semibold text-text-primary">
+                    This account is private
+                  </Text>
+                  <Text className="mt-1 text-center text-sm leading-5 text-text-tertiary">
+                    {followState === "requested"
+                      ? "Your follow request is pending approval."
+                      : "Follow this account to see their shows, reviews, and lists."}
+                  </Text>
+                </View>
+              </GlassSurface>
             </View>
           ) : null}
 
@@ -585,6 +741,8 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
+          {!contentLocked && !isBlockedByViewer ? (
+          <>
           {/* ── Public Lists ── */}
           <View className="mt-7">
             <SectionHeader title="Public Lists" />
@@ -654,6 +812,8 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
+          </>
+          ) : null}
         </View>
       </View>
       </ScrollView>

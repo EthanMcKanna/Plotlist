@@ -5,7 +5,13 @@
 export const NOTIFICATION_CATEGORIES = ["episodes", "follows", "likes", "comments"] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
-export type NotificationType = "follow" | "like" | "comment" | "episode";
+export type NotificationType =
+  | "follow"
+  | "follow_request"
+  | "follow_accepted"
+  | "like"
+  | "comment"
+  | "episode";
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
@@ -19,6 +25,8 @@ export const MAX_INDIVIDUAL_PUSHES_PER_BATCH = 3;
 
 const CATEGORY_BY_TYPE: Record<NotificationType, NotificationCategory> = {
   follow: "follows",
+  follow_request: "follows",
+  follow_accepted: "follows",
   like: "likes",
   comment: "comments",
   episode: "episodes",
@@ -163,6 +171,20 @@ export function buildFollowNotificationContent(actorName: string) {
   return {
     title: "New follower",
     body: `${actorName} started following you.`,
+  };
+}
+
+export function buildFollowRequestNotificationContent(actorName: string) {
+  return {
+    title: "Follow request",
+    body: `${actorName} wants to follow you.`,
+  };
+}
+
+export function buildFollowAcceptedNotificationContent(actorName: string) {
+  return {
+    title: "Request approved",
+    body: `${actorName} approved your follow request.`,
   };
 }
 

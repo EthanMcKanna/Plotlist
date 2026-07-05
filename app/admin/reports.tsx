@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { FlashList } from "../../components/FlashList";
 import { useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 
@@ -9,6 +10,7 @@ import { api } from "../../lib/plotlist/api";
 import { formatDate } from "../../lib/format";
 
 export default function ReportsAdminScreen() {
+  const router = useRouter();
   const me = useQuery(api.users.me);
   const { results: reports, status, loadMore } = usePaginatedQuery(
     api.reports.listOpen,
@@ -78,6 +80,19 @@ export default function ReportsAdminScreen() {
                         Dismiss
                       </Text>
                     </Pressable>
+                    {item.targetType === "user" ? (
+                      <Pressable
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          router.push(`/profile/${item.targetId}`);
+                        }}
+                        className="flex-1 items-center rounded-full bg-brand-500 py-2"
+                      >
+                        <Text className="text-xs font-semibold uppercase tracking-wide text-white">
+                          View profile
+                        </Text>
+                      </Pressable>
+                    ) : (
                     <Pressable
                       onPress={async () => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -110,6 +125,7 @@ export default function ReportsAdminScreen() {
                         Delete
                       </Text>
                     </Pressable>
+                    )}
                   </View>
                 </View>
               )}

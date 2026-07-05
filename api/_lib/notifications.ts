@@ -15,7 +15,9 @@ import {
 import {
   buildCommentNotificationContent,
   buildEpisodeNotificationContent,
+  buildFollowAcceptedNotificationContent,
   buildFollowNotificationContent,
+  buildFollowRequestNotificationContent,
   buildLikeNotificationContent,
   categoryForNotificationType,
   EPISODE_DIGEST_LOCAL_HOUR,
@@ -332,7 +334,7 @@ function actorDisplayName(actor: typeof users.$inferSelect) {
   return actor.displayName ?? actor.username ?? actor.name ?? "Someone";
 }
 
-async function resolveTargetOwner(targetType: string, targetId: string) {
+export async function resolveTargetOwner(targetType: string, targetId: string) {
   if (targetType === "review") {
     const rows = await db
       .select({ ownerId: reviews.authorId, showId: reviews.showId })
@@ -393,6 +395,56 @@ export async function notifyFollow(actor: typeof users.$inferSelect, followeeId:
     ]);
   } catch (error) {
     console.warn("[notifications] follow notification failed", error);
+  }
+}
+
+export async function notifyFollowRequest(
+  actor: typeof users.$inferSelect,
+  targetId: string,
+) {
+  try {
+    if (targetId === actor.id) {
+      return;
+    }
+    const content = buildFollowRequestNotificationContent(actorDisplayName(actor));
+    await createNotificationsAndPush([
+      {
+        userId: targetId,
+        type: "follow_request",
+        actorId: actor.id,
+        title: content.title,
+        body: content.body,
+        data: { url: "/follow-requests", actorId: actor.id },
+        dedupeKey: `follow_request:${actor.id}`,
+      },
+    ]);
+  } catch (error) {
+    console.warn("[notifications] follow request notification failed", error);
+  }
+}
+
+export async function notifyFollowAccepted(
+  actor: typeof users.$inferSelect,
+  requesterId: string,
+) {
+  try {
+    if (requesterId === actor.id) {
+      return;
+    }
+    const content = buildFollowAcceptedNotificationContent(actorDisplayName(actor));
+    await createNotificationsAndPush([
+      {
+        userId: requesterId,
+        type: "follow_accepted",
+        actorId: actor.id,
+        title: content.title,
+        body: content.body,
+        data: { url: `/profile/${actor.id}`, actorId: actor.id },
+        dedupeKey: `follow_accepted:${actor.id}`,
+      },
+    ]);
+  } catch (error) {
+    console.warn("[notifications] follow accepted notification failed", error);
   }
 }
 

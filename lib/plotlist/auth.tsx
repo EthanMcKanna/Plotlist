@@ -1,6 +1,7 @@
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { authApi, refreshSessionIfNeeded } from "../api/client";
+import { setStoredSignInPhone } from "../authStorage";
 import {
   clearStoredSession,
   getStoredSession,
@@ -119,6 +120,7 @@ export function useAuthActions() {
         typeof params?.code === "string"
       ) {
         await authApi.verify(params.phone, params.code);
+        await setStoredSignInPhone(params.phone);
         session.markSignedIn();
         return { signingIn: true };
       }

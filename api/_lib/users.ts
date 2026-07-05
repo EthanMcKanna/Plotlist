@@ -23,9 +23,15 @@ function sanitizeUsername(raw: string) {
   return normalized.slice(0, 16) || `user${Math.floor(Math.random() * 10000)}`;
 }
 
+// The raw phone number is only used in flight to derive the HMAC hash; the
+// users row never stores it.
 export async function upsertPhoneUser(phone: string) {
   const phoneHash = hashPhoneNumber(phone);
-  const existingRows = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
+  const existingRows = await db
+    .select()
+    .from(users)
+    .where(eq(users.phoneHash, phoneHash))
+    .limit(1);
   const existing = existingRows[0];
   const now = Date.now();
 
@@ -33,8 +39,6 @@ export async function upsertPhoneUser(phone: string) {
     await db
       .update(users)
       .set({
-        phone,
-        phoneHash,
         phoneVerificationTime: now,
         lastSeenAt: now,
       })
@@ -48,11 +52,10 @@ export async function upsertPhoneUser(phone: string) {
   const id = createId("user");
   await db.insert(users).values({
     id,
-    name: phone,
+    name: username,
     image: null,
     email: null,
     emailVerificationTime: null,
-    phone,
     phoneVerificationTime: now,
     phoneHash,
     isAnonymous: false,
@@ -73,6 +76,7 @@ export async function upsertPhoneUser(phone: string) {
       currentlyWatching: "public",
       watchlist: "public",
     },
+    isPrivate: false,
     releaseCalendarPreferences: {
       selectedProviders: [],
     },

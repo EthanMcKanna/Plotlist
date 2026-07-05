@@ -152,6 +152,26 @@ function createNativeStorage(): TokenStorage {
 export const authStorage: TokenStorage =
   Platform.OS === "web" ? webStorage : createNativeStorage();
 
+// The server only stores a hash of the phone number, so the number the user
+// signed in with is remembered on-device for display in settings.
+const SIGN_IN_PHONE_KEY = "__plotlistSignInPhone";
+
+export async function setStoredSignInPhone(phone: string) {
+  try {
+    await authStorage.setItem(SIGN_IN_PHONE_KEY, phone);
+  } catch {
+    // Display-only convenience; ignore storage failures.
+  }
+}
+
+export async function getStoredSignInPhone(): Promise<string | null> {
+  try {
+    return await authStorage.getItem(SIGN_IN_PHONE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 // Helper to clear all auth tokens (call this to force re-login)
 export async function clearAuthTokens() {
   const keys = [
@@ -159,6 +179,7 @@ export async function clearAuthTokens() {
     "__plotlistApiRefreshToken",
     "__plotlistApiAccessTokenExpiresAt",
     "__plotlistApiRefreshTokenExpiresAt",
+    SIGN_IN_PHONE_KEY,
   ];
   for (const key of keys) {
     try {

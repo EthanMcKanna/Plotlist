@@ -92,6 +92,8 @@ export const UserRow = memo(function UserRow({
   const follow = useMutation(api.follows.follow);
   const unfollow = useMutation(api.follows.unfollow);
   const [isFollowing, setIsFollowing] = useState(Boolean(isFollowingProp));
+  // Private accounts turn a follow tap into a pending request.
+  const [isRequested, setIsRequested] = useState(false);
   const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
@@ -106,23 +108,30 @@ export const UserRow = memo(function UserRow({
   const handleToggleFollow = useCallback(async () => {
     if (isPending) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const next = !isFollowing;
     setIsPending(true);
-    setIsFollowing(next);
 
     try {
-      if (next) {
-        await follow({ userIdToFollow: userId });
-      } else {
+      if (isFollowing || isRequested) {
+        // Unfollow also withdraws a pending follow request.
         await unfollow({ userIdToUnfollow: userId });
+        setIsFollowing(false);
+        setIsRequested(false);
+      } else {
+        const result = (await follow({ userIdToFollow: userId })) as
+          | { status?: string }
+          | null;
+        if (result?.status === "requested") {
+          setIsRequested(true);
+        } else {
+          setIsFollowing(true);
+        }
       }
     } catch (error) {
-      setIsFollowing(!next);
       console.warn("Failed to update follow", error);
     } finally {
       setIsPending(false);
     }
-  }, [follow, isFollowing, isPending, unfollow, userId]);
+  }, [follow, isFollowing, isPending, isRequested, unfollow, userId]);
 
   const nameLabel = displayName ?? username ?? "User";
   const usernameLabel = username ? `@${username}` : null;
@@ -164,17 +173,17 @@ export const UserRow = memo(function UserRow({
             onPress={handleToggleFollow}
             disabled={isPending}
             className={`items-center justify-center rounded-full px-4 py-2 ${
-              isFollowing
+              isFollowing || isRequested
                 ? "border border-dark-border bg-dark-card"
                 : "bg-brand-500"
             } ${isPending ? "opacity-60" : ""}`}
           >
             <Text
               className={`text-xs font-semibold ${
-                isFollowing ? "text-text-primary" : "text-white"
+                isFollowing || isRequested ? "text-text-primary" : "text-white"
               }`}
             >
-              {isFollowing ? "Following" : "Follow"}
+              {isFollowing ? "Following" : isRequested ? "Requested" : "Follow"}
             </Text>
           </Pressable>
         ) : null}

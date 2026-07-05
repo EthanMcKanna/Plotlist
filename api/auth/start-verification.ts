@@ -5,7 +5,7 @@ import { db } from "../_lib/db";
 import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { createId } from "../_lib/ids";
-import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
+import { hashPhoneNumber, matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "../_lib/rate-limit";
 import { sendPhoneVerificationCode } from "../_lib/twilio";
 
@@ -33,7 +33,7 @@ export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
   const now = Date.now();
   await db.insert(phoneVerificationRequests).values({
     id: createId("verifyreq"),
-    phone: normalizedPhone,
+    phoneHash: hashPhoneNumber(normalizedPhone),
     requestedAt: now,
     expiresAt: now + 10 * 60 * 1000,
     completedAt: null,

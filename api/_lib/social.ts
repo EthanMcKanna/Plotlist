@@ -2,14 +2,10 @@ import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { contactSyncEntries, follows, users, watchStates } from "../../db/schema";
+import { resolveProfileVisibility } from "../../lib/profilePrivacy";
 import { db } from "./db";
+import { getBlockedEitherWayIdSet } from "./privacy";
 import { chunkForSqlParams } from "./sql-dialect";
-
-const DEFAULT_PROFILE_VISIBILITY = {
-  favorites: "public",
-  currentlyWatching: "public",
-  watchlist: "public",
-} as const;
 
 export function normalizeSearchText(value: string) {
   return value
@@ -21,12 +17,16 @@ export function normalizeSearchText(value: string) {
 }
 
 export function toClientUser(user: typeof users.$inferSelect) {
+  // Client user payloads are shared surfaces (profiles, feeds, comments), so
+  // credential-adjacent columns never leave the server.
+  const { phoneHash: _phoneHash, email: _email, notificationPreferences: _prefs, ...rest } = user;
   return {
-    ...user,
+    ...rest,
     _id: user.id,
     _creationTime: user.createdAt,
     avatarStorageId: user.avatarUrl ?? null,
-    profileVisibility: user.profileVisibility ?? DEFAULT_PROFILE_VISIBILITY,
+    profileVisibility: resolveProfileVisibility(user.profileVisibility),
+    isPrivate: user.isPrivate ?? false,
   };
 }
 
@@ -65,6 +65,18 @@ export async function buildPersonPreviews(
     .map((candidate) => candidate.id)
     .filter((id) => id !== viewerId);
 
+  // Users with a block in either direction disappear from every people
+  // surface built on previews (search, suggestions, follower lists, contact
+  // matches).
+  const blockedIds = await getBlockedEitherWayIdSet(viewerId, candidateIds);
+  const visibleCandidates = uniqueCandidates.filter(
+    (candidate) => !blockedIds.has(candidate.id),
+  );
+  if (visibleCandidates.length === 0) {
+    return [];
+  }
+  const visibleCandidateIds = candidateIds.filter((id) => !blockedIds.has(id));
+
   const followingIds = new Set<string>();
   const followerIds = new Set<string>();
   const contactMatchIds = new Set<string>();
@@ -74,7 +86,7 @@ export async function buildPersonPreviews(
   const viewerFollows = alias(follows, "viewer_follows");
   const viewerWatch = alias(watchStates, "viewer_watch_states");
 
-  for (const chunk of chunkForSqlParams(candidateIds, 1, 80)) {
+  for (const chunk of chunkForSqlParams(visibleCandidateIds, 1, 80)) {
     const [
       followingRows,
       followerRows,
@@ -147,7 +159,7 @@ export async function buildPersonPreviews(
     }
   }
 
-  return uniqueCandidates.map((candidate) => {
+  return visibleCandidates.map((candidate) => {
     const isSelf = candidate.id === viewerId;
     const isFollowing = !isSelf && followingIds.has(candidate.id);
     const followsYou = !isSelf && followerIds.has(candidate.id);

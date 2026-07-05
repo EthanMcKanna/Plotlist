@@ -120,7 +120,7 @@ export async function verifyRefreshToken(token: string) {
   };
 }
 
-export async function findUserByPhone(phone: string) {
+export async function findUserByPhoneHash(phoneHash: string) {
   const existing = await db
     .select({
       userId: userIdentities.userId,
@@ -129,7 +129,7 @@ export async function findUserByPhone(phone: string) {
     .where(
       and(
         eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phone),
+        eq(userIdentities.providerAccountId, phoneHash),
       ),
     )
     .limit(1);
@@ -147,14 +147,16 @@ export async function findUserByPhone(phone: string) {
   return userRows[0] ?? null;
 }
 
-export async function ensurePhoneIdentity(userId: string, phone: string) {
+// Phone identities are keyed by the HMAC phone hash so the raw number never
+// lands in the identities table.
+export async function ensurePhoneIdentity(userId: string, phoneHash: string) {
   const existing = await db
     .select()
     .from(userIdentities)
     .where(
       and(
         eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phone),
+        eq(userIdentities.providerAccountId, phoneHash),
       ),
     )
     .limit(1);
@@ -169,7 +171,7 @@ export async function ensurePhoneIdentity(userId: string, phone: string) {
     id: createId("ident"),
     userId,
     provider: PHONE_PROVIDER,
-    providerAccountId: phone,
+    providerAccountId: phoneHash,
     createdAt: now,
     updatedAt: now,
   });
@@ -180,7 +182,7 @@ export async function ensurePhoneIdentity(userId: string, phone: string) {
     .where(
       and(
         eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phone),
+        eq(userIdentities.providerAccountId, phoneHash),
       ),
     )
     .limit(1);

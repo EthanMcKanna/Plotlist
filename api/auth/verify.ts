@@ -6,7 +6,7 @@ import { db } from "../_lib/db";
 import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { ensurePhoneIdentity, createSession } from "../_lib/auth";
-import { matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
+import { hashPhoneNumber, matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "../_lib/rate-limit";
 import { setSessionCookies } from "../_lib/session-cookies";
 import { verifyPhoneVerificationCode } from "../_lib/twilio";
@@ -45,19 +45,20 @@ export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
   }
 
   const now = Date.now();
+  const phoneHash = hashPhoneNumber(normalizedPhone);
   await db
     .update(phoneVerificationRequests)
     .set({ completedAt: now })
     .where(
       and(
-        eq(phoneVerificationRequests.phone, normalizedPhone),
+        eq(phoneVerificationRequests.phoneHash, phoneHash),
         isNull(phoneVerificationRequests.completedAt),
         gte(phoneVerificationRequests.expiresAt, now),
       ),
     );
 
   const user = await upsertPhoneUser(normalizedPhone);
-  await ensurePhoneIdentity(user.id, normalizedPhone);
+  await ensurePhoneIdentity(user.id, phoneHash);
 
   const session = await createSession(user.id);
   setSessionCookies(res, session);
