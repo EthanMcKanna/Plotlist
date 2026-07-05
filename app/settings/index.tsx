@@ -23,6 +23,7 @@ import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import { showFeedbackForm } from "../../lib/sentry";
 import { sanitizeUsername, validateUsername } from "../../lib/username";
 
 function formatPhone(raw?: string | null): string | null {
@@ -598,6 +599,12 @@ export default function SettingsScreen() {
               iconColor="#0ea5e9"
               label="Replay the welcome tour"
               onPress={() => router.push("/onboarding/welcome")}
+            />
+            <SettingsRow
+              icon="chatbubble-ellipses-outline"
+              iconColor="#0ea5e9"
+              label="Share feedback"
+              onPress={() => showFeedbackForm()}
             />
           </GlassSurface>
         </View>

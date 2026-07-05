@@ -12,6 +12,7 @@ import { PlotlistApiError } from "../lib/api/client";
 import { clearStoredSession } from "../lib/api/session";
 import { getCachedOnboardingStep } from "../lib/onboardingCache";
 import { getWelcomeTourSeen } from "../lib/preferences";
+import { setSentryUser } from "../lib/sentry";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 
 function isAuthFailure(error: unknown): boolean {
@@ -88,6 +89,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   const isProfileLoading = isAuthenticated && (me === undefined || isEnsuringProfile);
+
+  // Attach the signed-in user to crash reports; cleared on sign-out.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setSentryUser(null);
+      return;
+    }
+    const meId = me?._id ?? me?.id;
+    if (meId) {
+      setSentryUser({
+        id: String(meId),
+        username: typeof me?.username === "string" ? me.username : undefined,
+      });
+    }
+  }, [isAuthenticated, me?._id, me?.id, me?.username]);
 
   // Route protection: redirect based on authentication state
   useEffect(() => {

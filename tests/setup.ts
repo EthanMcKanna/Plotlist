@@ -16,6 +16,19 @@ jest.mock("@expo/vector-icons", () => ({
   Ionicons: ({ name }: { name?: string }) => name ?? "icon",
 }));
 
+// The Sentry SDK touches native modules at init time, which jest-expo does
+// not provide; component tests only need inert stand-ins.
+jest.mock("@sentry/react-native", () => ({
+  init: jest.fn(),
+  wrap: <T,>(component: T) => component,
+  setUser: jest.fn(),
+  captureException: jest.fn(),
+  reactNavigationIntegration: () => ({ registerNavigationContainer: jest.fn() }),
+  httpClientIntegration: () => ({ name: "HttpClient" }),
+  feedbackIntegration: () => ({ name: "MobileFeedback" }),
+  showFeedbackWidget: jest.fn(),
+}));
+
 afterEach(() => {
   cleanup();
 });

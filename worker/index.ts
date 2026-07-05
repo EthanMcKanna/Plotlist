@@ -1,3 +1,5 @@
+import * as Sentry from "@sentry/cloudflare";
+
 import logoutRoute from "../api/auth/logout";
 import refreshRoute from "../api/auth/refresh";
 import startVerificationRoute from "../api/auth/start-verification";
@@ -104,7 +106,7 @@ async function serveUploadedFile(pathname: string, request: Request) {
   });
 }
 
-export default {
+const workerHandler = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     bootstrap(env);
     const url = new URL(request.url);
@@ -122,6 +124,7 @@ export default {
         return await runNodeRoute(handler, request);
       } catch (error) {
         console.error("[worker] Unhandled route error", url.pathname, error);
+        Sentry.captureException(error);
         return jsonResponse(500, {
           error: { code: "internal_error", message: "Unexpected error" },
         });
@@ -133,6 +136,24 @@ export default {
 
   async scheduled(event: { cron: string }, env: WorkerEnv, ctx: { waitUntil(p: Promise<unknown>): void }) {
     bootstrap(env);
-    ctx.waitUntil(runScheduledTasks(event.cron));
+    ctx.waitUntil(
+      // withSentry only observes the handler call itself, so failures inside
+      // waitUntil must be captured explicitly before rethrowing.
+      runScheduledTasks(event.cron).catch((error) => {
+        Sentry.captureException(error, { tags: { cron: event.cron } });
+        throw error;
+      }),
+    );
   },
 };
+
+export default Sentry.withSentry(
+  (env: WorkerEnv) => ({
+    dsn: typeof env.SENTRY_DSN === "string" ? env.SENTRY_DSN : undefined,
+    environment: typeof env.NODE_ENV === "string" ? env.NODE_ENV : "production",
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false,
+    debug: env.SENTRY_DEBUG === "1",
+  }),
+  workerHandler,
+);

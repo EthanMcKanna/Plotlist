@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import { router } from "expo-router";
 import { LoadingScreen } from "./LoadingScreen";
 import { clearStoredSession } from "../lib/api/session";
+import { Sentry } from "../lib/sentry";
 
 function isAuthError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -31,7 +32,9 @@ export class AuthErrorBoundary extends Component<Props, State> {
       this.setState({ isAuthError: true });
       await clearStoredSession();
       router.replace("/sign-in");
+      return;
     }
+    Sentry.captureException(error);
   }
 
   render() {

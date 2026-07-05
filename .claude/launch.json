@@ -11,6 +11,7 @@
       "name": "web-against-prod",
       "runtimeExecutable": "env",
       "runtimeArgs": [
+        "EXPO_PUBLIC_SENTRY_IN_DEV=1",
         "EXPO_PUBLIC_API_URL=https://plotlist.ethanmckanna.workers.dev",
         "npx",
         "expo",

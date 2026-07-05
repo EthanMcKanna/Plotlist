@@ -1,9 +1,11 @@
-const { getDefaultConfig } = require("expo/metro-config");
+const { getSentryExpoConfig } = require("@sentry/react-native/metro");
 const exclusionList = require("metro-config/private/defaults/exclusionList").default;
 const path = require("node:path");
 const { withNativeWind } = require("nativewind/metro");
 
-const config = getDefaultConfig(__dirname);
+// Expo's default config plus Sentry debug-ID injection for source maps.
+// Web replay is excluded to protect the home preview bundle budget.
+const config = getSentryExpoConfig(__dirname, { includeWebReplay: false });
 const blockListPatterns = [/\.env\..*\.local$/];
 const isProductionLike = process.env.NODE_ENV !== "development";
 const homePreviewDataStub = path.join(

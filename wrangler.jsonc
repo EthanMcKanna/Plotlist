@@ -30,7 +30,8 @@
   "vars": {
     "NODE_ENV": "production",
     "GEMINI_EMBEDDING_MODEL": "gemini-embedding-2-preview",
-    "GEMINI_EMBEDDING_VERSION": "shows-v1"
+    "GEMINI_EMBEDDING_VERSION": "shows-v1",
+    "SENTRY_DSN": "https://60e85cc7b00be6a37f0d56afae9b2827@o4511680500334592.ingest.us.sentry.io/4511680705462272"
   },
   "observability": {
     "enabled": true

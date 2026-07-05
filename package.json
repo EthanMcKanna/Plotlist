@@ -32,6 +32,8 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-community/datetimepicker": "8.4.4",
+    "@sentry/cloudflare": "^10.63.0",
+    "@sentry/react-native": "~7.2.0",
     "@shopify/flash-list": "2.0.2",
     "@tanstack/react-query": "^5.95.2",
     "date-fns": "^4.1.0",
@@ -105,5 +107,8 @@
     "typescript-eslint": "^8.57.0",
     "wrangler": "^4.106.0"
   },
-  "private": true
+  "private": true,
+  "allowScripts": {
+    "@sentry/cli@2.55.0": true
+  }
 }

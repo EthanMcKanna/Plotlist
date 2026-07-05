@@ -57,7 +57,15 @@
           "contactsPermission": "Allow Plotlist to access your contacts so you can find friends already using the app."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "organization": "ethan-mckanna",
+          "project": "plotlist-app"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
