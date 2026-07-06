@@ -4,6 +4,12 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "plotlist.app", "custom_domain": true },
+    { "pattern": "www.plotlist.app", "custom_domain": true }
+  ],
+  // Keep workers.dev alive until all shipped app builds point at plotlist.app.
+  "workers_dev": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -25,7 +31,7 @@
     }
   ],
   "triggers": {
-    "crons": ["*/20 * * * *", "40 * * * *", "10 * * * *", "5 */6 * * *"]
+    "crons": ["* * * * *", "*/20 * * * *", "40 * * * *", "10 * * * *", "5 */6 * * *"]
   },
   "vars": {
     "NODE_ENV": "production",

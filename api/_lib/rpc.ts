@@ -292,12 +292,15 @@ type UpNextEnrichableEntry = {
   sortTimestamp: number;
 };
 
-const MAX_INLINE_SEASON_FETCHES = 3;
+// Stale seasons refreshed inline per request. Generous now that the account
+// is on Workers Paid (1000 subrequests/invocation); the fetches run in
+// parallel so latency stays at one TMDB round-trip.
+const MAX_INLINE_SEASON_FETCHES = 24;
 
 // Fill next-episode metadata (name, still, overview, runtime, air date) from
-// the season cache. At most a few stale seasons are refreshed from TMDB per
-// request; everything else serves stale-if-available and heals on later calls,
-// keeping the handler inside the Workers subrequest budget.
+// the season cache. Stale seasons are refreshed from TMDB in parallel;
+// anything beyond the inline budget serves stale-if-available and heals on
+// later calls.
 async function enrichUpNextEntriesWithSeasonMetadata(
   entries: UpNextEnrichableEntry[],
   { now, today }: { now: number; today: string },
@@ -950,7 +953,7 @@ function normalizeTmdbEpisode(episode: any) {
   };
 }
 
-function normalizeTmdbShowDetails(payload: any) {
+export function normalizeTmdbShowDetails(payload: any) {
   if (!payload) {
     return payload;
   }
@@ -1124,7 +1127,91 @@ const editorialSeedGroupsByTmdbCategory: Record<string, HomeEditorialSeedGroup |
   quick_picks: "quick",
 };
 
+function catalogItemFromShowRow(show: typeof shows.$inferSelect) {
+  return {
+    externalSource: show.externalSource,
+    externalId: show.externalId,
+    title: show.title,
+    year: show.year ?? undefined,
+    posterUrl: show.posterUrl ?? undefined,
+    backdropUrl: show.backdropUrl ?? undefined,
+    overview: show.overview ?? undefined,
+    genreIds: show.genreIds ?? undefined,
+    originalLanguage: show.originalLanguage ?? undefined,
+    originCountries: show.originCountries ?? undefined,
+    tmdbPopularity: show.tmdbPopularity ?? undefined,
+    tmdbVoteAverage: show.tmdbVoteAverage ?? undefined,
+    tmdbVoteCount: show.tmdbVoteCount ?? undefined,
+  };
+}
+
+function buildFtsMatchQuery(text: string): string | null {
+  const tokens = normalizeSearchText(text).split(/\s+/).filter(Boolean).slice(0, 8);
+  if (tokens.length === 0) {
+    return null;
+  }
+  // Quote every token so user input can't hit FTS5 query syntax; the final
+  // token prefix-matches so results appear while the user is still typing.
+  return tokens
+    .map((token, index) => (index === tokens.length - 1 ? `"${token}"*` : `"${token}"`))
+    .join(" ");
+}
+
+// Full-text search over the bulk-ingested catalog: bm25 relevance blended
+// with TMDB popularity so "the office" surfaces the show everyone means.
+async function searchShowsLocal(text: string, limit: number) {
+  const match = buildFtsMatchQuery(text);
+  if (!match) {
+    return [];
+  }
+  const ranked = (await db.all(sql`
+    SELECT s.rowid AS row_id
+    FROM shows_fts f
+    JOIN shows s ON s.rowid = f.rowid
+    WHERE shows_fts MATCH ${match}
+    ORDER BY bm25(shows_fts, 8.0, 4.0, 2.0) - 1.6 * ln(1.0 + coalesce(s.tmdb_popularity, 0.0)) ASC
+    LIMIT ${limit}
+  `)) as Array<{ row_id: number }>;
+  if (ranked.length === 0) {
+    return [];
+  }
+  const rowIds = ranked.map((row) => row.row_id);
+  const rows = await db
+    .select({ rowId: sql<number>`"shows".rowid`, show: shows })
+    .from(shows)
+    .where(sql`"shows".rowid IN (${sql.join(rowIds.map((id) => sql`${id}`), sql`, `)})`);
+  const byRowId = new Map(rows.map((row) => [row.rowId, row.show]));
+  return rowIds
+    .map((rowId) => byRowId.get(rowId))
+    .filter((row): row is typeof shows.$inferSelect => row !== undefined);
+}
+
 async function searchCatalog(text: string, limit: number) {
+  const normalized = text.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  // Local-first: the bulk ingest keeps (nearly) the whole TMDB TV catalog in
+  // D1, so live TMDB search is only a fallback for thin local results.
+  const localRows = await searchShowsLocal(normalized, limit).catch(() => []);
+  const local = localRows.map(catalogItemFromShowRow);
+  if (local.length >= Math.min(limit, 8)) {
+    return local;
+  }
+  try {
+    const remote = await searchCatalogRemote(normalized, limit);
+    const seen = new Set(local.map((item) => item.externalId));
+    return [...local, ...remote.filter((item: any) => !seen.has(String(item.externalId)))].slice(
+      0,
+      limit,
+    );
+  } catch {
+    return local;
+  }
+}
+
+async function searchCatalogRemote(text: string, limit: number) {
   const normalized = text.trim();
   if (!normalized) {
     return [];
@@ -1440,9 +1527,8 @@ const homeCatalogCategoryPlan: Array<{ category: string; limit: number }> = [
   })),
 ];
 
-// Refresh the stalest home catalog categories, a few per invocation, so the
-// scheduled Worker stays inside per-invocation subrequest budgets while the
-// full 16-category surface converges to fresh within an hour.
+// Refresh the stalest home catalog categories, stalest first, up to
+// maxCategories per invocation.
 export async function refreshStaleHomeCatalogCategories(maxCategories = 4) {
   const keyFor = (item: { category: string; limit: number }) =>
     `v6:${item.category}:1:${item.limit}`;
@@ -2425,12 +2511,14 @@ async function listFollowsPage(input: {
   };
 }
 
-const FEED_FANOUT_MAX_FOLLOWERS = 400;
+// Worst-case bound so a mega account can't stall its own write request
+// indefinitely; followers beyond it still see the activity on the actor's
+// profile. Sized for Workers Paid subrequest limits with room to spare.
+const FEED_FANOUT_MAX_FOLLOWERS = 5000;
+// D1 statements grouped per batch() call — one network round-trip per group.
+const FEED_FANOUT_STATEMENTS_PER_BATCH = 40;
 
 async function addFeedForFollowers(actorId: string, type: "review" | "log", targetId: string, showId: string, timestamp: number) {
-  // Fan-out is capped to the most recent followers so a popular account
-  // can't blow the request past D1 write limits; everyone still sees the
-  // activity on the actor's profile.
   const followerRows = await db
     .select({ followerId: follows.followerId })
     .from(follows)
@@ -2451,8 +2539,12 @@ async function addFeedForFollowers(actorId: string, type: "review" | "log", targ
     timestamp,
     createdAt: Date.now(),
   }));
-  for (const chunk of chunkForSqlParams(feedRows, 8)) {
-    await db.insert(feedItems).values(chunk);
+  const statements = chunkForSqlParams(feedRows, 8).map((chunk) =>
+    db.insert(feedItems).values(chunk),
+  );
+  for (let i = 0; i < statements.length; i += FEED_FANOUT_STATEMENTS_PER_BATCH) {
+    const group = statements.slice(i, i + FEED_FANOUT_STATEMENTS_PER_BATCH);
+    await db.batch(group as [(typeof statements)[number], ...(typeof statements)[number][]]);
   }
 }
 
@@ -2723,11 +2815,18 @@ export const queryHandlers: Record<string, RpcHandler> = {
     if (parsed.text.trim().length < 2) {
       return [];
     }
+    const limit = Math.min(parsed.limit ?? 20, 50);
+    const ftsRows = await searchShowsLocal(parsed.text, limit).catch(() => []);
+    if (ftsRows.length > 0) {
+      return ftsRows.map(showToDoc);
+    }
+    // FTS prefix-matches word starts only; the substring scan still catches
+    // mid-word fragments and covers environments without the FTS table.
     const rows = await db
       .select()
       .from(shows)
       .where(or(ilike(shows.title, `%${parsed.text}%`), ilike(shows.searchText, `%${parsed.text}%`)))
-      .limit(Math.min(parsed.limit ?? 20, 50));
+      .limit(limit);
     return rows.map(showToDoc);
   },
   "watchStates:getCounts": async ({ req }) => {
@@ -4348,7 +4447,14 @@ export const actionHandlers: Record<string, RpcHandler> = {
       await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,recommendations,external_ids" }),
     );
     const now = Date.now();
-    const expiresAt = now + 24 * 60 * 60 * 1000;
+    // Active shows churn (new episodes, next-episode pointers) so they expire
+    // fast; ended shows barely change and can ride the cache for a week.
+    const isActiveShow =
+      payload?.in_production === true ||
+      payload?.next_episode_to_air != null ||
+      payload?.status === "Returning Series" ||
+      payload?.status === "In Production";
+    const expiresAt = now + (isActiveShow ? 12 : 7 * 24) * 60 * 60 * 1000;
     const fetchedImdbId = readImdbIdFromDetailsPayload(payload);
     if (show.imdbId == null && fetchedImdbId) {
       await db

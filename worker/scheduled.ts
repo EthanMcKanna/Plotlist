@@ -9,25 +9,38 @@ import {
   refreshStaleTrackedReleases,
 } from "../api/_lib/release-refresh";
 import { refreshStaleHomeCatalogCategories } from "../api/_lib/rpc";
+import { runShowIngestTick } from "../api/_lib/show-ingest";
 
-// Consolidated cron dispatch. The Workers free plan allows five schedules, so
-// the nine legacy Vercel cron endpoints collapse into four rotations:
-//   */20 * * * *  — refresh the stalest home catalog categories (4 per tick,
-//                   16 categories total, 6h TTL → whole surface stays fresh)
-//   40 * * * *    — refresh release calendars for a few tracked shows
+// Consolidated cron dispatch (five schedules):
+//   * * * * *     — bulk catalog ingest: drain due show_ingest_state rows
+//                   (backfill by popularity, then tiered freshness refresh)
+//                   plus an hourly /tv/changes sync piggybacked on the tick
+//   */20 * * * *  — refresh every stale home catalog category (whole surface
+//                   converges to fresh each tick on the Workers Paid plan)
+//   40 * * * *    — refresh release calendars for tracked shows
 //   10 * * * *    — episode-tonight pushes for timezones hitting the digest
 //                   hour, then settle pending Expo push receipts
 //   5 */6 * * *   — TTL cleanup for caches, sessions, OTPs, rate limits
+export const SHOW_INGEST_CRON = "* * * * *";
 export const CATALOG_ROTATE_CRON = "*/20 * * * *";
 export const RELEASE_REFRESH_CRON = "40 * * * *";
 export const NOTIFICATIONS_CRON = "10 * * * *";
 export const CLEANUP_CRON = "5 */6 * * *";
 
-const CATALOG_CATEGORIES_PER_TICK = 4;
-const RELEASE_SHOWS_PER_TICK = 3;
+const CATALOG_CATEGORIES_PER_TICK = 16;
+const RELEASE_SHOWS_PER_TICK = 12;
+const INGEST_SHOWS_PER_TICK = 200;
 
 export async function runScheduledTasks(cron: string) {
   try {
+    if (cron === SHOW_INGEST_CRON) {
+      const summary = await runShowIngestTick(INGEST_SHOWS_PER_TICK);
+      if (summary.selected > 0 || summary.changesSynced !== null) {
+        console.info("[cron] show ingest", summary);
+      }
+      return;
+    }
+
     if (cron === CATALOG_ROTATE_CRON) {
       const summary = await refreshStaleHomeCatalogCategories(CATALOG_CATEGORIES_PER_TICK);
       console.info("[cron] home catalog rotate", summary);

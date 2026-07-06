@@ -13,7 +13,7 @@
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://plotlist.ethanmckanna.workers.dev"
+        "EXPO_PUBLIC_API_URL": "https://plotlist.app"
       },
       "autoIncrement": true
     }

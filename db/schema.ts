@@ -931,3 +931,39 @@ export const rateLimits = sqliteTable(
     keyIdx: uniqueIndex("rate_limits_key_idx").on(table.key),
   }),
 );
+
+export const showIngestStatusValues = ["pending", "ingested", "failed"] as const;
+
+// One row per TMDB TV series id known to exist (seeded from the daily id
+// export and topped up by the /tv/changes feed). Drives the bulk-ingest cron:
+// rows are due when nextRefreshAt <= now; refresh cadence is tiered by how
+// active the show is (see computeNextRefreshAt in api/_lib/show-ingest.ts).
+export const showIngestState = sqliteTable(
+  "show_ingest_state",
+  {
+    id: text("id").primaryKey(),
+    tmdbId: integer("tmdb_id").notNull(),
+    popularity: doublePrecision("popularity"),
+    status: text("status", { enum: showIngestStatusValues }).notNull(),
+    nextRefreshAt: timestampMs("next_refresh_at").notNull(),
+    lastIngestedAt: timestampMs("last_ingested_at"),
+    failCount: integer("fail_count").notNull(),
+    lastError: text("last_error"),
+    updatedAt: timestampMs("updated_at").notNull(),
+  },
+  (table) => ({
+    tmdbIdx: uniqueIndex("show_ingest_state_tmdb_idx").on(table.tmdbId),
+    dueIdx: index("show_ingest_state_due_idx").on(table.nextRefreshAt),
+    statusPopularityIdx: index("show_ingest_state_status_popularity_idx").on(
+      table.status,
+      table.popularity,
+    ),
+  }),
+);
+
+// Tiny key/value store for ingest watermarks (e.g. the last /tv/changes sync).
+export const ingestSyncMeta = sqliteTable("ingest_sync_meta", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updatedAt: timestampMs("updated_at").notNull(),
+});

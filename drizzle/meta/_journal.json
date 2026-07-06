@@ -43,6 +43,13 @@
       "when": 1783573200000,
       "tag": "0005_curious_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783298961718,
+      "tag": "0006_clumsy_loners",
+      "breakpoints": true
     }
   ]
 }

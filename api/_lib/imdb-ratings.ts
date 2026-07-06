@@ -14,9 +14,9 @@ const SETTLED_SEASON_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SETTLED_SEASON_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // OMDb misses (unrated titles, transient errors) retry sooner than hits.
 const EMPTY_RESULT_TTL_MS = 6 * 60 * 60 * 1000;
-// OMDb calls come out of the same 50-subrequest budget as TMDB; a cold
-// multi-season request warms at most this many rows and fills in later.
-const MAX_INLINE_FETCHES = 4;
+// Bound on inline OMDb calls per request: show rating plus up to ten seasons
+// warm fully on a cold request now that the account is on Workers Paid.
+const MAX_INLINE_FETCHES = 11;
 
 export type ImdbShowRatingPayload = {
   rating: number | null;
