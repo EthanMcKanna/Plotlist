@@ -2,16 +2,12 @@ import { Redirect } from "expo-router";
 
 import { Screen } from "../../components/Screen";
 import { LogSurface } from "../(tabs)/log";
-import type { LogActivityItem } from "../../lib/logActivity";
+import type { DiaryItem } from "../../lib/logDiary";
 import type { Id } from "../../lib/plotlist/types";
 
 const PREVIEW_NOW = new Date("2026-06-02T20:30:00-07:00").getTime();
 
-function show(
-  id: string,
-  title: string,
-  posterUrl: string,
-) {
+function show(id: string, title: string, posterUrl: string) {
   return {
     _id: id,
     id,
@@ -47,10 +43,10 @@ function minutesAgo(minutes: number) {
   return PREVIEW_NOW - minutes * 60_000;
 }
 
-function daysAgo(days: number, hour = 21) {
+function daysAgo(days: number, hour = 21, minute = 20) {
   const date = new Date(PREVIEW_NOW);
   date.setDate(date.getDate() - days);
-  date.setHours(hour, 20, 0, 0);
+  date.setHours(hour, minute, 0, 0);
   return date.getTime();
 }
 
@@ -58,11 +54,11 @@ function watchLog(
   id: string,
   showItem: (typeof SHOWS)[keyof typeof SHOWS],
   timestamp: number,
-  seasonNumber: number,
-  episodeNumber: number,
-  episodeTitle: string,
+  seasonNumber: number | null,
+  episodeNumber: number | null,
+  episodeTitle: string | null,
   note?: string,
-): LogActivityItem {
+): DiaryItem {
   return {
     id: id as Id<"watchLogs">,
     type: "log",
@@ -86,9 +82,9 @@ function review(
   showItem: (typeof SHOWS)[keyof typeof SHOWS],
   timestamp: number,
   rating: number,
-  reviewText: string,
+  reviewText: string | null,
   spoiler = false,
-): LogActivityItem {
+): DiaryItem {
   return {
     id: id as Id<"reviews">,
     type: "review",
@@ -106,7 +102,8 @@ function review(
   };
 }
 
-const PREVIEW_ITEMS: LogActivityItem[] = [
+const PREVIEW_ITEMS: DiaryItem[] = [
+  // Today: a noted watch, then a three-episode binge run.
   watchLog(
     "log-signal-6",
     SHOWS.signal,
@@ -119,6 +116,7 @@ const PREVIEW_ITEMS: LogActivityItem[] = [
   watchLog("log-studio-8", SHOWS.studio, minutesAgo(95), 1, 8, "Notes Session"),
   watchLog("log-studio-7", SHOWS.studio, minutesAgo(122), 1, 7, "Open Floor"),
   watchLog("log-studio-6", SHOWS.studio, minutesAgo(154), 1, 6, "Table Read"),
+  // Yesterday: half-star review plus a two-episode run.
   review(
     "review-northline",
     SHOWS.northline,
@@ -127,7 +125,8 @@ const PREVIEW_ITEMS: LogActivityItem[] = [
     "A restrained, icy season opener with a great sense of place.",
   ),
   watchLog("log-afterparty-3", SHOWS.afterparty, daysAgo(1, 20), 3, 3, "Guest List"),
-  watchLog("log-afterparty-2", SHOWS.afterparty, daysAgo(1, 19), 3, 2, "Side Door"),
+  watchLog("log-afterparty-2", SHOWS.afterparty, daysAgo(1, 19, 40), 3, 2, "Side Door"),
+  // Earlier this week: a spoiler review and a rating with no text.
   review(
     "review-signal",
     SHOWS.signal,
@@ -136,6 +135,7 @@ const PREVIEW_ITEMS: LogActivityItem[] = [
     "Dense, strange, and worth sitting with. The best episode so far.",
     true,
   ),
+  review("review-studio-rating", SHOWS.studio, daysAgo(4, 21), 3.5, null),
   watchLog("log-northline-2", SHOWS.northline, daysAgo(5, 21), 1, 2, "Whiteout"),
   watchLog(
     "log-northline-1",
@@ -146,6 +146,16 @@ const PREVIEW_ITEMS: LogActivityItem[] = [
     "Pilot",
     "Strong premiere. Keeping an eye on the sound design.",
   ),
+  // Previous month: exercises the month header and a whole-show entry.
+  watchLog("log-afterparty-season", SHOWS.afterparty, daysAgo(9, 22), null, null, null),
+  review(
+    "review-afterparty",
+    SHOWS.afterparty,
+    daysAgo(11, 21),
+    4,
+    "Every episode retells the same night from a new genre. Mostly lands.",
+  ),
+  watchLog("log-signal-1", SHOWS.signal, daysAgo(12, 20), 1, 1, "Static"),
 ];
 
 export default function DevLogPreviewScreen() {
@@ -155,7 +165,7 @@ export default function DevLogPreviewScreen() {
 
   return (
     <Screen hasTabBar>
-      <LogSurface items={PREVIEW_ITEMS} hasMore now={PREVIEW_NOW} />
+      <LogSurface items={PREVIEW_ITEMS} hasMore={false} now={PREVIEW_NOW} />
     </Screen>
   );
 }

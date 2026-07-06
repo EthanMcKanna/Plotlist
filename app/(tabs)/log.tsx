@@ -1,21 +1,19 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
-  type ViewStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { guardedPush } from "../../lib/navigation";
+import { useScrollToTopOnTabPress } from "../../lib/useScrollToTopOnTabPress";
 
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { EmptyState } from "../../components/EmptyState";
@@ -25,59 +23,45 @@ import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import {
-  computeLogSummary,
-  getItemSignal,
-  getItemSubtitle,
-  getItemText,
-  getShowTitle,
-  organizeLogTimeline,
-  type LogActivityItem,
-  type LogClusterRow,
-  type LogFilterValue,
-  type LogItemRow,
-  type LogSortValue,
-  type LogSummary,
-  type LogTimelineRow,
-} from "../../lib/logActivity";
-import { formatRelativeTime, formatShortDate, formatTime } from "../../lib/format";
+  buildDiaryFeed,
+  computeDiaryPulse,
+  getDiaryEmptyCopy,
+  getDiaryEpisodeLabel,
+  getDiaryHeadline,
+  getDiaryItemRating,
+  getDiaryItemText,
+  getDiaryItemTitle,
+  type DiaryBingeRow,
+  type DiaryDayActivity,
+  type DiaryDayLabel,
+  type DiaryEntryRow,
+  type DiaryFilter,
+  type DiaryItem,
+  type DiaryMonthRow,
+  type DiaryRow,
+} from "../../lib/logDiary";
+import { formatTime } from "../../lib/format";
 import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import type { Id } from "../../lib/plotlist/types";
 
-const FILTER_OPTIONS: { value: LogFilterValue; label: string }[] = [
-  { value: "highlights", label: "Highlights" },
-  { value: "journal", label: "Journal" },
-  { value: "reviews", label: "Reviews" },
+const FILTER_OPTIONS: { value: DiaryFilter; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "episodes", label: "Episodes" },
+  { value: "reviews", label: "Reviews" },
+  { value: "notes", label: "Notes" },
 ];
 
-const SORT_OPTIONS: {
-  value: LogSortValue;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { value: "recent", label: "Newest first", icon: "time-outline" },
-  { value: "oldest", label: "Oldest first", icon: "hourglass-outline" },
-  { value: "title", label: "Title", icon: "text-outline" },
-  { value: "rating", label: "Rating", icon: "star-outline" },
-];
+const DAY_RAIL_WIDTH = 44;
+const PAGE_SIZE = 40;
+const MAX_LIMIT = 160;
 
-type LogListEntry =
-  | {
-      kind: "section";
-      id: string;
-      label: string;
-      detail: string;
-    }
-  | {
-      kind: "row";
-      id: string;
-      row: LogTimelineRow;
-      isLastInSection: boolean;
-    };
+type DiaryAction =
+  | { type: "log"; logId: Id<"watchLogs">; showId: string | null; title: string }
+  | { type: "review"; reviewId: Id<"reviews">; showId: string | null; title: string };
 
 export type LogSurfaceProps = {
-  items: LogActivityItem[];
+  items: DiaryItem[];
   hasMore?: boolean;
   onLoadMore?: () => void;
   onDeleteLog?: (logId: Id<"watchLogs">, title: string) => void;
@@ -85,77 +69,51 @@ export type LogSurfaceProps = {
   now?: number;
 };
 
-function triggerLightHaptic() {
+function lightHaptic() {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 }
 
-function triggerMediumHaptic() {
+function mediumHaptic() {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 }
 
-function formatCompactNumber(value: number) {
-  return value.toLocaleString("en-US");
-}
-
-function formatRating(value: number | null) {
-  if (value === null) return "None";
-  return value % 1 === 0 ? String(value) : value.toFixed(1);
-}
-
-function getLatestLabel(item: LogActivityItem | null) {
-  if (!item) return "Latest moment";
+function openDiaryItem(item: DiaryItem) {
+  lightHaptic();
   if (item.type === "review") {
-    return getItemText(item) ? "Latest review" : "Latest rating";
+    router.push(`/review/${item.review._id}`);
+    return;
   }
-  return getItemText(item) ? "Latest note" : "Latest watch";
+  if (item.show?._id) {
+    guardedPush(`/show/${item.show._id}`);
+  }
 }
 
-function getSummarySentence(summary: LogSummary) {
-  if (summary.totalItems === 0) {
-    return "Your viewing journal starts when you mark something watched.";
-  }
-
-  const weekTotal = summary.weekEntries + summary.weekReviews;
-  const signalTotal = summary.totalNotes + summary.totalReviews;
-  return `${formatCompactNumber(weekTotal)} this week - ${formatCompactNumber(signalTotal)} notes and reviews`;
-}
-
-function getFilterEmptyCopy(filter: LogFilterValue) {
-  if (filter === "highlights") {
-    return {
-      title: "No highlights yet",
-      description: "Notes, reviews, high ratings, and compact episode runs will appear here.",
-    };
-  }
-  if (filter === "reviews") {
-    return {
-      title: "No reviews yet",
-      description: "Reviews and ratings get their own quiet lane once you publish them.",
-    };
-  }
-  if (filter === "journal") {
-    return {
-      title: "No watch entries yet",
-      description: "Watched episodes and notes will build this journal view.",
-    };
-  }
-  return {
-    title: "Nothing matches",
-    description: "Try a different mode or sort.",
-  };
-}
-
-function StarRating({ rating }: { rating: number }) {
+// Seven slim bars for the trailing week; today reads brand-blue so the
+// header carries a pulse without becoming a stats dashboard.
+function WeekSparkline({ days }: { days: DiaryDayActivity[] }) {
+  const max = Math.max(1, ...days.map((day) => day.count));
+  const active = days.filter((day) => day.count > 0).length;
   return (
-    <View className="flex-row items-center gap-0.5">
-      {Array.from({ length: 5 }, (_, index) => {
-        const filled = index < Math.round(rating);
+    <View
+      accessibilityLabel={`Activity on ${active} of the last 7 days`}
+      style={styles.sparkline}
+    >
+      {days.map((day) => {
+        const height = day.count === 0 ? 4 : 7 + Math.round((day.count / max) * 17);
         return (
-          <Ionicons
-            key={index}
-            name={filled ? "star" : "star-outline"}
-            size={12}
-            color={filled ? "#F59E0B" : "#4B5563"}
+          <View
+            key={day.key}
+            style={[
+              styles.sparklineBar,
+              {
+                height,
+                backgroundColor: day.isToday
+                  ? "#38BDF8"
+                  : day.count > 0
+                    ? "rgba(125,211,252,0.42)"
+                    : "rgba(255,255,255,0.12)",
+              },
+            ]}
           />
         );
       })}
@@ -163,253 +121,77 @@ function StarRating({ rating }: { rating: number }) {
   );
 }
 
-function SummaryMetric({
-  label,
-  value,
-  detail,
-  tone,
-  showDivider,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone: string;
-  showDivider?: boolean;
-}) {
+function Stars({ rating, size = 13 }: { rating: number; size?: number }) {
   return (
-    <View
-      className="flex-1 px-3 py-3"
-      style={showDivider ? styles.metricDivider : undefined}
-    >
-      <Text className="text-[21px] font-bold text-text-primary" style={{ color: tone }}>
-        {value}
-      </Text>
-      <Text className="mt-0.5 text-[12px] font-semibold text-text-secondary">
-        {label}
-      </Text>
-      <Text className="mt-1 text-[11px] text-text-tertiary" numberOfLines={1}>
-        {detail}
-      </Text>
+    <View className="flex-row items-center" style={styles.starRow}>
+      {Array.from({ length: 5 }, (_, index) => {
+        const name =
+          rating >= index + 1 ? "star" : rating >= index + 0.5 ? "star-half" : "star-outline";
+        return (
+          <Ionicons
+            key={index}
+            name={name}
+            size={size}
+            color={name === "star-outline" ? "#4B5563" : "#F59E0B"}
+          />
+        );
+      })}
     </View>
   );
 }
 
-function TypeBadge({
-  label,
-  icon,
-  color,
-}: {
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-}) {
+// Letterboxd-style date spine: the first row of each day carries the day
+// number, every following row leaves the rail empty so the eye can scan
+// dates down the left edge.
+function DayRail({ label }: { label: DiaryDayLabel | null }) {
   return (
-    <View className="flex-row items-center gap-1.5">
-      <Ionicons name={icon} size={12} color={color} />
-      <Text className="text-[11px] font-semibold text-text-tertiary" style={{ color }}>
-        {label}
-      </Text>
+    <View style={styles.dayRail}>
+      {label ? (
+        <>
+          <Text
+            className="text-[17px] font-bold"
+            style={{ color: label.isToday ? "#38BDF8" : "#F1F3F7" }}
+          >
+            {label.day}
+          </Text>
+          <Text className="text-[10px] font-semibold tracking-widest text-text-tertiary">
+            {label.weekday}
+          </Text>
+        </>
+      ) : null}
     </View>
   );
 }
 
-function LatestMoment({
-  item,
-}: {
-  item: LogActivityItem | null;
-}) {
-  if (!item) {
-    return (
-      <View className="mt-3 rounded-lg border border-dashed border-dark-border px-4 py-5">
-        <Text className="text-sm font-semibold text-text-primary">Nothing logged yet</Text>
-        <Text className="mt-1 text-sm leading-5 text-text-tertiary">
-          Watch entries, notes, and reviews will collect into this page.
+function MonthHeader({ row }: { row: DiaryMonthRow }) {
+  return (
+    <View className="mb-1 mt-6 px-6">
+      <View className="flex-row items-baseline justify-between border-b border-dark-border/70 pb-2">
+        <Text className="text-[13px] font-bold uppercase tracking-[2px] text-text-secondary">
+          {row.label}
+        </Text>
+        <Text className="text-[12px] font-medium text-text-tertiary">
+          {row.entryCount} {row.entryCount === 1 ? "entry" : "entries"}
         </Text>
       </View>
-    );
-  }
-
-  const title = getShowTitle(item);
-  const subtitle = getItemSubtitle(item);
-  const text = getItemText(item);
-  const isReview = item.type === "review";
-  const rating =
-    isReview && typeof item.review.rating === "number" ? item.review.rating : null;
-
-  return (
-    <Pressable
-      onPress={() => {
-        triggerLightHaptic();
-        if (isReview) {
-          router.push(`/review/${item.review._id}`);
-          return;
-        }
-        if (item.show?._id) {
-          guardedPush(`/show/${item.show._id}`);
-        }
-      }}
-      className="mt-3 active:opacity-90"
-    >
-      <LinearGradient
-        colors={["rgba(14,165,233,0.18)", "rgba(255,255,255,0.055)"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.latestGradient}
-      >
-        <View className="flex-row gap-3">
-          <Poster uri={item.show?.posterUrl} width={52} />
-          <View className="flex-1">
-            <View className="flex-row items-center justify-between gap-3">
-              <TypeBadge
-                label={getLatestLabel(item)}
-                icon={isReview ? "star-outline" : text ? "create-outline" : "play-outline"}
-                color={isReview ? "#F59E0B" : "#7DD3FC"}
-              />
-              <Text className="text-[11px] text-text-tertiary">
-                {formatRelativeTime(item.timestamp)}
-              </Text>
-            </View>
-            <Text className="mt-2 text-[16px] font-bold text-text-primary" numberOfLines={1}>
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text className="mt-0.5 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
-                {subtitle}
-              </Text>
-            ) : null}
-            {text ? (
-              <Text className="mt-2 text-[13px] leading-5 text-text-secondary" numberOfLines={2}>
-                {text}
-              </Text>
-            ) : rating !== null ? (
-              <View className="mt-2 flex-row items-center gap-2">
-                <StarRating rating={rating} />
-                <Text className="text-[12px] font-semibold text-text-secondary">
-                  {formatRating(rating)}
-                </Text>
-              </View>
-            ) : (
-              <Text className="mt-2 text-[13px] text-text-secondary">
-                {formatShortDate(item.timestamp)} at {formatTime(item.timestamp)}
-              </Text>
-            )}
-          </View>
-        </View>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-function LogHeader({
-  filter,
-  summary,
-  onChangeFilter,
-  onOpenSort,
-}: {
-  filter: LogFilterValue;
-  summary: LogSummary;
-  onChangeFilter: (value: LogFilterValue) => void;
-  onOpenSort: () => void;
-}) {
-  return (
-    <View className="px-6 pb-4 pt-5">
-      <View className="flex-row items-start justify-between gap-4">
-        <View className="flex-1">
-          <Text className="text-[34px] font-bold text-text-primary">Log</Text>
-          <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">
-            {getSummarySentence(summary)}
-          </Text>
-        </View>
-        <GlassPressable
-          accessibilityLabel="Sort log"
-          onPress={() => {
-            triggerLightHaptic();
-            onOpenSort();
-          }}
-          radius={8}
-          variant="control"
-          fallbackColor="rgba(255,255,255,0.07)"
-          contentStyle={styles.iconButtonContent}
-        >
-          <Ionicons name="options-outline" size={19} color="#D6DAE6" />
-        </GlassPressable>
-      </View>
-
-      <GlassSurface
-        radius={8}
-        variant="surface"
-        fallbackColor="rgba(17,21,29,0.84)"
-        style={[styles.summaryPanel, styles.summaryPanelBorder]}
-      >
-        <View className="flex-row">
-          <SummaryMetric
-            label="Entries"
-            value={formatCompactNumber(summary.weekEntries)}
-            detail="This week"
-            tone="#7DD3FC"
-            showDivider
-          />
-          <SummaryMetric
-            label="Reviews"
-            value={formatCompactNumber(summary.weekReviews)}
-            detail={`${formatCompactNumber(summary.totalReviews)} total`}
-            tone="#F59E0B"
-            showDivider
-          />
-          <SummaryMetric
-            label="Notes"
-            value={formatCompactNumber(summary.weekNotes)}
-            detail={`${formatCompactNumber(summary.totalNotes)} saved`}
-            tone="#D6DAE6"
-          />
-        </View>
-        <View className="border-t border-dark-border/70 px-3 pb-3 pt-3">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-[12px] font-semibold text-text-secondary">
-              {formatCompactNumber(summary.uniqueShows)} shows in the archive
-            </Text>
-            <Text className="text-[12px] text-text-tertiary">
-              Avg {formatRating(summary.averageRating)}
-            </Text>
-          </View>
-          <LatestMoment item={summary.latestMeaningfulItem} />
-        </View>
-      </GlassSurface>
-
-      <View className="mt-4 flex-row items-center gap-2">
-        <View className="flex-1">
-          <SegmentedControl
-            options={FILTER_OPTIONS}
-            value={filter}
-            onChange={(value) => onChangeFilter(value as LogFilterValue)}
-          />
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function SectionHeader({ label, detail }: { label: string; detail: string }) {
-  return (
-    <View className="mb-1 mt-4 flex-row items-center justify-between px-6">
-      <Text className="text-[15px] font-bold text-text-primary">{label}</Text>
-      <Text className="text-[12px] font-medium text-text-tertiary">{detail}</Text>
     </View>
   );
 }
 
 function RowShell({
-  children,
-  isLast,
+  dayLabel,
+  isLastOfDay,
   onPress,
   onLongPress,
   accessibilityLabel,
+  children,
 }: {
-      children: ReactNode;
-  isLast: boolean;
+  dayLabel: DiaryDayLabel | null;
+  isLastOfDay: boolean;
   onPress: () => void;
   onLongPress?: () => void;
   accessibilityLabel: string;
+  children: React.ReactNode;
 }) {
   return (
     <Pressable
@@ -418,204 +200,227 @@ function RowShell({
       onLongPress={onLongPress}
       className="active:opacity-85"
     >
-      <View
-        className="flex-row gap-3 py-3"
-        style={isLast ? undefined : styles.rowDivider}
-      >
-        {children}
+      <View className="flex-row px-6">
+        <DayRail label={dayLabel} />
+        <View
+          className="flex-1 flex-row gap-3 py-3"
+          style={isLastOfDay ? undefined : styles.rowDivider}
+        >
+          {children}
+        </View>
       </View>
     </Pressable>
   );
 }
 
-function ActivityRow({
+const EntryRow = memo(function EntryRow({
   row,
-  isLast,
-  onDeleteLog,
-  onDeleteReview,
+  onAction,
 }: {
-  row: LogItemRow;
-  isLast: boolean;
-  onDeleteLog?: (logId: Id<"watchLogs">, title: string) => void;
-  onDeleteReview?: (reviewId: Id<"reviews">, title: string) => void;
+  row: DiaryEntryRow;
+  onAction: (action: DiaryAction) => void;
 }) {
   const item = row.item;
-  const title = getShowTitle(item);
-  const subtitle = getItemSubtitle(item);
-  const text = getItemText(item);
+  const title = getDiaryItemTitle(item);
+  const episodeLabel = getDiaryEpisodeLabel(item);
+  const text = getDiaryItemText(item);
+  const rating = getDiaryItemRating(item);
   const isReview = item.type === "review";
-  const rating =
-    isReview && typeof item.review.rating === "number" ? item.review.rating : null;
-  const signal = getItemSignal(item);
-  const signalColor = isReview ? "#F59E0B" : text ? "#7DD3FC" : "#9BA1B0";
 
   return (
     <RowShell
-      isLast={isLast}
-      accessibilityLabel={`${signal} for ${title}`}
-      onPress={() => {
-        triggerLightHaptic();
-        if (isReview) {
-          router.push(`/review/${item.review._id}`);
-          return;
-        }
-        if (item.show?._id) {
-          guardedPush(`/show/${item.show._id}`);
-        }
-      }}
+      dayLabel={row.dayLabel}
+      isLastOfDay={row.isLastOfDay}
+      accessibilityLabel={`${isReview ? "Review" : "Watch entry"} for ${title}`}
+      onPress={() => openDiaryItem(item)}
       onLongPress={() => {
-        triggerMediumHaptic();
-        if (isReview) {
-          onDeleteReview?.(item.review._id, title);
-          return;
-        }
-        onDeleteLog?.(item.log._id, title);
+        mediumHaptic();
+        onAction(
+          isReview
+            ? { type: "review", reviewId: item.review._id, showId: item.show?._id ?? null, title }
+            : { type: "log", logId: item.log._id, showId: item.show?._id ?? null, title },
+        );
       }}
     >
-      <Poster uri={item.show?.posterUrl} width={40} />
-      <View className="min-w-0 flex-1">
+      <Poster uri={item.show?.posterUrl} width={42} />
+      <View className="min-w-0 flex-1 justify-center">
         <View className="flex-row items-center justify-between gap-3">
-          <TypeBadge
-            label={signal}
-            icon={isReview ? "star-outline" : text ? "create-outline" : "play-outline"}
-            color={signalColor}
-          />
-          <Text className="text-[11px] text-text-tertiary">
-            {formatRelativeTime(item.timestamp)}
+          <Text
+            className="flex-1 text-[15px] font-semibold text-text-primary"
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+          <Text className="text-[11px] font-medium text-text-tertiary">
+            {formatTime(item.timestamp)}
           </Text>
         </View>
-        <Text className="mt-1.5 text-[15px] font-semibold text-text-primary" numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text className="mt-0.5 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
-            {subtitle}
+
+        {isReview ? (
+          <View className="mt-1 flex-row items-center gap-2">
+            {rating !== null ? <Stars rating={rating} /> : null}
+            {episodeLabel ? (
+              <Text className="flex-1 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
+                {episodeLabel}
+              </Text>
+            ) : rating === null ? (
+              <Text className="text-[12px] font-semibold text-accent">Review</Text>
+            ) : null}
+          </View>
+        ) : (
+          <Text className="mt-1 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
+            {episodeLabel ?? "Marked watched"}
           </Text>
-        ) : null}
+        )}
+
         {text ? (
-          <Text className="mt-1.5 text-[13px] leading-5 text-text-secondary" numberOfLines={2}>
+          <Text className="mt-1.5 text-[13px] leading-5 text-text-secondary" numberOfLines={3}>
             {text}
           </Text>
         ) : null}
-        {rating !== null ? (
-          <View className="mt-2 flex-row items-center gap-2">
-            <StarRating rating={rating} />
-            <Text className="text-[12px] font-semibold text-text-tertiary">
-              {formatRating(rating)}
-            </Text>
-          </View>
-        ) : null}
+
         {isReview && item.review.spoiler ? (
-          <View className="mt-2 flex-row items-center gap-1.5">
-            <Ionicons name="warning-outline" size={12} color="#9BA1B0" />
-            <Text className="text-[11px] text-text-tertiary">Contains spoilers</Text>
+          <View className="mt-1.5 flex-row items-center gap-1">
+            <Ionicons name="eye-off-outline" size={11} color="#5A6070" />
+            <Text className="text-[11px] font-medium text-text-tertiary">Spoilers</Text>
           </View>
         ) : null}
       </View>
     </RowShell>
   );
-}
+});
 
-function ClusterRow({
-  row,
-  isLast,
-}: {
-  row: LogClusterRow;
-  isLast: boolean;
-}) {
+const BingeRow = memo(function BingeRow({ row }: { row: DiaryBingeRow }) {
   return (
     <RowShell
-      isLast={isLast}
-      accessibilityLabel={`${row.logs.length} watch entries for ${row.title}`}
+      dayLabel={row.dayLabel}
+      isLastOfDay={row.isLastOfDay}
+      accessibilityLabel={`${row.logs.length} episodes of ${row.title}`}
       onPress={() => {
-        triggerLightHaptic();
+        lightHaptic();
         if (row.show?._id) {
           guardedPush(`/show/${row.show._id}`);
         }
       }}
     >
-      <Poster uri={row.show?.posterUrl} width={40} />
-      <View className="min-w-0 flex-1">
+      <Poster uri={row.show?.posterUrl} width={42} />
+      <View className="min-w-0 flex-1 justify-center">
         <View className="flex-row items-center justify-between gap-3">
-          <TypeBadge label="Episode run" icon="albums-outline" color="#7DD3FC" />
-          <Text className="text-[11px] text-text-tertiary">
-            {formatRelativeTime(row.timestamp)}
+          <Text
+            className="flex-1 text-[15px] font-semibold text-text-primary"
+            numberOfLines={1}
+          >
+            {row.title}
+          </Text>
+          <Text className="text-[11px] font-medium text-text-tertiary">
+            {formatTime(row.timestamp)}
           </Text>
         </View>
-        <Text className="mt-1.5 text-[15px] font-semibold text-text-primary" numberOfLines={1}>
-          {row.title}
-        </Text>
-        <Text className="mt-0.5 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
-          {row.subtitle}
-        </Text>
-        <Text className="mt-1.5 text-[13px] leading-5 text-text-secondary" numberOfLines={1}>
-          {row.logs.length} episodes watched in a row
-        </Text>
-      </View>
-      <View className="h-8 min-w-8 items-center justify-center rounded-lg border border-brand-500/30 bg-brand-500/10 px-2">
-        <Text className="text-[13px] font-bold text-brand-300">
-          {row.logs.length}
-        </Text>
+        <View className="mt-1 flex-row items-center gap-2">
+          <Text className="text-[12px] font-semibold text-brand-300" numberOfLines={1}>
+            {row.episodeRange ?? `${row.logs.length} entries`}
+          </Text>
+          <View className="rounded-full border border-brand-500/25 bg-brand-500/10 px-2 py-0.5">
+            <Text className="text-[10px] font-bold text-brand-300">
+              {row.logs.length} eps
+            </Text>
+          </View>
+        </View>
       </View>
     </RowShell>
   );
-}
-
-const TimelineRow = memo(function TimelineRow({
-  row,
-  isLast,
-  onDeleteLog,
-  onDeleteReview,
-}: {
-  row: LogTimelineRow;
-  isLast: boolean;
-  onDeleteLog?: (logId: Id<"watchLogs">, title: string) => void;
-  onDeleteReview?: (reviewId: Id<"reviews">, title: string) => void;
-}) {
-  if (row.kind === "cluster") {
-    return <ClusterRow row={row} isLast={isLast} />;
-  }
-
-  return (
-    <ActivityRow
-      row={row}
-      isLast={isLast}
-      onDeleteLog={onDeleteLog}
-      onDeleteReview={onDeleteReview}
-    />
-  );
 });
 
-function TimelineFooter({
-  hasMore,
-  onLoadMore,
+function DiaryHeader({
+  filter,
+  headline,
+  days,
+  onChangeFilter,
 }: {
-  hasMore?: boolean;
-  onLoadMore?: () => void;
+  filter: DiaryFilter;
+  headline: string;
+  days: DiaryDayActivity[];
+  onChangeFilter: (value: DiaryFilter) => void;
 }) {
-  if (hasMore && onLoadMore) {
+  return (
+    <View className="px-6 pb-2 pt-5">
+      <View className="flex-row items-end justify-between">
+        <Text className="text-[34px] font-bold text-text-primary">Log</Text>
+        <View className="pb-2">
+          <WeekSparkline days={days} />
+        </View>
+      </View>
+      <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">{headline}</Text>
+      <View className="mt-4">
+        <SegmentedControl
+          options={FILTER_OPTIONS}
+          value={filter}
+          onChange={(value) => onChangeFilter(value as DiaryFilter)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function DiaryFooter({ hasMore }: { hasMore?: boolean }) {
+  if (hasMore) {
     return (
-      <View className="px-6 pb-2 pt-4">
-        <GlassPressable
-          onPress={() => {
-            triggerLightHaptic();
-            onLoadMore();
-          }}
-          radius={8}
-          variant="control"
-          fallbackColor="rgba(255,255,255,0.07)"
-          contentStyle={styles.loadMoreContent}
-        >
-          <Text className="text-sm font-bold text-text-primary">Load more</Text>
-        </GlassPressable>
+      <View className="items-center py-6">
+        <ActivityIndicator color="#38BDF8" />
       </View>
     );
   }
-
   return (
-    <View className="items-center px-6 pb-2 pt-5">
-      <View className="mb-2 h-px w-14 bg-dark-border" />
-      <Text className="text-[12px] font-semibold text-text-tertiary">Caught up</Text>
+    <View className="items-center pb-2 pt-6">
+      <View className="mb-2 h-px w-12 bg-dark-border" />
+      <Text className="text-[12px] font-semibold text-text-tertiary">
+        You're all caught up
+      </Text>
+    </View>
+  );
+}
+
+function EmptyDiary() {
+  return (
+    <View className="flex-1 px-6 pt-5">
+      <Text className="text-[34px] font-bold text-text-primary">Log</Text>
+      <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">
+        Everything you watch, remembered in order.
+      </Text>
+      <GlassSurface
+        radius={12}
+        variant="surface"
+        fallbackColor="rgba(22,26,34,0.72)"
+        style={styles.emptyCard}
+      >
+        <View className="items-center px-6 py-10">
+          <View className="h-14 w-14 items-center justify-center rounded-full border border-brand-500/25 bg-brand-500/10">
+            <Ionicons name="book-outline" size={24} color="#7DD3FC" />
+          </View>
+          <Text className="mt-4 text-[17px] font-bold text-text-primary">
+            Your diary starts here
+          </Text>
+          <Text className="mt-2 text-center text-[13px] leading-5 text-text-tertiary">
+            Mark an episode watched, jot a note, or review a show — every moment lands
+            here, day by day.
+          </Text>
+          <GlassPressable
+            accessibilityLabel="Find something to watch"
+            onPress={() => {
+              lightHaptic();
+              router.push("/search");
+            }}
+            radius={8}
+            variant="prominent"
+            style={styles.emptyCta}
+            contentStyle={styles.emptyCtaContent}
+          >
+            <Text className="text-[14px] font-bold text-text-primary">
+              Find something to watch
+            </Text>
+          </GlassPressable>
+        </View>
+      </GlassSurface>
     </View>
   );
 }
@@ -629,116 +434,114 @@ export function LogSurface({
   now = Date.now(),
 }: LogSurfaceProps) {
   const insets = useSafeAreaInsets();
-  const [filter, setFilter] = useState<LogFilterValue>("highlights");
-  const [sort, setSort] = useState<LogSortValue>("recent");
-  const [sortSheetVisible, setSortSheetVisible] = useState(false);
+  const listRef = useRef<any>(null);
+  useScrollToTopOnTabPress(listRef);
 
-  const summary = useMemo(() => computeLogSummary(items, now), [items, now]);
-  const sections = useMemo(
-    () => organizeLogTimeline({ items, filter, sort, now }),
-    [filter, items, now, sort],
-  );
-  const entries = useMemo<LogListEntry[]>(
-    () =>
-      sections.flatMap((section) => [
-        { kind: "section" as const, id: section.id, label: section.label, detail: section.detail },
-        ...section.rows.map((row, index) => ({
-          kind: "row" as const,
-          id: row.id,
-          row,
-          isLastInSection: index === section.rows.length - 1,
-        })),
-      ]),
-    [sections],
-  );
-  const sortSheetOptions = useMemo<ActionSheetOption[]>(
-    () =>
-      SORT_OPTIONS.map((option) => ({
-        label: option.value === sort ? `${option.label} (selected)` : option.label,
-        icon: option.icon,
-        onPress: () => setSort(option.value),
-      })),
-    [sort],
-  );
-  const header = useMemo(
-    () => (
-        <LogHeader
-          filter={filter}
-          summary={summary}
-          onChangeFilter={setFilter}
-          onOpenSort={() => setSortSheetVisible(true)}
-        />
-      ),
-    [filter, summary],
-  );
+  const [filter, setFilter] = useState<DiaryFilter>("all");
+  const [pendingAction, setPendingAction] = useState<DiaryAction | null>(null);
 
-  const renderEntry = useCallback(
-    ({ item }: { item: LogListEntry }) => {
-      if (item.kind === "section") {
-        return <SectionHeader label={item.label} detail={item.detail} />;
+  const pulse = useMemo(() => computeDiaryPulse(items, now), [items, now]);
+  const rows = useMemo(() => buildDiaryFeed({ items, filter, now }), [filter, items, now]);
+
+  const handleAction = useCallback((action: DiaryAction) => {
+    setPendingAction(action);
+  }, []);
+
+  const actionOptions = useMemo<ActionSheetOption[]>(() => {
+    if (!pendingAction) return [];
+    const options: ActionSheetOption[] = [];
+    if (pendingAction.showId) {
+      const showId = pendingAction.showId;
+      options.push({
+        label: "Open show",
+        icon: "tv-outline",
+        onPress: () => guardedPush(`/show/${showId}`),
+      });
+    }
+    if (pendingAction.type === "review") {
+      const { reviewId, title } = pendingAction;
+      options.push({
+        label: "Open review",
+        icon: "star-outline",
+        onPress: () => router.push(`/review/${reviewId}`),
+      });
+      options.push({
+        label: "Delete review",
+        icon: "trash-outline",
+        destructive: true,
+        onPress: () => onDeleteReview?.(reviewId, title),
+      });
+    } else {
+      const { logId, title } = pendingAction;
+      options.push({
+        label: "Delete entry",
+        icon: "trash-outline",
+        destructive: true,
+        onPress: () => onDeleteLog?.(logId, title),
+      });
+    }
+    return options;
+  }, [onDeleteLog, onDeleteReview, pendingAction]);
+
+  const renderRow = useCallback(
+    ({ item }: { item: DiaryRow }) => {
+      if (item.kind === "month") {
+        return <MonthHeader row={item} />;
       }
-
-      return (
-        <View className="px-6">
-          <TimelineRow
-            row={item.row}
-            isLast={item.isLastInSection}
-            onDeleteLog={onDeleteLog}
-            onDeleteReview={onDeleteReview}
-          />
-        </View>
-      );
+      if (item.kind === "binge") {
+        return <BingeRow row={item} />;
+      }
+      return <EntryRow row={item} onAction={handleAction} />;
     },
-    [onDeleteLog, onDeleteReview],
+    [handleAction],
   );
+
+  const handleEndReached = useCallback(() => {
+    if (hasMore) {
+      onLoadMore?.();
+    }
+  }, [hasMore, onLoadMore]);
 
   if (items.length === 0) {
-    return (
-      <View className="flex-1 px-6 pt-5">
-        <Text className="text-[34px] font-bold text-text-primary">Log</Text>
-        <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">
-          Your viewing journal starts when you mark something watched.
-        </Text>
-        <View className="mt-6">
-          <EmptyState
-            title="No activity yet"
-            description="Watch entries, notes, and reviews will collect here once you start tracking."
-          />
-        </View>
-      </View>
-    );
+    return <EmptyDiary />;
   }
 
-  const emptyCopy = getFilterEmptyCopy(filter);
+  const emptyCopy = getDiaryEmptyCopy(filter);
 
   return (
     <View className="flex-1">
-      <FlashList<LogListEntry>
-        data={entries}
-        renderItem={renderEntry}
-        keyExtractor={(item: LogListEntry) => item.id}
-        estimatedItemSize={96}
-        ListHeaderComponent={header}
+      <FlashList<DiaryRow>
+        ref={listRef}
+        data={rows}
+        renderItem={renderRow}
+        keyExtractor={(row: DiaryRow) => row.id}
+        getItemType={(row: DiaryRow) => row.kind}
+        estimatedItemSize={84}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 88 }}
-        getItemType={(item: LogListEntry) => item.kind}
+        ListHeaderComponent={
+          <DiaryHeader
+            filter={filter}
+            headline={getDiaryHeadline(pulse)}
+            days={pulse.days}
+            onChangeFilter={setFilter}
+          />
+        }
         ListEmptyComponent={
           <View className="px-6 pt-4">
             <EmptyState title={emptyCopy.title} description={emptyCopy.description} />
           </View>
         }
-        ListFooterComponent={
-          entries.length > 0 ? (
-            <TimelineFooter hasMore={hasMore} onLoadMore={onLoadMore} />
-          ) : null
-        }
+        ListFooterComponent={rows.length > 0 ? <DiaryFooter hasMore={hasMore} /> : null}
       />
 
       <ActionSheet
-        visible={sortSheetVisible}
-        onClose={() => setSortSheetVisible(false)}
-        title="Sort log"
-        options={sortSheetOptions}
+        visible={pendingAction !== null}
+        onClose={() => setPendingAction(null)}
+        title={pendingAction?.title}
+        options={actionOptions}
       />
     </View>
   );
@@ -761,7 +564,7 @@ export default function LogScreen() {
       if (!current?.items) return;
       localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, {
         ...current,
-        items: current.items.filter((item: LogActivityItem) => item.id !== args.logId),
+        items: current.items.filter((item: DiaryItem) => item.id !== args.logId),
       });
     },
   );
@@ -773,54 +576,50 @@ export default function LogScreen() {
       if (!current?.items) return;
       localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, {
         ...current,
-        items: current.items.filter((item: LogActivityItem) => item.id !== args.reviewId),
+        items: current.items.filter((item: DiaryItem) => item.id !== args.reviewId),
       });
     },
   );
 
   const handleDeleteLog = useCallback(
     (logId: Id<"watchLogs">, title: string) => {
-      Alert.alert(
-        "Delete entry",
-        `Remove your watch entry for "${title}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => {
-              void deleteLog({ logId }).catch((error) => {
-                Alert.alert("Could not delete", String(error));
-              });
-            },
+      Alert.alert("Delete entry", `Remove your watch entry for "${title}"?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteLog({ logId }).catch((error) => {
+              Alert.alert("Could not delete", String(error));
+            });
           },
-        ],
-      );
+        },
+      ]);
     },
     [deleteLog],
   );
 
   const handleDeleteReview = useCallback(
     (reviewId: Id<"reviews">, title: string) => {
-      Alert.alert(
-        "Delete review",
-        `Remove your review for "${title}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => {
-              void deleteReview({ reviewId }).catch((error) => {
-                Alert.alert("Could not delete", String(error));
-              });
-            },
+      Alert.alert("Delete review", `Remove your review for "${title}"?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteReview({ reviewId }).catch((error) => {
+              Alert.alert("Could not delete", String(error));
+            });
           },
-        ],
-      );
+        },
+      ]);
     },
     [deleteReview],
   );
+
+  const handleLoadMore = useCallback(() => {
+    setLimit((current) => Math.min(current + PAGE_SIZE, MAX_LIMIT));
+  }, []);
 
   if (!isAuthenticated || me === undefined || activity === undefined) {
     return (
@@ -832,14 +631,14 @@ export default function LogScreen() {
     );
   }
 
-  const items: LogActivityItem[] = (activity.items as LogActivityItem[] | undefined) ?? [];
+  const items: DiaryItem[] = (activity.items as DiaryItem[] | undefined) ?? [];
 
   return (
     <Screen hasTabBar>
       <LogSurface
         items={items}
-        hasMore={Boolean(activity.hasMore)}
-        onLoadMore={() => setLimit((current) => Math.min(current + 40, 160))}
+        hasMore={Boolean(activity.hasMore) && limit < MAX_LIMIT}
+        onLoadMore={handleLoadMore}
         onDeleteLog={handleDeleteLog}
         onDeleteReview={handleDeleteReview}
       />
@@ -847,50 +646,37 @@ export default function LogScreen() {
   );
 }
 
-const webShadow =
-  Platform.OS === "web"
-    ? ({
-        boxShadow: "0 18px 40px rgba(0,0,0,0.28)",
-      } as ViewStyle)
-    : {
-        elevation: 10,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 18 },
-        shadowOpacity: 0.28,
-        shadowRadius: 28,
-      };
-
 const styles = StyleSheet.create({
-  iconButtonContent: {
-    alignItems: "center",
-    height: 42,
-    justifyContent: "center",
-    width: 42,
+  dayRail: {
+    alignItems: "flex-start",
+    paddingTop: 14,
+    width: DAY_RAIL_WIDTH,
   },
-  latestGradient: {
-    borderColor: "rgba(125,211,252,0.18)",
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-    padding: 12,
+  emptyCard: {
+    marginTop: 24,
   },
-  loadMoreContent: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
+  emptyCta: {
+    marginTop: 20,
   },
-  metricDivider: {
-    borderRightColor: "rgba(255,255,255,0.08)",
-    borderRightWidth: StyleSheet.hairlineWidth,
+  emptyCtaContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   rowDivider: {
-    borderBottomColor: "rgba(255,255,255,0.08)",
+    borderBottomColor: "rgba(255,255,255,0.07)",
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  summaryPanel: {
-    marginTop: 18,
+  sparkline: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    gap: 3,
+    height: 24,
   },
-  summaryPanelBorder: {
-    ...webShadow,
+  sparklineBar: {
+    borderRadius: 2.5,
+    width: 5,
+  },
+  starRow: {
+    gap: 1,
   },
 });
