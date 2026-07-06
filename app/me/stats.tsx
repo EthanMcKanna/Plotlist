@@ -188,7 +188,14 @@ export default function WatchStatsScreen() {
           </View>
 
           {/* Hero */}
-          <GlassSurface radius={12} variant="prominent" style={{ marginTop: 20 }} contentStyle={{ padding: 20 }}>
+          <GlassSurface
+            radius={12}
+            variant="surface"
+            fallbackColor="rgba(14,165,233,0.14)"
+            borderColor="rgba(125,211,252,0.28)"
+            style={{ marginTop: 20 }}
+            contentStyle={{ padding: 20 }}
+          >
             <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
               Total time watched
             </Text>

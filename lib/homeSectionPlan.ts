@@ -5,8 +5,6 @@ import {
 } from "./homeCurrentSignal";
 
 export type HomeSection =
-  | { kind: "hero" }
-  | { kind: "curated" }
   | { kind: "continue-watching" }
   | { kind: "tonight" }
   | { kind: "for-you" }
@@ -27,7 +25,6 @@ export type NumberedHomeSectionKind = Extract<
   HomeSectionKind,
   | "continue-watching"
   | "tonight"
-  | "curated"
   | "for-you"
   | "heat"
   | "fresh"
@@ -83,7 +80,6 @@ const DEFAULT_DISCOVERY_ORDER: DiscoveryHomeSectionKind[] = [
 const NUMBERED_HOME_SECTION_KINDS = new Set<HomeSectionKind>([
   "continue-watching",
   "tonight",
-  "curated",
   "for-you",
   "heat",
   "fresh",
@@ -284,12 +280,10 @@ export function getHomeSectionPlan({
   const showUpcomingSchedule = showSchedule && scheduleKnown && !scheduleHasTonight;
 
   return [
-    { kind: "hero" },
     ...(hasProfile
       ? [
           { kind: "continue-watching" as const },
           ...(showUrgentSchedule ? [{ kind: "tonight" as const }] : []),
-          { kind: "curated" as const },
           ...(showUpcomingSchedule ? [{ kind: "tonight" as const }] : []),
           ...openingDiscoverySections,
           ...(promoteFriends ? [{ kind: "friends" as const }] : []),

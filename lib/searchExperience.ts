@@ -83,6 +83,7 @@ export function getCatalogSearchViewState({
   isAuthenticated,
   isSearching,
   resultCount,
+  pendingResultCount = resultCount,
   resultsQuery,
   hasError,
 }: {
@@ -93,6 +94,13 @@ export function getCatalogSearchViewState({
   isAuthenticated: boolean;
   isSearching: boolean;
   resultCount: number;
+  /**
+   * Live result count when `resultCount` comes from a deferred value. On the
+   * frame a search resolves the deferred list still holds the previous
+   * (empty) array, so the two counts disagree — that render is busy, not
+   * empty.
+   */
+  pendingResultCount?: number;
   resultsQuery: string;
   hasError: boolean;
 }): CatalogSearchViewState {
@@ -125,7 +133,15 @@ export function getCatalogSearchViewState({
   }
 
   const isDebouncing = trimmedDebouncedQuery !== trimmedQuery;
-  const isBusy = isSearching || isDebouncing;
+  // Results only correspond to the typed query once a search for it has
+  // resolved (resultsQuery is set on completion). Until then — including the
+  // frame between the debounce firing and the search effect starting — the
+  // surface is pending, never "empty". Errors keep resultsQuery stale on
+  // purpose, so they bypass this gate.
+  const isAwaitingResults = !hasError && trimmedResultsQuery !== trimmedQuery;
+  const isDeferringResults = pendingResultCount !== resultCount;
+  const isBusy =
+    isSearching || isDebouncing || isAwaitingResults || isDeferringResults;
   const hasRenderableResults =
     resultCount > 0 && trimmedResultsQuery.length >= minLength;
 

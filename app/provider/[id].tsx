@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GlassPressable } from "../../components/NativeGlass";
 import { Poster } from "../../components/Poster";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
@@ -217,30 +218,39 @@ export default function ProviderScreen() {
         className="px-6 pb-4 border-b border-dark-border"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row items-center justify-between">
-          <Pressable
+        <View className="flex-row items-center gap-3">
+          <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
             }}
-            hitSlop={12}
-            className="active:opacity-60"
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            radius={20}
+            variant="control"
+            contentStyle={{
+              alignItems: "center",
+              height: 40,
+              justifyContent: "center",
+              width: 40,
+            }}
           >
-            <Ionicons name="chevron-back" size={28} color="#E8EAED" />
-          </Pressable>
+            <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+          </GlassPressable>
 
-          <View className="flex-row items-center gap-3">
-            <Image
-              source={{ uri: provider.logoUrl }}
-              style={{ width: 32, height: 32, borderRadius: 8 }}
-              contentFit="cover"
-            />
-            <Text className="text-xl font-bold text-text-primary">
+          <Image
+            source={{ uri: provider.logoUrl }}
+            style={{ width: 36, height: 36, borderRadius: 9 }}
+            contentFit="cover"
+          />
+          <View className="flex-1">
+            <Text className="text-xl font-black text-text-primary">
               {provider.label}
             </Text>
+            <Text className="text-xs font-semibold text-text-tertiary">
+              What's on right now
+            </Text>
           </View>
-
-          <View style={{ width: 28 }} />
         </View>
       </View>
 

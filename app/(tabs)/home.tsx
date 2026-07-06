@@ -24,7 +24,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { guardedPush } from "../../lib/navigation";
-import { useAction, useMutation } from "../../lib/plotlist/react";
+import { useAction } from "../../lib/plotlist/react";
 import { api } from "../../lib/plotlist/api";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
@@ -41,14 +41,8 @@ import {
   getFriendsActivityFeedItems,
   getFriendsActivityPeople,
 } from "../../components/FriendsActivity";
-import { HomeCuratedEdits } from "../../components/HomeCuratedEdits";
-import {
-  HeroCarousel,
-  type HeroSaveState,
-  type HeroSlide,
-} from "../../components/HeroCarousel";
 import { LoadingScreen } from "../../components/LoadingScreen";
-import { HomeTopBar } from "../../components/HomeTopBar";
+import { HOME_TOP_BAR_HEIGHT, HomeTopBar } from "../../components/HomeTopBar";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { SignatureRail, type SignatureRailItem } from "../../components/SignatureRail";
 import {
@@ -66,11 +60,6 @@ import {
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
 import {
-  buildHomeCuratedEdits,
-  getHomeCuratedEditLeadPreviewKeys,
-  getHomeCuratedEditPreviewKeys,
-} from "../../lib/homeCuratedEdits";
-import {
   buildFreshRailRoomTopUpItems,
   buildVisibleFreshRailItems,
 } from "../../lib/homeFreshRail";
@@ -84,7 +73,6 @@ import {
   getHomeDiscoveryPreviewKeys,
   limitHomeRoomItemsByTitleAppearances,
   limitHomeRailItemsByTitleAppearances,
-  prioritizeUnpreviewedHomeRailItems,
   prioritizeHomeRoomsAgainstPreviewKeys,
   removePreviewedHomeRailItems,
   topUpHomeRailItemsPreservingSources,
@@ -201,7 +189,6 @@ function getFreshRoomTopUpItems(data: HomeData): SignatureRailItem[] {
 export type HomeSurfaceProps = {
   data: HomeData;
   continueWatchingItems?: ContinueWatchingItem[] | null;
-  reduceMotionEnabled?: boolean;
   schedulePreview?: HomeSchedulePreviewState;
 };
 
@@ -210,7 +197,6 @@ type PreviewDataModule = typeof import("../../lib/homePreviewData");
 export function HomeSurface({
   data,
   continueWatchingItems: providedContinueWatchingItems,
-  reduceMotionEnabled,
   schedulePreview: providedSchedulePreview,
 }: HomeSurfaceProps) {
   const { width } = useWindowDimensions();
@@ -243,9 +229,6 @@ export function HomeSurface({
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [contactNudgeDismissed, setContactNudgeDismissed] = useState<boolean | null>(null);
-  const [heroSaveStateByKey, setHeroSaveStateByKey] = useState<
-    Partial<Record<string, HeroSaveState>>
-  >({});
   const queriedContinueWatchingItems = useContinueWatchingItems(
     data.hasProfile && providedContinueWatchingItems === undefined,
   );
@@ -271,96 +254,17 @@ export function HomeSurface({
     ),
     [activeContinueWatchingItems],
   );
-  const heroPreviewKeys = useMemo(
-    () => getHomeRailIdentitySet(data.heroSlides),
-    [data.heroSlides],
-  );
   const personalPreviewKeys = useMemo(
     () => new Set([...continueWatchingPreviewKeys]),
     [continueWatchingPreviewKeys],
   );
-  const curatedBlockedKeys = useMemo(
-    () => new Set([...heroPreviewKeys, ...personalPreviewKeys]),
-    [heroPreviewKeys, personalPreviewKeys],
-  );
-  const curatedHeatItems = useMemo(
-    () => prioritizeUnpreviewedHomeRailItems(data.heat, personalPreviewKeys),
-    [data.heat, personalPreviewKeys],
-  );
-  const curatedFreshItems = useMemo(
-    () => prioritizeUnpreviewedHomeRailItems(data.fresh, personalPreviewKeys),
-    [data.fresh, personalPreviewKeys],
-  );
-  const curatedEdits = useMemo(
-    () =>
-      buildHomeCuratedEdits({
-        heat: curatedHeatItems,
-        fresh: curatedFreshItems,
-        critics: data.critics,
-        quick: data.quick,
-        blockedKeys: curatedBlockedKeys,
-        now: surfaceNow,
-      }),
-    [
-      curatedBlockedKeys,
-      curatedHeatItems,
-      curatedFreshItems,
-      data.critics,
-      data.quick,
-      surfaceNow,
-    ],
-  );
-  const curatedLeadPreviewKeys = useMemo(
-    () => getHomeCuratedEditLeadPreviewKeys(curatedEdits),
-    [curatedEdits],
-  );
-  const curatedVisiblePreviewKeys = useMemo(
-    () => getHomeCuratedEditPreviewKeys(curatedEdits),
-    [curatedEdits],
-  );
-  const curatedLeadItems = useMemo(
-    () =>
-      curatedEdits
-        .map((edit) => edit.items[0])
-        .filter((item): item is SignatureRailItem => Boolean(item)),
-    [curatedEdits],
-  );
-  const curatedVisibleItems = useMemo(
-    () => curatedEdits.flatMap((edit) => edit.items.slice(0, 4)),
-    [curatedEdits],
-  );
-  const curatedSupportItems = useMemo(
-    () => curatedEdits.flatMap((edit) => edit.items.slice(1, 4)),
-    [curatedEdits],
-  );
-  const visibleHeroSurfaceItems = useMemo(
-    () => data.heroSlides.slice(0, 1),
-    [data.heroSlides],
-  );
   const visibleOpeningSurfaceItems = useMemo(
-    () => [
-      ...getContinueWatchingPreviewItems(activeContinueWatchingItems),
-      ...visibleHeroSurfaceItems,
-      ...curatedLeadItems,
-    ],
-    [
-      activeContinueWatchingItems,
-      visibleHeroSurfaceItems,
-      curatedLeadItems,
-    ],
+    () => getContinueWatchingPreviewItems(activeContinueWatchingItems),
+    [activeContinueWatchingItems],
   );
-  const visibleEditorialSurfaceItems = useMemo(
-    () => [...visibleOpeningSurfaceItems, ...curatedSupportItems],
-    [visibleOpeningSurfaceItems, curatedSupportItems],
-  );
-  const railPreviewKeys = useMemo(
-    () => new Set([...heroPreviewKeys, ...personalPreviewKeys, ...curatedLeadPreviewKeys]),
-    [heroPreviewKeys, personalPreviewKeys, curatedLeadPreviewKeys],
-  );
-  const visibleEditorialPreviewKeys = useMemo(
-    () => new Set([...railPreviewKeys, ...curatedVisiblePreviewKeys]),
-    [railPreviewKeys, curatedVisiblePreviewKeys],
-  );
+  const visibleEditorialSurfaceItems = visibleOpeningSurfaceItems;
+  const railPreviewKeys = personalPreviewKeys;
+  const visibleEditorialPreviewKeys = railPreviewKeys;
   const roomHardPreviewKeys = useMemo(
     () => new Set([...railPreviewKeys]),
     [railPreviewKeys],
@@ -455,18 +359,10 @@ export function HomeSurface({
     ],
     [data.critics, data.fresh, data.quick, data.heat],
   );
-  const softShelfItems = useMemo(
-    () =>
-      prioritizeUnpreviewedHomeRailItems(
-        primaryShelfItems,
-        curatedVisiblePreviewKeys,
-      ),
-    [primaryShelfItems, curatedVisiblePreviewKeys],
-  );
   const forYouItems = useMemo(
     () => {
       const candidates = topUpHomeRailItemsPreservingSources(
-        softShelfItems,
+        primaryShelfItems,
         forYouTopUpSources,
         forYouPreviewKeys,
         MIN_FEATURE_RAIL_ITEMS,
@@ -484,7 +380,7 @@ export function HomeSurface({
       );
     },
     [
-      softShelfItems,
+      primaryShelfItems,
       forYouTopUpSources,
       hasPersonalTasteSignals,
       surfaceNow,
@@ -758,40 +654,29 @@ export function HomeSurface({
   const roomSoftPreviewKeys = useMemo(
     () =>
       new Set([
-        ...curatedVisiblePreviewKeys,
         ...getHomeRailIdentitySet(heatItems),
         ...getHomeRailIdentitySet(freshItems),
         ...getHomeRailIdentitySet(criticsItems),
         ...getHomeRailIdentitySet(quickItems),
       ]),
-    [
-      curatedVisiblePreviewKeys,
-      heatItems,
-      freshItems,
-      criticsItems,
-      quickItems,
-    ],
+    [heatItems, freshItems, criticsItems, quickItems],
   );
   const roomSurfaceItems = useMemo(
     () => [
-      ...data.heroSlides,
       ...visibleOpeningSurfaceItems,
       ...forYouItems,
       ...heatItems,
       ...freshItems,
       ...criticsItems,
       ...quickItems,
-      ...curatedVisibleItems,
     ],
     [
-      data.heroSlides,
       visibleOpeningSurfaceItems,
       forYouItems,
       heatItems,
       freshItems,
       criticsItems,
       quickItems,
-      curatedVisibleItems,
     ],
   );
   const roomSurfacePreviewKeys = useMemo(
@@ -933,7 +818,6 @@ export function HomeSurface({
   }, []);
 
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
-  const setStatus = useMutation(api.watchStates.setStatus);
   const syncContacts = useAction(api.contacts.syncSnapshot);
 
   const handleRefresh = useCallback(async () => {
@@ -990,63 +874,6 @@ export function HomeSurface({
       void openShowFromKey(item.key, item.title);
     },
     [openShowFromKey],
-  );
-
-  const handlePressHero = useCallback(
-    (slide: HeroSlide) => {
-      void openShowFromKey(slide.key, slide.title);
-    },
-    [openShowFromKey],
-  );
-
-  const handleSaveHero = useCallback(
-    async (slide: HeroSlide) => {
-      const existingState = heroSaveStateByKey[slide.key];
-      if (existingState === "saving" || existingState === "saved") {
-        return;
-      }
-      const catalog = data.getCatalogForKey(slide.key);
-      if (!catalog) return;
-      let showId = catalog._id ?? catalog.showId;
-      setHeroSaveStateByKey((current) => ({ ...current, [slide.key]: "saving" }));
-      try {
-        if (!showId && catalog.externalId) {
-          showId = await ingestFromCatalog({
-            externalSource: catalog.externalSource ?? "tmdb",
-            externalId: catalog.externalId,
-            title: catalog.title,
-            year: catalog.year,
-            overview: catalog.overview,
-            posterUrl: catalog.posterUrl,
-            backdropUrl: catalog.backdropUrl,
-            genreIds: catalog.genreIds,
-            tmdbPopularity: catalog.tmdbPopularity,
-            tmdbVoteAverage: catalog.tmdbVoteAverage,
-            tmdbVoteCount: catalog.tmdbVoteCount,
-          });
-        }
-        if (!showId) {
-          setHeroSaveStateByKey((current) => {
-            const next = { ...current };
-            delete next[slide.key];
-            return next;
-          });
-          Alert.alert("Could not save", "Missing show id.");
-          return;
-        }
-        await setStatus({ showId, status: "watchlist" });
-        setHeroSaveStateByKey((current) => ({ ...current, [slide.key]: "saved" }));
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (error) {
-        setHeroSaveStateByKey((current) => {
-          const next = { ...current };
-          delete next[slide.key];
-          return next;
-        });
-        Alert.alert("Could not save", String(error));
-      }
-    },
-    [data, heroSaveStateByKey, ingestFromCatalog, setStatus],
   );
 
   const handleSyncContacts = useCallback(async () => {
@@ -1123,7 +950,6 @@ export function HomeSurface({
         Boolean(schedulePreview.preview) &&
         schedulePreview.hasScheduleItems,
     );
-    add("curated", data.hasProfile && curatedEdits.length > 0);
     add(
       "for-you",
       data.hasProfile && (data.loading.forYou || forYouItems.length > 0),
@@ -1139,7 +965,6 @@ export function HomeSurface({
   }, [
     continueWatchingItems,
     criticsItems.length,
-    curatedEdits.length,
     data.hasProfile,
     data.loading.critics,
     data.loading.forYou,
@@ -1170,28 +995,6 @@ export function HomeSurface({
 
   const renderSectionContent = (item: HomeSection) => {
     switch (item.kind) {
-      case "hero":
-        return (
-          <HeroCarousel
-            slides={data.heroSlides}
-            scrollY={scrollY}
-            onPressSlide={handlePressHero}
-            onSavePress={data.hasProfile ? handleSaveHero : undefined}
-            saveStateByKey={heroSaveStateByKey}
-            topInset={insets.top}
-            now={surfaceNow}
-            reduceMotionEnabled={reduceMotionEnabled}
-          />
-        );
-      case "curated":
-        if (!data.hasProfile || curatedEdits.length === 0) return null;
-        return (
-          <HomeCuratedEdits
-            edits={curatedEdits}
-            index={getSectionDisplayIndex(item.kind)}
-            onPressItem={handlePressRailItem}
-          />
-        );
       case "continue-watching":
         if (!data.hasProfile) return null;
         return (
@@ -1218,7 +1021,7 @@ export function HomeSurface({
               title={hasPersonalTasteSignals ? "For you" : "Start here"}
               accent={FOR_YOU_ACCENT}
               icon="sparkles"
-              variant="feature"
+              variant="poster"
             />
           );
         }
@@ -1230,7 +1033,7 @@ export function HomeSurface({
             title={hasPersonalTasteSignals ? "For you" : "Start here"}
             accent={FOR_YOU_ACCENT}
             icon="sparkles"
-            layout="feature"
+            layout="poster"
             items={forYouItems}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
@@ -1246,7 +1049,7 @@ export function HomeSurface({
               title={railHeaderCopy.heat.title}
               accent={HEAT_ACCENT}
               icon="flame"
-              variant="feature"
+              variant="poster"
             />
           );
         }
@@ -1258,7 +1061,7 @@ export function HomeSurface({
             title={railHeaderCopy.heat.title}
             accent={HEAT_ACCENT}
             icon="flame"
-            layout="feature"
+            layout="poster"
             items={pulseHeatItems}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
@@ -1437,7 +1240,10 @@ export function HomeSurface({
         renderItem={renderItem}
         initialNumToRender={initialRenderSectionCount}
         maxToRenderPerBatch={initialRenderSectionCount}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingTop: insets.top + HOME_TOP_BAR_HEIGHT },
+        ]}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}

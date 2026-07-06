@@ -68,6 +68,53 @@ describe("search experience helpers", () => {
     });
   });
 
+  it("keeps loading between the debounce firing and the search resolving", () => {
+    // debouncedQuery has caught up but the search effect hasn't run yet, so
+    // isSearching is still false and no results exist for this query. This
+    // frame used to flash the empty state.
+    expect(
+      getCatalogSearchViewState({
+        mode: "shows",
+        query: "sev",
+        debouncedQuery: "sev",
+        minLength: 3,
+        isAuthenticated: true,
+        isSearching: false,
+        resultCount: 0,
+        resultsQuery: "",
+        hasError: false,
+      }),
+    ).toEqual({
+      surface: "loading",
+      isBusy: true,
+      isShowingPreviousResults: false,
+    });
+  });
+
+  it("stays loading while deferred results lag behind a resolved search", () => {
+    // The search just resolved with items: isSearching flipped false and
+    // resultsQuery matches, but the deferred list still holds the previous
+    // empty array. This frame used to flash the empty state before results.
+    expect(
+      getCatalogSearchViewState({
+        mode: "shows",
+        query: "severance",
+        debouncedQuery: "severance",
+        minLength: 3,
+        isAuthenticated: true,
+        isSearching: false,
+        resultCount: 0,
+        pendingResultCount: 5,
+        resultsQuery: "severance",
+        hasError: false,
+      }),
+    ).toEqual({
+      surface: "loading",
+      isBusy: true,
+      isShowingPreviousResults: false,
+    });
+  });
+
   it("separates auth and settled empty/error states", () => {
     expect(
       getCatalogSearchViewState({

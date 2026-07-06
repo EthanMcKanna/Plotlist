@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -38,9 +39,6 @@ const CARD_WIDTH = 224;
 const CARD_HEIGHT = (CARD_WIDTH * 9) / 16;
 const SCHEDULE_TODAY_POLL_INTERVAL_MS = 60 * 1000;
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";
-export const HOME_SCHEDULE_SEGMENTED_TAB_TOUCH_TARGET = 44;
-
-type TabKey = "tonight" | "week";
 
 function flattenGroups(groups?: ReleaseGroup[]) {
   return (groups ?? []).flatMap((group) => group.items ?? []);
@@ -76,51 +74,64 @@ export function getHomeSchedulePreviewCounts(
   };
 }
 
-export function getHomeScheduleSubtitle({
-  tab,
-  tonightCount,
-  weekCount,
-}: {
-  tab: TabKey;
-  tonightCount: number;
-  weekCount: number;
-}) {
-  if (tab === "week") {
-    if (weekCount > 0) {
-      return `${weekCount} this week.`;
-    }
-    if (tonightCount > 0) {
-      return `${tonightCount} tonight.`;
-    }
-  }
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-  if (tonightCount > 0) {
-    return `${tonightCount} tonight.`;
+function getScheduleItemDayTs(item: { airDate?: string | null; airDateTs?: number }) {
+  // Prefer the air-date string (parsed as UTC midnight) so timezone offsets
+  // cannot shift a release across day boundaries; see getScheduleCardDateLabel.
+  if (item.airDate) {
+    const ts = Date.parse(`${item.airDate}T00:00:00Z`);
+    if (Number.isFinite(ts)) return ts;
   }
-
-  return "Upcoming.";
+  return typeof item.airDateTs === "number" ? item.airDateTs : Number.NaN;
 }
 
-export function getHomeScheduleTabAccessibilityLabel({
-  label,
-  badge,
-  active,
-  disabled = false,
+/**
+ * Split upcoming items into "this week" (within the next 7 days) and
+ * "later". The preview's upcoming window runs longer than a week, so the
+ * raw item count must never be presented as a weekly count.
+ */
+export function getHomeScheduleWindowCounts(
+  upcomingItems: Array<{ airDate?: string | null; airDateTs?: number }>,
+  today: string,
+) {
+  const todayTs = Date.parse(`${today}T00:00:00Z`);
+  const weekEndTs = todayTs + 7 * DAY_MS;
+  let weekCount = 0;
+  let laterCount = 0;
+  upcomingItems.forEach((item) => {
+    const dayTs = getScheduleItemDayTs(item);
+    if (!Number.isFinite(dayTs) || dayTs <= todayTs) return;
+    if (dayTs <= weekEndTs) {
+      weekCount += 1;
+    } else {
+      laterCount += 1;
+    }
+  });
+  return { weekCount, laterCount };
+}
+
+export function getHomeScheduleSubtitle({
+  tonightCount,
+  weekCount,
+  laterCount = 0,
 }: {
-  label: string;
-  badge: number;
-  active: boolean;
-  disabled?: boolean;
+  tonightCount: number;
+  weekCount: number;
+  laterCount?: number;
 }) {
-  const releaseWord = badge === 1 ? "release" : "releases";
-  return [
-    label,
-    `${badge} ${releaseWord}`,
-    active ? "selected" : null,
-    disabled ? "unavailable" : null,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const parts = [
+    tonightCount > 0 ? `${tonightCount} tonight` : null,
+    weekCount > 0
+      ? `${weekCount}${tonightCount > 0 ? " more" : ""} this week`
+      : null,
+  ].filter(Boolean);
+  if (parts.length === 0) {
+    return laterCount > 0
+      ? `${laterCount} coming up`
+      : "Upcoming";
+  }
+  return parts.join(" · ");
 }
 
 export function shouldRefreshHomeSchedulePreview(
@@ -289,18 +300,6 @@ export function TonightStrip({
     weekCount,
   } = activeSchedule;
 
-  const initialTab: TabKey = tonightCount > 0 ? "tonight" : "week";
-  const [tab, setTab] = useState<TabKey>(initialTab);
-
-  // Snap tab when data arrives.
-  useEffect(() => {
-    if (tonightCount === 0 && weekCount > 0) {
-      setTab("week");
-    } else if (tonightCount > 0) {
-      setTab("tonight");
-    }
-  }, [tonightCount, weekCount]);
-
   if (!isAuthenticated || !preview) {
     return null;
   }
@@ -309,7 +308,10 @@ export function TonightStrip({
     return null;
   }
 
-  const items = tab === "tonight" ? tonightItems : upcomingItems;
+  // One rail: tonight leads, the rest of the week follows. Every card
+  // carries its own date chip, so no tab switching is needed.
+  const items = [...tonightItems, ...upcomingItems];
+  const windowCounts = getHomeScheduleWindowCounts(upcomingItems, today);
 
   return (
     <View className="mt-8">
@@ -317,37 +319,15 @@ export function TonightStrip({
         index={index}
         kicker="Schedule"
         title="Releases"
+        subtitle={getHomeScheduleSubtitle({ tonightCount, ...windowCounts })}
         accent={ACCENT}
         icon="radio"
+        actionLabel="Calendar"
+        onAction={() => guardedPush("/calendar")}
       />
 
-      <View className="mt-3 px-6">
-        <View
-          style={styles.segmented}
-          accessibilityRole="tablist"
-          accessibilityLabel="Release schedule"
-        >
-          <SegmentedTab
-            label="Tonight"
-            testID="home-schedule-tab-tonight"
-            badge={tonightCount}
-            active={tab === "tonight"}
-            disabled={tonightCount === 0}
-            onPress={() => setTab("tonight")}
-          />
-          <SegmentedTab
-            label="This week"
-            testID="home-schedule-tab-week"
-            badge={weekCount}
-            active={tab === "week"}
-            disabled={weekCount === 0}
-            onPress={() => setTab("week")}
-          />
-        </View>
-      </View>
-
       <ScrollView
-        accessibilityLabel={`${tab === "tonight" ? "Tonight" : "This week"} releases rail`}
+        accessibilityLabel="Releases rail"
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.rail}
@@ -359,65 +339,45 @@ export function TonightStrip({
           <ScheduleCard
             key={`${item.show?._id ?? "show"}-${item.seasonNumber}-${item.episodeNumber}`}
             item={item}
-            isTonight={tab === "tonight"}
             index={index}
             today={today}
           />
         ))}
+        <CalendarTailCard />
       </ScrollView>
     </View>
   );
 }
 
-function SegmentedTab({
-  label,
-  testID,
-  badge,
-  active,
-  disabled,
-  onPress,
-}: {
-  label: string;
-  testID: string;
-  badge: number;
-  active: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  const [focused, setFocused] = useState(false);
-
+function CalendarTailCard() {
   return (
     <Pressable
-      testID={testID}
-      onBlur={() => setFocused(false)}
-      onFocus={() => setFocused(true)}
       onPress={() => {
-        if (disabled) return;
-        Haptics.selectionAsync();
-        onPress();
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        guardedPush("/calendar");
       }}
-      disabled={disabled}
-      style={[
-        styles.tab,
-        active && styles.tabActive,
-        Platform.OS === "web" && focused && styles.tabWebFocus,
-        disabled && styles.tabDisabled,
-      ]}
-      accessibilityRole="tab"
-      accessibilityLabel={getHomeScheduleTabAccessibilityLabel({
-        label,
-        badge,
-        active,
-        disabled,
-      })}
-      accessibilityState={{ selected: active, disabled }}
-      aria-selected={active}
-      aria-disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel="Open the full release calendar"
+      testID="home-schedule-calendar-card"
+      style={[styles.card, styles.tailCard]}
+      className="active:opacity-85"
     >
-      <Text
-        className={`text-[12px] font-bold ${active ? "text-text-primary" : "text-text-tertiary"}`}
-      >
-        {label}
+      <View style={styles.tailIcon}>
+        <Ionicons
+          name="calendar-outline"
+          size={18}
+          color={ACCENT}
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+      </View>
+      <Text className="mt-2 text-[13px] font-bold text-text-primary">
+        Full calendar
+      </Text>
+      <Text className="mt-0.5 text-[11px] font-semibold text-text-tertiary">
+        Everything coming up
       </Text>
     </Pressable>
   );
@@ -425,12 +385,10 @@ function SegmentedTab({
 
 function ScheduleCard({
   item,
-  isTonight,
   index,
   today,
 }: {
   item: any;
-  isTonight: boolean;
   index: number;
   today: string;
 }) {
@@ -491,16 +449,14 @@ function ScheduleCard({
           style={[StyleSheet.absoluteFill, styles.pointerNone]}
         />
 
-        {!isTonight ? (
-          <View style={styles.dateBadge}>
-            <Text
-              className="text-[10px] font-bold text-white/85"
-              style={{ letterSpacing: 0 }}
-            >
-              {dateLabel}
-            </Text>
-          </View>
-        ) : null}
+        <View style={styles.dateBadge}>
+          <Text
+            className="text-[10px] font-bold text-white/85"
+            style={{ letterSpacing: 0 }}
+          >
+            {dateLabel}
+          </Text>
+        </View>
 
         <View style={styles.bottomContent}>
           {item.show?.title ? (
@@ -543,32 +499,6 @@ function ScheduleCard({
 }
 
 const styles = StyleSheet.create({
-  segmented: {
-    borderBottomColor: "rgba(255,255,255,0.08)",
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    gap: 10,
-  },
-  tab: {
-    alignItems: "center",
-    borderBottomColor: "transparent",
-    borderBottomWidth: 2,
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-    minHeight: HOME_SCHEDULE_SEGMENTED_TAB_TOUCH_TARGET,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  tabActive: {
-    borderBottomColor: ACCENT,
-  },
-  tabWebFocus: {
-    borderBottomColor: "rgba(56,189,248,0.72)",
-  },
-  tabDisabled: {
-    opacity: 0.4,
-  },
   rail: {
     gap: 12,
     paddingHorizontal: 24,
@@ -614,6 +544,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: 6,
+  },
+  tailCard: {
+    alignItems: "flex-start",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    width: 148,
+  },
+  tailIcon: {
+    alignItems: "center",
+    backgroundColor: "rgba(56,189,248,0.12)",
+    borderColor: "rgba(56,189,248,0.28)",
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
   },
   pointerNone: {
     pointerEvents: "none",

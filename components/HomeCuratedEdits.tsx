@@ -119,25 +119,16 @@ function CuratedEditCard({
       />
 
       <CuratedLeadArtwork item={lead} accent={edit.accent} />
-      <LinearGradient
-        colors={[
-          "rgba(12,14,20,0)",
-          "rgba(12,14,20,0.62)",
-          "rgba(12,14,20,0.98)",
-        ]}
-        locations={[0, 0.56, 1]}
-        style={[StyleSheet.absoluteFill, styles.pointerNone]}
-      />
 
       <View
         testID={`curated-caption-${lead.key}`}
         style={[styles.caption, compact ? styles.captionCompact : null]}
       >
-        <Text className="text-[14px] font-black leading-[17px] text-white" numberOfLines={2}>
+        <Text className="text-[15px] font-black leading-[19px] text-white" numberOfLines={3}>
           {lead.title}
         </Text>
         {metaLine ? (
-          <Text className="mt-1 text-[11px] font-semibold leading-[14px] text-white/70" numberOfLines={1}>
+          <Text className="mt-1 text-[11px] font-semibold leading-[14px] text-white/70" numberOfLines={2}>
             {metaLine}
           </Text>
         ) : null}
@@ -154,7 +145,9 @@ function CuratedLeadArtwork({
   accent: string;
 }) {
   const [failed, setFailed] = useState(false);
-  const artworkUrl = item.backdropUrl ?? item.posterUrl ?? null;
+  // Posters lead everywhere outside Continue Watching; backdrops are only a
+  // last resort when no poster exists.
+  const artworkUrl = item.posterUrl ?? item.backdropUrl ?? null;
   const shouldShowFallback = !artworkUrl || failed;
 
   useEffect(() => {
@@ -207,6 +200,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#141820",
     borderRadius: 8,
     borderWidth: 1,
+    flexDirection: "row",
     height: 156,
     overflow: "hidden",
   },
@@ -214,8 +208,9 @@ const styles = StyleSheet.create({
     height: 148,
   },
   artworkFrame: {
+    aspectRatio: 2 / 3,
     backgroundColor: "rgba(255,255,255,0.06)",
-    ...StyleSheet.absoluteFillObject,
+    height: "100%",
     overflow: "hidden",
   },
   posterFallback: {
@@ -223,11 +218,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   caption: {
-    bottom: 0,
-    left: 0,
+    flex: 1,
+    justifyContent: "flex-end",
     padding: 15,
-    position: "absolute",
-    right: 0,
   },
   captionCompact: {
     padding: 14,

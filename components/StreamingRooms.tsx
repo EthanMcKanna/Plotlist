@@ -6,6 +6,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -128,7 +129,7 @@ function RoomCard({
     mutedHeroTitleKeys,
     allowMutedFeaturedFallback,
   );
-  const heroImage = heroShow?.backdropUrl ?? heroShow?.posterUrl ?? null;
+  const heroPoster = heroShow?.posterUrl ?? heroShow?.backdropUrl ?? null;
   const visibleHeroSignal = heroShow
     ? getStreamingRoomVisibleSignal(room, heroShow)
     : null;
@@ -169,10 +170,66 @@ function RoomCard({
         testID={`provider-room-card-${room.key}`}
         className="active:opacity-92"
       >
-        <View style={styles.imageContainer}>
-          {heroImage ? (
+        <LinearGradient
+          colors={[`${room.tint}1F`, "rgba(22,26,34,0)"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[StyleSheet.absoluteFill, styles.pointerNone]}
+        />
+
+        <View
+          testID={`provider-room-copy-${room.key}`}
+          style={styles.roomContent}
+        >
+          <View style={styles.providerRow}>
+            {room.logoUrl ? (
+              <Image
+                source={{ uri: room.logoUrl }}
+                style={styles.providerLogo}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={160}
+              />
+            ) : null}
+            <Text
+              style={[styles.providerLabel, { color: room.tint }]}
+              numberOfLines={1}
+            >
+              {room.label}
+            </Text>
+          </View>
+
+          <View style={styles.featureBlock}>
+            {heroShow?.title ? (
+              <Text style={styles.featureTitle} numberOfLines={2}>
+                {heroShow.title}
+              </Text>
+            ) : null}
+            {visibleHeroSignal ? (
+              <Text style={styles.featureSignal} numberOfLines={1}>
+                {visibleHeroSignal}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={styles.browseRow}>
+            <Text style={styles.browseLabel}>Browse all</Text>
+            <Ionicons
+              name="chevron-forward"
+              size={13}
+              color="#9BA1B0"
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
+          </View>
+        </View>
+
+        <View style={styles.posterFrame}>
+          {heroPoster ? (
             <Image
-              source={{ uri: heroImage }}
+              source={{ uri: heroPoster }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               cachePolicy="memory-disk"
@@ -188,43 +245,6 @@ function RoomCard({
               copyVisible={false}
             />
           )}
-          <LinearGradient
-            colors={[
-              "rgba(13,15,20,0.0)",
-              "rgba(13,15,20,0.62)",
-              "rgba(13,15,20,0.98)",
-            ]}
-            locations={[0, 0.58, 1]}
-            style={[StyleSheet.absoluteFill, styles.pointerNone]}
-          />
-          <View
-            style={[
-              styles.tintBlock,
-              { backgroundColor: `${room.tint}1A` },
-            ]}
-          />
-        </View>
-
-        <View
-          testID={`provider-room-copy-${room.key}`}
-          style={styles.roomContent}
-        >
-          <Text
-            style={[styles.providerLabel, { color: room.tint }]}
-            numberOfLines={1}
-          >
-            {room.label}
-          </Text>
-          {heroShow?.title ? (
-            <Text style={styles.featureTitle} numberOfLines={2}>
-              {heroShow.title}
-            </Text>
-          ) : null}
-          {visibleHeroSignal ? (
-            <Text style={styles.featureSignal} numberOfLines={1}>
-              {visibleHeroSignal}
-            </Text>
-          ) : null}
         </View>
       </Pressable>
     </Animated.View>
@@ -364,42 +384,64 @@ const styles = StyleSheet.create({
     backgroundColor: "#161A22",
     borderRadius: 8,
     borderWidth: 1,
+    flexDirection: "row",
     height: 148,
     overflow: "hidden",
   },
-  imageContainer: {
-    ...StyleSheet.absoluteFillObject,
-    width: "100%",
-  },
-  tintBlock: {
-    ...StyleSheet.absoluteFillObject,
-  },
   roomContent: {
-    bottom: 0,
-    left: 0,
+    flex: 1,
+    justifyContent: "space-between",
     padding: 12,
-    position: "absolute",
-    right: 0,
+  },
+  providerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+  },
+  providerLogo: {
+    borderRadius: 6,
+    height: 22,
+    width: 22,
   },
   providerLabel: {
-    fontSize: 11,
+    flexShrink: 1,
+    fontSize: 12,
     fontWeight: "900",
     letterSpacing: 0,
-    lineHeight: 14,
+    lineHeight: 15,
+  },
+  featureBlock: {
+    marginVertical: 6,
   },
   featureTitle: {
     color: "#F8FAFC",
     fontSize: 13,
     fontWeight: "900",
     lineHeight: 17,
-    marginTop: 4,
   },
   featureSignal: {
     color: "rgba(255,255,255,0.68)",
     fontSize: 11,
     fontWeight: "800",
     lineHeight: 14,
-    marginTop: 1,
+    marginTop: 2,
+  },
+  browseRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 3,
+  },
+  browseLabel: {
+    color: "#9BA1B0",
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 14,
+  },
+  posterFrame: {
+    aspectRatio: 2 / 3,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    height: "100%",
+    overflow: "hidden",
   },
   pointerNone: {
     pointerEvents: "none",

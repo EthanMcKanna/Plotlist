@@ -134,7 +134,6 @@ export default function SearchPreviewScreen() {
                   year={item.year}
                   overview={item.overview}
                   posterUrl={item.posterUrl}
-                  sourceLabel="TMDB"
                   actionLabel="Add to Plotlist"
                   onPress={() => undefined}
                 />

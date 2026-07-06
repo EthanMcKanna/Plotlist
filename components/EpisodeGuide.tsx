@@ -258,7 +258,7 @@ function EpisodeGuideComponent({
                     {episodes.length > 0 && isAuthenticated ? (
                       <GlassSurface
                         radius={999}
-                        variant={allWatched ? "prominent" : "control"}
+                        variant="surface"
                         fallbackColor={
                           allWatched
                             ? "rgba(14,165,233,0.14)"
@@ -287,7 +287,7 @@ function EpisodeGuideComponent({
                     ) : (
                       <GlassSurface
                         radius={999}
-                        variant="control"
+                        variant="surface"
                         fallbackColor="rgba(255,255,255,0.04)"
                         borderColor="rgba(255,255,255,0.07)"
                         contentStyle={{ paddingHorizontal: 8, paddingVertical: 2 }}

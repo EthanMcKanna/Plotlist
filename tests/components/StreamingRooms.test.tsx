@@ -69,6 +69,8 @@ describe("StreamingRooms", () => {
     expect(screen.getByTestId("provider-room-copy-netflix")).toBeTruthy();
     expect(screen.getByText("A Good Girl's Guide to Murder").props.numberOfLines).toBe(2);
     expect(screen.getByText("S2 · May 27")).toBeTruthy();
+    // The card is a door into the provider catalog, and says so.
+    expect(screen.getByText("Browse all")).toBeTruthy();
   });
 
   it("keeps provider identity visible even when a logo is unavailable", () => {

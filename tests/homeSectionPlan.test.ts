@@ -98,18 +98,17 @@ describe("home section plan", () => {
     ).toBe("rooms");
   });
 
-  it("puts utility and editorial modules directly after the hero for signed-in viewers", () => {
+  it("opens with resume and utility modules for signed-in viewers", () => {
     expect(
       kinds({
         hasProfile: true,
         showContactSyncNudge: false,
         contactNudgeDismissed: null,
-      }).slice(0, 4),
+      }).slice(0, 3),
     ).toEqual([
-      "hero",
       "continue-watching",
       "tonight",
-      "curated",
+      "heat",
     ]);
   });
 
@@ -127,7 +126,7 @@ describe("home section plan", () => {
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
           rooms: { itemCount: 24, providerRoomCount: 6 },
         },
-      }).slice(4, 8),
+      }).slice(2, 6),
     ).toEqual(["fresh", "for-you", "rooms", "heat"]);
   });
 
@@ -139,7 +138,6 @@ describe("home section plan", () => {
         contactNudgeDismissed: null,
       }),
     ).toEqual([
-      "hero",
       "heat",
       "fresh",
       "critics",
@@ -191,12 +189,11 @@ describe("home section plan", () => {
           tonightCount: 2,
           upcomingCount: 4,
         },
-      }).slice(0, 4),
+      }).slice(0, 3),
     ).toEqual([
-      "hero",
       "continue-watching",
       "tonight",
-      "curated",
+      "heat",
     ]);
   });
 
@@ -211,11 +208,9 @@ describe("home section plan", () => {
           tonightCount: 0,
           upcomingCount: 3,
         },
-      }).slice(0, 5),
+      }).slice(0, 3),
     ).toEqual([
-      "hero",
       "continue-watching",
-      "curated",
       "tonight",
       "heat",
     ]);
@@ -238,7 +233,6 @@ describe("home section plan", () => {
     });
     const visibleKinds = new Set<HomeSectionKind>([
       "continue-watching",
-      "curated",
       "tonight",
       "fresh",
       "for-you",
@@ -248,11 +242,10 @@ describe("home section plan", () => {
     const indexes = getHomeSectionDisplayIndexes(plan, visibleKinds);
 
     expect(indexes.get("continue-watching")).toBe(1);
-    expect(indexes.get("curated")).toBe(2);
-    expect(indexes.get("tonight")).toBe(3);
-    expect(indexes.get("fresh")).toBe(4);
-    expect(indexes.get("for-you")).toBe(5);
-    expect(indexes.get("rooms")).toBe(6);
+    expect(indexes.get("tonight")).toBe(2);
+    expect(indexes.get("fresh")).toBe(3);
+    expect(indexes.get("for-you")).toBe(4);
+    expect(indexes.get("rooms")).toBe(5);
     expect(new Set(indexes.values()).size).toBe(indexes.size);
   });
 
@@ -309,10 +302,8 @@ describe("home section plan", () => {
 
     expect(handles).toEqual(
       expect.arrayContaining([
-        "home-section-hero",
         "home-section-continue-watching",
         "home-section-tonight",
-        "home-section-curated",
         "home-section-for-you",
         "home-section-fresh",
         "home-section-rooms",
@@ -336,11 +327,9 @@ describe("home section plan", () => {
         },
       });
 
-    expect(plan.slice(0, 8)).toEqual([
-      "hero",
+    expect(plan.slice(0, 6)).toEqual([
       "continue-watching",
       "tonight",
-      "curated",
       "fresh",
       "for-you",
       "rooms",
@@ -372,7 +361,7 @@ describe("home section plan", () => {
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
           rooms: { itemCount: 24, providerRoomCount: 6 },
         },
-      }).slice(4, 9),
+      }).slice(2, 7),
     ).toEqual(["fresh", "friends", "for-you", "rooms", "heat"]);
 
     expect(
@@ -450,7 +439,7 @@ describe("home section plan", () => {
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
           rooms: { itemCount: 24, providerRoomCount: 6 },
         },
-      }).slice(1, 4),
+      }).slice(0, 3),
     ).toEqual(["fresh", "rooms", "heat"]);
   });
 
@@ -520,7 +509,7 @@ describe("home section plan", () => {
           fresh: { itemCount: 5, currentCount: 5, explicitCurrentCount: 5 },
           rooms: { itemCount: 24, providerRoomCount: 6 },
         },
-      }).slice(4, 8),
+      }).slice(2, 6),
     ).toEqual(["fresh", "for-you", "rooms", "heat"]);
   });
 });

@@ -1726,7 +1726,7 @@ export default function ShowScreen() {
             ) : imdbShowRating !== null ? (
               <GlassSurface
                 radius={999}
-                variant="control"
+                variant="surface"
                 fallbackColor="rgba(245,197,24,0.10)"
                 tintColor="rgba(245,197,24,0.10)"
                 borderColor="rgba(245,197,24,0.18)"
@@ -1753,7 +1753,7 @@ export default function ShowScreen() {
             {activeDetails?.contentRating && (
               <GlassSurface
                 radius={8}
-                variant="control"
+                variant="surface"
                 fallbackColor="rgba(255,255,255,0.06)"
                 borderColor="rgba(255,255,255,0.16)"
                 contentStyle={{ paddingHorizontal: 9, paddingVertical: 3 }}

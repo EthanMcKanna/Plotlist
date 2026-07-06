@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { render, screen } from "@testing-library/react-native";
 import { createElement } from "react";
 import { Platform } from "react-native";
 
@@ -197,7 +197,6 @@ describe("HomeSurface rendered preview", () => {
         createElement(HomeSurface, {
           data: buildHomePreviewData(HOME_PREVIEW_NOW),
           continueWatchingItems: buildHomePreviewContinueWatchingItems(),
-          reduceMotionEnabled: true,
           schedulePreview: buildHomePreviewSchedule(),
         }),
       );
@@ -232,10 +231,8 @@ describe("HomeSurface rendered preview", () => {
         screen.getByLabelText("Release calendar, 2 upcoming releases"),
       ).toBeTruthy();
       expect(sectionIds).toEqual([
-        "home-section-hero",
         "home-section-continue-watching",
         "home-section-tonight",
-        "home-section-curated",
         "home-section-rooms",
         "home-section-for-you",
         "home-section-heat",
@@ -243,13 +240,11 @@ describe("HomeSurface rendered preview", () => {
         "home-section-critics",
       ]);
       expect(sectionDataSet).toEqual([
-        { homeSection: "hero", homeSectionId: "home-section-hero" },
         {
           homeSection: "continue-watching",
           homeSectionId: "home-section-continue-watching",
         },
         { homeSection: "tonight", homeSectionId: "home-section-tonight" },
-        { homeSection: "curated", homeSectionId: "home-section-curated" },
         { homeSection: "rooms", homeSectionId: "home-section-rooms" },
         { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "heat", homeSectionId: "home-section-heat" },
@@ -306,9 +301,9 @@ describe("HomeSurface rendered preview", () => {
         const testID = getRenderedTestID(node);
         return typeof testID === "string" && testID.startsWith("provider-room-copy-");
       }).map(getRenderedText);
-      const featureCardTexts: string[] = UNSAFE_root.findAll((node: unknown) => {
+      const posterCardTexts: string[] = UNSAFE_root.findAll((node: unknown) => {
         const testID = getRenderedTestID(node);
-        return typeof testID === "string" && testID.startsWith("feature-card-");
+        return typeof testID === "string" && testID.startsWith("poster-fallback-");
       }).map(getRenderedText);
       const repeatedStreamingLeadTitles = [
         "Off Campus",
@@ -316,7 +311,7 @@ describe("HomeSurface rendered preview", () => {
       ].filter(
         (title) =>
           providerRoomTexts.some((text) => text.includes(title)) &&
-          featureCardTexts.some((text) => text.includes(title)),
+          posterCardTexts.some((text) => text.includes(title)),
       );
       expect(repeatedStreamingLeadTitles).toEqual([]);
       expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
@@ -327,10 +322,8 @@ describe("HomeSurface rendered preview", () => {
       expect(screen.UNSAFE_getByProps({ testID: "home-topbar-title" })).toBeTruthy();
       expect(screen.queryAllByText("Plotlist")).toHaveLength(0);
       [
-        "Lead picks carousel",
         "Continue watching rail",
-        "Tonight releases rail",
-        "Picks rail",
+        "Releases rail",
         "Streaming rail",
         "For you rail",
         "New rail",
@@ -338,15 +331,8 @@ describe("HomeSurface rendered preview", () => {
       ].forEach((label) => {
         expect(screen.getByLabelText(label)).toBeTruthy();
       });
-      expect(
-        screen.getByLabelText(/^Lead pick\. 1 of 5\. The Four Seasons\./).props
-          .accessibilityRole,
-      ).toBe("header");
-      expect(
-        screen.getByLabelText(/^Lead pick\. 1 of 5\. The Four Seasons\./).props[
-          "aria-level"
-        ],
-      ).toBeUndefined();
+      expect(screen.queryByLabelText("Lead picks carousel")).toBeNull();
+      expect(screen.queryByLabelText("Picks rail")).toBeNull();
       expect(screen.queryByText(/Ben Reilly, an aging/)).toBeNull();
       expect(screen.queryByLabelText("Pick. Next")).toBeNull();
       expect(screen.queryByText("Next")).toBeNull();
@@ -367,49 +353,42 @@ describe("HomeSurface rendered preview", () => {
       ).toBe(2);
       expect(
         screen.getByLabelText(
-          "Section 02. Schedule. Releases",
+          "Section 02. Schedule. Releases. 1 tonight · 1 more this week",
         ).props.accessibilityRole,
       ).toBe("header");
       expect(
         screen.getByLabelText(
-          "Section 02. Schedule. Releases",
+          "Section 02. Schedule. Releases. 1 tonight · 1 more this week",
         ).props["aria-level"],
       ).toBe(2);
       expect(
         screen.getByLabelText(
-          "Section 04. Settle in. Streaming",
+          "Section 03. Settle in. Streaming",
         ).props.accessibilityRole,
       ).toBe("header");
       expect(
         screen.getByLabelText(
-          "Section 04. Settle in. Streaming",
+          "Section 03. Settle in. Streaming",
         ).props["aria-level"],
       ).toBe(2);
-      expect(screen.getByLabelText("Tonight, 1 release, selected")).toBeTruthy();
-      expect(screen.getByLabelText("This week, 1 release")).toBeTruthy();
-      expect(screen.queryByText("1")).toBeNull();
-
-      fireEvent.press(screen.getByLabelText("This week, 1 release"));
-
-      expect(screen.getByLabelText("This week, 1 release, selected")).toBeTruthy();
+      // The schedule is one dated rail — no tabs, everything visible at once,
+      // with clear paths to the dedicated calendar page.
+      expect(screen.queryByLabelText("Release schedule")).toBeNull();
       expect(screen.queryByText("1")).toBeNull();
       expect(
         screen.getByLabelText(
-          "Section 02. Schedule. Releases",
-        ).props.accessibilityRole,
-      ).toBe("header");
-      expect(screen.getByLabelText("This week releases rail")).toBeTruthy();
+          "Open Sirens. Tonight. S01E01. Premiere · Netflix",
+        ),
+      ).toBeTruthy();
       expect(
         screen.getByLabelText(
           "Open Love Island USA. Tuesday, Jun 2. S07E01. Season premiere · Peacock",
         ),
       ).toBeTruthy();
-      expect(screen.queryByLabelText("Tonight releases rail")).toBeNull();
+      expect(screen.getByLabelText("Open Calendar from Releases")).toBeTruthy();
       expect(
-        screen.queryByLabelText(
-          "Open Sirens. Tonight. S01E01. Premiere · Netflix",
-        ),
-      ).toBeNull();
+        screen.getByLabelText("Open the full release calendar"),
+      ).toBeTruthy();
     } finally {
       Object.defineProperty(Platform, "OS", {
         configurable: true,
@@ -426,15 +405,15 @@ describe("HomeSurface rendered preview", () => {
         configurable: true,
         value: "ios",
       });
-      expect(getHomeSectionWebDataSet("hero", "home-section-hero")).toBeUndefined();
+      expect(getHomeSectionWebDataSet("rooms", "home-section-rooms")).toBeUndefined();
 
       Object.defineProperty(Platform, "OS", {
         configurable: true,
         value: "web",
       });
-      expect(getHomeSectionWebDataSet("hero", "home-section-hero")).toEqual({
-        homeSection: "hero",
-        homeSectionId: "home-section-hero",
+      expect(getHomeSectionWebDataSet("rooms", "home-section-rooms")).toEqual({
+        homeSection: "rooms",
+        homeSectionId: "home-section-rooms",
       });
     } finally {
       Object.defineProperty(Platform, "OS", {

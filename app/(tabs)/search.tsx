@@ -267,6 +267,7 @@ export default function SearchScreen() {
         isAuthenticated,
         isSearching: isSearchingCatalog,
         resultCount: deferredCatalogResults.length,
+        pendingResultCount: catalogResults.length,
         resultsQuery: catalogResultsQuery,
         hasError: catalogError?.query === debouncedQuery,
       }),
@@ -277,6 +278,7 @@ export default function SearchScreen() {
       isAuthenticated,
       isSearchingCatalog,
       deferredCatalogResults.length,
+      catalogResults.length,
       catalogResultsQuery,
       catalogError?.query,
     ],
@@ -285,6 +287,21 @@ export default function SearchScreen() {
     catalogViewState.surface !== "hidden" &&
     catalogViewState.surface !== "discover";
   const showDiscover = catalogViewState.surface === "discover";
+
+  // Damper: "No catalog results" only renders once the empty surface has
+  // held for a beat. Any transient empty frame (render-ordering races the
+  // view-state math can't see) keeps showing the loading skeleton instead
+  // of flashing the empty state.
+  const isCatalogEmptySurface = catalogViewState.surface === "empty";
+  const [showCatalogEmptyState, setShowCatalogEmptyState] = useState(false);
+  useEffect(() => {
+    if (!isCatalogEmptySurface) {
+      setShowCatalogEmptyState(false);
+      return;
+    }
+    const handle = setTimeout(() => setShowCatalogEmptyState(true), 250);
+    return () => clearTimeout(handle);
+  }, [isCatalogEmptySurface]);
 
   /* ── URL param sync ────────────────────────────────────────── */
 
@@ -674,9 +691,6 @@ export default function SearchScreen() {
           overview={item.overview}
           posterUrl={item.posterUrl}
           actionLabel={item.matchLabel ?? "Add to Plotlist"}
-          sourceLabel={
-            item.externalSource === "tmdb" ? "TMDB" : item.externalSource
-          }
           onPress={() => handleAddFromCatalog(item)}
         />
       </View>
@@ -861,11 +875,13 @@ export default function SearchScreen() {
                   scrollEnabled={false}
                 />
               </View>
-            ) : (
+            ) : showCatalogEmptyState ? (
               <EmptyState
                 title="No catalog results"
                 description="Try a different search term."
               />
+            ) : (
+              <SearchLoadingRows />
             )}
           </View>
         )}

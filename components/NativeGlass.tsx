@@ -11,6 +11,17 @@ import {
 } from "react-native";
 
 type GlassVariant = "surface" | "control" | "prominent" | "sheet";
+
+// Apple's Liquid Glass guidance: glass belongs on the control/navigation
+// layer floating above content, never on the content itself. "surface" is
+// our content-card variant (settings groups, stats panels, detail sections),
+// so it always renders the solid tinted fallback; only true controls and
+// overlays ("control", "prominent", "sheet") get native glass.
+const NATIVE_GLASS_VARIANTS: ReadonlySet<GlassVariant> = new Set([
+  "control",
+  "prominent",
+  "sheet",
+]);
 type GlassStyle = "clear" | "regular";
 
 type VariantTokens = {
@@ -63,7 +74,6 @@ let NativeGlassView: ComponentType<NativeGlassViewProps> | null = null;
 
 if (Platform.OS === "ios") {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const glassModule = require("expo-glass-effect");
     if (
       typeof glassModule?.isLiquidGlassAvailable === "function" &&
@@ -108,6 +118,7 @@ export function GlassSurface({
   const resolvedBorderColor = borderColor ?? tokens.borderColor;
   const resolvedFallbackColor = fallbackColor ?? tokens.fallbackColor;
   const resolvedTintColor = tintColor ?? tokens.tintColor;
+  const GlassView = NATIVE_GLASS_VARIANTS.has(variant) ? NativeGlassView : null;
   const surfaceStyle = useMemo(
     () => [
       styles.surface,
@@ -116,16 +127,16 @@ export function GlassSurface({
         borderRadius: radius,
         // Native glass supplies its own material; painting a background over
         // it would flatten the effect.
-        backgroundColor: NativeGlassView ? "transparent" : resolvedFallbackColor,
+        backgroundColor: GlassView ? "transparent" : resolvedFallbackColor,
       },
       style,
     ],
-    [radius, resolvedBorderColor, resolvedFallbackColor, style],
+    [radius, resolvedBorderColor, resolvedFallbackColor, style, GlassView],
   );
 
-  if (NativeGlassView) {
+  if (GlassView) {
     return (
-      <NativeGlassView
+      <GlassView
         {...viewProps}
         glassEffectStyle={glassEffectStyle}
         tintColor={resolvedTintColor}
@@ -134,7 +145,7 @@ export function GlassSurface({
         style={surfaceStyle}
       >
         <View style={contentStyle}>{children}</View>
-      </NativeGlassView>
+      </GlassView>
     );
   }
 

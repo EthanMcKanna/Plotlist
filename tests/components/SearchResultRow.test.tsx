@@ -21,19 +21,21 @@ describe("SearchResultRow", () => {
         year={2025}
         overview="A workplace thriller about memory, labor, and the rituals of the office."
         posterUrl="https://image.example/severance.jpg"
-        sourceLabel="TMDB"
         actionLabel="Add to Plotlist"
         onPress={onPress}
       />,
     );
 
     fireEvent.press(
-      screen.getByLabelText("Open Severance. 2025. TMDB. Add to Plotlist"),
+      screen.getByLabelText("Open Severance. 2025. Add to Plotlist"),
     );
 
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Severance")).toBeTruthy();
-    expect(screen.getByText("TMDB")).toBeTruthy();
+    // Source badges and the add button are gone — the row is just poster,
+    // title, year, and overview.
+    expect(screen.queryByText("TMDB")).toBeNull();
+    expect(screen.queryByText("add", { includeHiddenElements: true })).toBeNull();
     expect(screen.queryByText("Add to Plotlist")).toBeNull();
   });
 
@@ -59,7 +61,6 @@ describe("SearchResultRow", () => {
       getSearchResultRowAccessibilityLabel({
         title: "Pluribus",
         year: null,
-        sourceLabel: undefined,
         actionLabel: "Open",
       }),
     ).toBe("Open Pluribus. Open");

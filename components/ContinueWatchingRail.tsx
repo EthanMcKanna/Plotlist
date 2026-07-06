@@ -59,7 +59,9 @@ type ContinueWatchingRailProps = {
   index?: number;
 };
 
-const CARD_WIDTH = 260;
+// Continue watching leads the home surface, so its cards run larger than any
+// other rail — episode stills (16:9 thumbnails) are reserved for this rail.
+const CARD_WIDTH = 300;
 const IMAGE_HEIGHT = Math.round((CARD_WIDTH * 9) / 16);
 const ACCENT = "#0EA5E9";
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";

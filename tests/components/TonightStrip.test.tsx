@@ -48,11 +48,10 @@ jest.mock("../../lib/releaseCalendar", () => ({
 }));
 
 import {
-  HOME_SCHEDULE_SEGMENTED_TAB_TOUCH_TARGET,
   getHomeSchedulePreviewCounts,
   getHomeSchedulePreviewItems,
   getHomeScheduleSubtitle,
-  getHomeScheduleTabAccessibilityLabel,
+  getHomeScheduleWindowCounts,
   getScheduleCardDateLabel,
   getScheduleCardAccessibilityLabel,
   getScheduleCardSubline,
@@ -62,6 +61,7 @@ import {
   TonightStrip,
 } from "../../components/TonightStrip";
 import { router } from "expo-router";
+import { resetNavigationLock } from "../../lib/navigationLock";
 
 const mockPush = router.push as jest.Mock;
 
@@ -102,6 +102,7 @@ function makePreview(item = makeEvent()) {
 describe("TonightStrip", () => {
   beforeEach(() => {
     mockLocalDateString = "2026-05-30";
+    resetNavigationLock();
     mockPush.mockReset();
     mockRefreshForMe.mockClear();
     mockInvalidateQueries.mockClear();
@@ -150,56 +151,45 @@ describe("TonightStrip", () => {
     ).toEqual(["Gamma"]);
   });
 
-  it("describes the active schedule segment instead of stale tonight copy", () => {
+  it("summarizes tonight and weekly counts in one subtitle", () => {
     expect(
-      getHomeScheduleSubtitle({
-        tab: "tonight",
-        tonightCount: 2,
-        weekCount: 1,
-      }),
-    ).toBe("2 tonight.");
+      getHomeScheduleSubtitle({ tonightCount: 2, weekCount: 1 }),
+    ).toBe("2 tonight · 1 more this week");
+    expect(getHomeScheduleSubtitle({ tonightCount: 2, weekCount: 0 })).toBe(
+      "2 tonight",
+    );
+    expect(getHomeScheduleSubtitle({ tonightCount: 0, weekCount: 3 })).toBe(
+      "3 this week",
+    );
+    // Releases beyond the next 7 days must not be sold as "this week".
     expect(
-      getHomeScheduleSubtitle({
-        tab: "week",
-        tonightCount: 2,
-        weekCount: 1,
-      }),
-    ).toBe("1 this week.");
-    expect(
-      getHomeScheduleSubtitle({
-        tab: "week",
-        tonightCount: 0,
-        weekCount: 3,
-      }),
-    ).toBe("3 this week.");
+      getHomeScheduleSubtitle({ tonightCount: 0, weekCount: 0, laterCount: 7 }),
+    ).toBe("7 coming up");
+    expect(getHomeScheduleSubtitle({ tonightCount: 0, weekCount: 0 })).toBe(
+      "Upcoming",
+    );
   });
 
-  it("labels schedule tabs with count and selected state for Browser and screen-reader QA", () => {
-    expect(
-      getHomeScheduleTabAccessibilityLabel({
-        label: "Tonight",
-        badge: 1,
-        active: true,
-      }),
-    ).toBe("Tonight, 1 release, selected");
-    expect(
-      getHomeScheduleTabAccessibilityLabel({
-        label: "This week",
-        badge: 3,
-        active: false,
-      }),
-    ).toBe("This week, 3 releases");
-    expect(
-      getHomeScheduleTabAccessibilityLabel({
-        label: "This week",
-        badge: 0,
-        active: false,
-        disabled: true,
-      }),
-    ).toBe("This week, 0 releases, unavailable");
+  it("only counts releases within the next 7 days as this week", () => {
+    const counts = getHomeScheduleWindowCounts(
+      [
+        { airDate: "2026-07-09" },
+        { airDate: "2026-07-13" },
+        { airDate: "2026-07-14" },
+        { airDate: "2026-07-16" },
+        { airDate: null, airDateTs: Date.parse("2026-08-01T00:00:00Z") },
+        { airDate: "2026-07-06" },
+        { airDate: null },
+      ],
+      "2026-07-06",
+    );
+
+    // Jul 9 and Jul 13 fall inside the window; Jul 14+ are later; today's
+    // date and undated items belong to neither bucket.
+    expect(counts).toEqual({ weekCount: 2, laterCount: 3 });
   });
 
-  it("updates schedule tab accessibility labels when the selected segment changes", () => {
+  it("shows tonight and upcoming releases together on one dated rail", () => {
     mockUseQuery.mockReturnValue({
       tonightGroups: [
         {
@@ -226,39 +216,31 @@ describe("TonightStrip", () => {
 
     render(<TonightStrip />);
 
-    expect(screen.getByLabelText("Tonight, 1 release, selected")).toBeTruthy();
-    expect(screen.getByLabelText("This week, 1 release")).toBeTruthy();
-    expect(screen.queryByText("1")).toBeNull();
-    expect(screen.getByLabelText("Tonight releases rail")).toBeTruthy();
-    expect(screen.getByLabelText("Release schedule").props.accessibilityRole).toBe(
-      "tablist",
-    );
+    // No tabs: both releases render at once with their own date chips.
+    expect(screen.getByLabelText("Releases rail")).toBeTruthy();
+    expect(screen.queryByLabelText("Release schedule")).toBeNull();
+    expect(screen.getByText("Tonight")).toBeTruthy();
+    expect(screen.getByText("Monday, Jun 1")).toBeTruthy();
     expect(
-      StyleSheet.flatten(screen.getByLabelText("Release schedule").props.style)
-        .borderWidth,
-    ).toBeUndefined();
+      screen.getByLabelText("Open Alpha. Tonight. S02E05. The Return · Max"),
+    ).toBeTruthy();
     expect(
-      screen.getByLabelText("Tonight, 1 release, selected").props.accessibilityRole,
-    ).toBe("tab");
-    expect(
-      screen.getByLabelText("Tonight, 1 release, selected").props.accessibilityState,
-    ).toEqual({ selected: true, disabled: false });
-    expect(
-      screen.getByLabelText("This week, 1 release").props.accessibilityState,
-    ).toEqual({ selected: false, disabled: false });
+      screen.getByLabelText("Open Beta. Monday, Jun 1. S02E05. The Return · Max"),
+    ).toBeTruthy();
+    expect(screen.getByText("1 tonight · 1 more this week")).toBeTruthy();
+  });
 
-    fireEvent.press(screen.getByLabelText("This week, 1 release"));
+  it("routes to the dedicated calendar from the header and the tail card", () => {
+    render(<TonightStrip />);
 
-    expect(screen.getByLabelText("This week, 1 release, selected")).toBeTruthy();
-    expect(screen.getByLabelText("Tonight, 1 release")).toBeTruthy();
-    expect(screen.queryByText("1")).toBeNull();
-    expect(screen.getByLabelText("This week releases rail")).toBeTruthy();
-    expect(
-      screen.getByLabelText("This week, 1 release, selected").props.accessibilityRole,
-    ).toBe("tab");
-    expect(
-      screen.getByLabelText("This week, 1 release, selected").props.accessibilityState,
-    ).toEqual({ selected: true, disabled: false });
+    fireEvent.press(screen.getByLabelText("Open Calendar from Releases"));
+    expect(mockPush).toHaveBeenCalledWith("/calendar");
+
+    mockPush.mockClear();
+    resetNavigationLock();
+    fireEvent.press(screen.getByLabelText("Open the full release calendar"));
+    expect(mockPush).toHaveBeenCalledWith("/calendar");
+    expect(screen.getByText("Full calendar")).toBeTruthy();
   });
 
   it("refreshes release data only when stale show ids are present", () => {
@@ -412,7 +394,7 @@ describe("TonightStrip", () => {
     render(<TonightStrip />);
 
     expect(screen.getByText("Releases")).toBeTruthy();
-    expect(screen.queryByLabelText("Open Calendar from Releases")).toBeNull();
+    expect(screen.getByLabelText("Open Calendar from Releases")).toBeTruthy();
     expect(
       screen.getByLabelText("Open Alpha. Tonight. S02E05. The Return · Max"),
     ).toBeTruthy();
@@ -480,48 +462,6 @@ describe("TonightStrip", () => {
     expect(screen.getAllByText("The Return · Max")).toHaveLength(1);
   });
 
-  it("updates the selected schedule rail without repeating counts in the header", () => {
-    mockUseQuery.mockReturnValue({
-      tonightGroups: [
-        {
-          airDate: "2026-05-30",
-          airDateTs: Date.parse("2026-05-30T00:00:00.000Z"),
-          items: [makeEvent({ show: { _id: "show-1", title: "Alpha" } })],
-        },
-      ],
-      upcomingGroups: [
-        {
-          airDate: "2026-06-01",
-          airDateTs: Date.parse("2026-06-01T00:00:00.000Z"),
-          items: [
-            makeEvent({
-              airDate: "2026-06-01",
-              airDateTs: Date.parse("2026-06-01T00:00:00.000Z"),
-              show: { _id: "show-2", title: "Beta" },
-            }),
-          ],
-        },
-      ],
-      staleShowIds: [],
-    });
-
-    render(<TonightStrip />);
-
-    expect(screen.queryByText("1 tonight.")).toBeNull();
-    expect(screen.getByLabelText("Tonight, 1 release, selected")).toBeTruthy();
-
-    fireEvent.press(screen.getByText("This week"));
-
-    expect(screen.queryByText("1 this week.")).toBeNull();
-    expect(screen.queryByText("1 tonight.")).toBeNull();
-    expect(screen.getByLabelText("This week, 1 release, selected")).toBeTruthy();
-    expect(screen.getByText("Monday, Jun 1")).toBeTruthy();
-    expect(screen.queryByText("MONDAY, JUN 1")).toBeNull();
-    expect(
-      screen.getByLabelText("Open Beta. Monday, Jun 1. S02E05. The Return · Max"),
-    ).toBeTruthy();
-  });
-
   it("does not route malformed schedule items to an undefined show page", () => {
     mockUseQuery.mockReturnValue(
       makePreview(
@@ -542,16 +482,13 @@ describe("TonightStrip", () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it("keeps schedule segment controls large enough for touch QA", () => {
+  it("keeps the calendar tail card sized like a schedule card for touch QA", () => {
     render(<TonightStrip />);
 
-    ["home-schedule-tab-tonight", "home-schedule-tab-week"].forEach((testID) => {
-      const tab = screen.getByTestId(testID);
-      const style = StyleSheet.flatten(tab.props.style);
+    const tailCard = screen.getByTestId("home-schedule-calendar-card");
+    const style = StyleSheet.flatten(tailCard.props.style);
 
-      expect(style.minHeight).toBeGreaterThanOrEqual(
-        HOME_SCHEDULE_SEGMENTED_TAB_TOUCH_TARGET,
-      );
-    });
+    expect(style.height).toBeGreaterThanOrEqual(100);
+    expect(style.width).toBeGreaterThanOrEqual(100);
   });
 });
