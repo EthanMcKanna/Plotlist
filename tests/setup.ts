@@ -26,6 +26,7 @@ jest.mock("@sentry/react-native", () => ({
   reactNavigationIntegration: () => ({ registerNavigationContainer: jest.fn() }),
   httpClientIntegration: () => ({ name: "HttpClient" }),
   feedbackIntegration: () => ({ name: "MobileFeedback" }),
+  mobileReplayIntegration: () => ({ name: "MobileReplay" }),
   showFeedbackWidget: jest.fn(),
 }));
 

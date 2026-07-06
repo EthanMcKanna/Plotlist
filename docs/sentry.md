@@ -35,6 +35,18 @@ DSNs are public identifiers and safe to commit. The only secret is
 Session/release health (crash-free rate per release) is on via auto session
 tracking; releases are keyed to the app version automatically by the SDK.
 
+### Session replay
+
+`mobileReplayIntegration` records the screen on iOS/Android: 100% of
+sessions with an error and 10% of healthy production sessions
+(`replaysOnErrorSampleRate` / `replaysSessionSampleRate` in `lib/sentry.ts`;
+dev opts into 100% when Sentry-in-dev is enabled). All text, images, and
+vectors are masked — replays show layout and interaction, not content.
+Replays attach to errors and to user-feedback items when the session was
+being recorded, under **Replays** in the `plotlist-app` project. Not
+available on web (the web replay module is excluded from the bundle to
+protect the size budget).
+
 ### User feedback
 
 Settings → Help → "Share feedback" opens Sentry's feedback form

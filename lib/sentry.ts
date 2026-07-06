@@ -20,9 +20,18 @@ export function initSentry() {
     enabled: !__DEV__ || process.env.EXPO_PUBLIC_SENTRY_IN_DEV === "1",
     environment: __DEV__ ? "development" : "production",
     tracesSampleRate: __DEV__ ? 1.0 : 0.25,
+    // Session Replay: every error/feedback session is recorded; 10% of
+    // healthy sessions in production for context.
+    replaysOnErrorSampleRate: 1.0,
+    replaysSessionSampleRate: __DEV__ ? 1.0 : 0.1,
     integrations: [
       navigationIntegration,
       Sentry.httpClientIntegration(),
+      Sentry.mobileReplayIntegration({
+        maskAllText: true,
+        maskAllImages: true,
+        maskAllVectors: true,
+      }),
       Sentry.feedbackIntegration({
         colorScheme: "dark",
         formTitle: "Share feedback",
