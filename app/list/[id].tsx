@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Dimensions, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  Alert,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
@@ -16,6 +25,7 @@ import Animated, {
 import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
+import { Comments } from "../../components/Comments";
 import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
@@ -376,6 +386,10 @@ export default function ListScreen() {
 
   return (
     <Screen>
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
@@ -435,8 +449,13 @@ export default function ListScreen() {
               </View>
             )}
           </View>
+
+          <View className="mt-8">
+            <Comments targetType="list" targetId={listId} />
+          </View>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}

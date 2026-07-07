@@ -122,6 +122,31 @@ export function useQuery<Query extends PlotlistFunctionReference<"query">>(
   return rpcResult.data;
 }
 
+// Like useQuery, but exposes fetch state so screens can tell "still loading"
+// apart from "the server said this does not exist" and offer a retry on error.
+export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
+  query: Query,
+  ...args: ArgsOrSkip
+): { data: any; isLoading: boolean; isError: boolean; refetch: () => void } {
+  const name = getFunctionName(query as any);
+  const queryArgs = args[0];
+  const rpcResult = useTanstackQuery(
+    {
+      queryKey: ["plotlist-rpc", "query", name, queryArgs],
+      queryFn: () => callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any)),
+      enabled: queryArgs !== "skip",
+    },
+    queryClient,
+  );
+
+  return {
+    data: queryArgs === "skip" ? undefined : rpcResult.data,
+    isLoading: queryArgs !== "skip" && rpcResult.isLoading,
+    isError: queryArgs !== "skip" && rpcResult.isError,
+    refetch: rpcResult.refetch,
+  };
+}
+
 export function useMutation<Mutation extends PlotlistFunctionReference<"mutation">>(
   mutation: Mutation,
 ): MutationFn {

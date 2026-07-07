@@ -373,6 +373,16 @@ function targetUrl(targetType: string, targetId: string) {
   return "/notifications";
 }
 
+// Comment notifications land on the conversation itself: logs have no detail
+// screen, so they open the standalone /comments thread instead of dead-ending
+// at the inbox.
+function commentTargetUrl(targetType: string, targetId: string) {
+  if (targetType === "log") {
+    return `/comments?targetType=log&targetId=${encodeURIComponent(targetId)}`;
+  }
+  return targetUrl(targetType, targetId);
+}
+
 // The notify* helpers are best-effort: a push outage must never fail the
 // social mutation that triggered it.
 
@@ -505,7 +515,7 @@ export async function notifyComment(
         targetId,
         title: content.title,
         body: content.body,
-        data: { url: targetUrl(targetType, targetId), targetType, targetId, actorId: actor.id },
+        data: { url: commentTargetUrl(targetType, targetId), targetType, targetId, actorId: actor.id },
         dedupeKey: `comment:${commentId}`,
       },
     ]);
