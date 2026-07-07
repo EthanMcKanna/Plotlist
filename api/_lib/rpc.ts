@@ -523,6 +523,65 @@ async function insertEpisodeProgressOnce(args: {
   return rows.length > 0;
 }
 
+// Diary contract: every deliberate "watched" action produces a watch log,
+// and undoing the mark removes the log it created. Only note-less logs are
+// auto-managed — once a user writes a note the log is their content and
+// survives progress changes. Bulk (season) marks log without fanning out to
+// follower feeds, so a 22-episode backfill doesn't post 22 feed items.
+async function createEpisodeWatchLog(args: {
+  userId: string;
+  showId: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle?: string | null;
+  watchedAt: number;
+  fanOutToFeeds: boolean;
+}) {
+  const logId = createId("log");
+  await db.insert(watchLogs).values({
+    id: logId,
+    userId: args.userId,
+    showId: args.showId,
+    watchedAt: args.watchedAt,
+    note: null,
+    seasonNumber: args.seasonNumber,
+    episodeNumber: args.episodeNumber,
+    episodeTitle: args.episodeTitle ?? null,
+  });
+  if (args.fanOutToFeeds) {
+    await addFeedForFollowers(args.userId, "log", logId, args.showId, args.watchedAt);
+  }
+  return logId;
+}
+
+async function deletePlainEpisodeWatchLogs(args: {
+  userId: string;
+  showId: string;
+  seasonNumber: number;
+  episodeNumber?: number;
+}) {
+  const conditions = [
+    eq(watchLogs.userId, args.userId),
+    eq(watchLogs.showId, args.showId),
+    eq(watchLogs.seasonNumber, args.seasonNumber),
+    isNull(watchLogs.note),
+  ];
+  if (typeof args.episodeNumber === "number") {
+    conditions.push(eq(watchLogs.episodeNumber, args.episodeNumber));
+  }
+  const rows = await db
+    .select({ id: watchLogs.id })
+    .from(watchLogs)
+    .where(and(...conditions));
+  if (rows.length === 0) return;
+  for (const chunk of chunkForSqlParams(rows.map((row) => row.id), 1, 80)) {
+    await db.delete(watchLogs).where(inArray(watchLogs.id, chunk));
+    await db
+      .delete(feedItems)
+      .where(and(eq(feedItems.type, "log"), inArray(feedItems.targetId, chunk)));
+  }
+}
+
 function getProfileVisibility(user: typeof users.$inferSelect) {
   return resolveProfileVisibility(user.profileVisibility);
 }
@@ -4156,6 +4215,12 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
     if (existing[0]) {
       await db.delete(episodeProgress).where(eq(episodeProgress.id, existing[0].id));
+      await deletePlainEpisodeWatchLogs({
+        userId: user.id,
+        showId: parsed.showId,
+        seasonNumber: parsed.seasonNumber,
+        episodeNumber: parsed.episodeNumber,
+      });
       await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
       return false;
     }
@@ -4167,10 +4232,19 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       episodeNumber: parsed.episodeNumber,
       watchedAt: now,
     });
-    if (parsed.createLog && created) {
-      const logId = createId("log");
-      await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
-      await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
+    // Single-episode marks are deliberate watch moments: they log by default
+    // (createLog omitted or true); older clients that never sent the flag get
+    // diary entries too, which is the product intent.
+    if ((parsed.createLog ?? true) && created) {
+      await createEpisodeWatchLog({
+        userId: user.id,
+        showId: parsed.showId,
+        seasonNumber: parsed.seasonNumber,
+        episodeNumber: parsed.episodeNumber,
+        episodeTitle: parsed.episodeTitle,
+        watchedAt: now,
+        fanOutToFeeds: true,
+      });
     }
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return true;
@@ -4187,10 +4261,16 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       episodeNumber: parsed.episodeNumber,
       watchedAt: now,
     });
-    if (parsed.createLog && created) {
-      const logId = createId("log");
-      await db.insert(watchLogs).values({ id: logId, userId: user.id, showId: parsed.showId, watchedAt: now, note: null, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null });
-      await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
+    if ((parsed.createLog ?? true) && created) {
+      await createEpisodeWatchLog({
+        userId: user.id,
+        showId: parsed.showId,
+        seasonNumber: parsed.seasonNumber,
+        episodeNumber: parsed.episodeNumber,
+        episodeTitle: parsed.episodeTitle,
+        watchedAt: now,
+        fanOutToFeeds: true,
+      });
     }
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return true;
@@ -4211,13 +4291,28 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         )
       : parsed.episodes;
     for (const episode of markableEpisodes) {
-      await insertEpisodeProgressOnce({
+      const created = await insertEpisodeProgressOnce({
         userId: user.id,
         showId: parsed.showId,
         seasonNumber: parsed.seasonNumber,
         episodeNumber: episode.episodeNumber,
         watchedAt: now,
       });
+      // Bulk marks default to createLog=false so status-change backfills and
+      // older clients stay out of the diary; the explicit season button opts
+      // in. Never fan out to feeds here — one tap must not post an item per
+      // episode to every follower.
+      if (parsed.createLog === true && created) {
+        await createEpisodeWatchLog({
+          userId: user.id,
+          showId: parsed.showId,
+          seasonNumber: parsed.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeTitle: episode.title,
+          watchedAt: now,
+          fanOutToFeeds: false,
+        });
+      }
     }
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return { success: true };
@@ -4227,6 +4322,11 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});
     const now = Date.now();
     await db.delete(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber)));
+    await deletePlainEpisodeWatchLogs({
+      userId: user.id,
+      showId: parsed.showId,
+      seasonNumber: parsed.seasonNumber,
+    });
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
     return { success: true };
   },

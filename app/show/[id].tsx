@@ -2098,10 +2098,14 @@ export default function ShowScreen() {
             }}
             onMarkSeasonWatched={(seasonNumber, episodes) => {
               if (isShowPreview) return;
+              // Explicit season button is a deliberate watch action, so it
+              // opts into diary logs; the status-change backfill sync above
+              // stays createLog: false.
               void markSeasonWatched({
                 showId,
                 seasonNumber,
                 episodes,
+                createLog: true,
               });
             }}
             onUnmarkSeasonWatched={(seasonNumber) => {
