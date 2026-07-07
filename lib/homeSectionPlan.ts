@@ -12,14 +12,13 @@ export type HomeSection =
   | { kind: "fresh" }
   | { kind: "critics" }
   | { kind: "quick" }
-  | { kind: "rooms" }
   | { kind: "contact-sync" }
   | { kind: "friends" };
 
 export type HomeSectionKind = HomeSection["kind"];
 export type DiscoveryHomeSectionKind = Extract<
   HomeSectionKind,
-  "heat" | "fresh" | "critics" | "quick" | "rooms"
+  "heat" | "fresh" | "critics" | "quick"
 >;
 export type NumberedHomeSectionKind = Extract<
   HomeSectionKind,
@@ -30,7 +29,6 @@ export type NumberedHomeSectionKind = Extract<
   | "fresh"
   | "critics"
   | "quick"
-  | "rooms"
   | "friends"
 >;
 
@@ -38,7 +36,6 @@ export type HomeDiscoverySectionSignal = {
   itemCount: number;
   currentCount?: number;
   explicitCurrentCount?: number;
-  providerRoomCount?: number;
 };
 
 export type HomeSocialSectionSignal = {
@@ -75,7 +72,6 @@ const DEFAULT_DISCOVERY_ORDER: DiscoveryHomeSectionKind[] = [
   "fresh",
   "critics",
   "quick",
-  "rooms",
 ];
 const NUMBERED_HOME_SECTION_KINDS = new Set<HomeSectionKind>([
   "continue-watching",
@@ -85,7 +81,6 @@ const NUMBERED_HOME_SECTION_KINDS = new Set<HomeSectionKind>([
   "fresh",
   "critics",
   "quick",
-  "rooms",
   "friends",
 ]);
 const SIGNED_IN_DISCOVERY_PREVIEW_COUNT = 1;
@@ -99,7 +94,6 @@ const DISCOVERY_BASE_SCORE: Record<DiscoveryHomeSectionKind, number> = {
   fresh: 68,
   critics: 56,
   quick: 48,
-  rooms: 44,
 };
 
 export function getHomeDiscoverySectionSignal<T extends HomeCurrentSignalItem>(
@@ -112,16 +106,6 @@ export function getHomeDiscoverySectionSignal<T extends HomeCurrentSignalItem>(
     explicitCurrentCount: items.filter((item) =>
       hasExplicitCurrentHomeSignal(item, { now }),
     ).length,
-  };
-}
-
-export function getHomeProviderRoomsSectionSignal<
-  T extends HomeCurrentSignalItem,
->(rooms: Array<{ items: T[] }>, now?: HomeSectionPlanOptions["now"]): HomeDiscoverySectionSignal {
-  const items = rooms.flatMap((room) => room.items);
-  return {
-    ...getHomeDiscoverySectionSignal(items, now),
-    providerRoomCount: rooms.length,
   };
 }
 
@@ -139,13 +123,10 @@ function getDaypartBoost(
   if (now === undefined) return 0;
   const date = toDate(now);
   const hour = Number.isFinite(date.getTime()) ? date.getHours() : new Date().getHours();
-  const day = Number.isFinite(date.getTime()) ? date.getDay() : new Date().getDay();
-  const weekend = day === 0 || day === 6;
 
   if (kind === "quick" && (hour >= 21 || hour < 5)) return 18;
   if (kind === "heat" && hour >= 17 && hour < 23) return 9;
   if (kind === "fresh" && hour >= 6 && hour < 14) return 6;
-  if (kind === "rooms" && weekend) return 8;
   return 0;
 }
 
@@ -171,21 +152,19 @@ function getDiscoverySectionScore(
   rotationSeed?: number,
 ) {
   const signal = signals[kind];
-  if (signal && signal.itemCount <= 0 && (signal.providerRoomCount ?? 0) <= 0) {
+  if (signal && signal.itemCount <= 0) {
     return Number.NEGATIVE_INFINITY;
   }
 
   const itemCount = signal?.itemCount ?? 0;
   const currentCount = signal?.currentCount ?? 0;
   const explicitCurrentCount = signal?.explicitCurrentCount ?? 0;
-  const providerRoomCount = signal?.providerRoomCount ?? 0;
 
   return (
     DISCOVERY_BASE_SCORE[kind] +
     Math.min(itemCount, 10) * 3 +
     currentCount * 7 +
     explicitCurrentCount * 5 +
-    providerRoomCount * 6 +
     getDaypartBoost(kind, now) +
     getDiscoveryRotationJitter(kind, rotationSeed)
   );

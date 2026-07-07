@@ -42,7 +42,7 @@ import { toHomeFeedItem } from "./homeFeedItems";
 import { getHomeRailIdentityKeys } from "./homeRailIdentity";
 import { shouldLoadEditorialSeedRail } from "./homeRailHealth";
 import type { HeroSlide } from "../components/HeroCarousel";
-import type { ProviderRoom } from "../components/StreamingRooms";
+import type { ProviderRoom } from "./providerRoom";
 import type { SignatureRailItem } from "../components/SignatureRail";
 import type { FeedItemProps } from "../components/FeedItem";
 
@@ -1623,6 +1623,8 @@ export type HomeData = {
   quick: SignatureRailItem[];
   /** Streaming room cards. */
   streamingRooms: ProviderRoom[];
+  /** The user's chosen streaming services (normalized keys; empty = no preference). */
+  streamingProviderKeys: string[];
   /** Batched catalog freshness diagnostics, kept for local QA and observability. */
   catalogDiagnostics: HomeCatalogDiagnostics;
   /** Loading flags for skeletons. */
@@ -2160,6 +2162,7 @@ export function useHomeData(): HomeData {
     critics,
     quick,
     streamingRooms: providerSections,
+    streamingProviderKeys,
     catalogDiagnostics,
     loading: {
       hero: heroLoading,

@@ -29,7 +29,7 @@ const requiredProductionPatterns = [
   "homeSectionId",
   "home-topbar-profile",
   "home-topbar-search",
-  "home-topbar-calendar",
+  "home-topbar-notifications",
 ];
 
 async function walk(dir) {

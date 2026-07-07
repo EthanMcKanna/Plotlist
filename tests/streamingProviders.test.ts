@@ -2,10 +2,12 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   STREAMING_PROVIDER_KEYS,
+  STREAMING_PROVIDER_PROMINENCE,
   buildStreamingAvailabilityIndex,
   filterSectionsToStreamingProviders,
   leanItemsToStreamingAvailability,
   normalizeStreamingProviderKeys,
+  sortSectionsByProviderProminence,
 } from "../lib/streamingProviders";
 
 describe("normalizeStreamingProviderKeys", () => {
@@ -94,5 +96,54 @@ describe("leanItemsToStreamingAvailability", () => {
     expect(
       leanItemsToStreamingAvailability(items, new Set(["99"]), (item) => item.externalId),
     ).toEqual(items);
+  });
+});
+
+describe("sortSectionsByProviderProminence", () => {
+  const sections = [
+    { key: "peacock" },
+    { key: "hulu" },
+    { key: "netflix" },
+    { key: "apple_tv" },
+  ];
+
+  it("covers every known provider in the prominence ranking", () => {
+    expect([...STREAMING_PROVIDER_PROMINENCE].sort()).toEqual(
+      [...STREAMING_PROVIDER_KEYS].sort(),
+    );
+  });
+
+  it("orders by service prominence when the user has no preference", () => {
+    expect(
+      sortSectionsByProviderProminence(sections, []).map((section) => section.key),
+    ).toEqual(["netflix", "hulu", "apple_tv", "peacock"]);
+    expect(
+      sortSectionsByProviderProminence(sections, null).map((section) => section.key),
+    ).toEqual(["netflix", "hulu", "apple_tv", "peacock"]);
+  });
+
+  it("puts the user's chosen services first, most prominent leading", () => {
+    expect(
+      sortSectionsByProviderProminence(sections, ["peacock", "apple_tv"]).map(
+        (section) => section.key,
+      ),
+    ).toEqual(["apple_tv", "peacock", "netflix", "hulu"]);
+  });
+
+  it("ignores unknown keys in the stored preference", () => {
+    expect(
+      sortSectionsByProviderProminence(sections, ["not-a-service"]).map(
+        (section) => section.key,
+      ),
+    ).toEqual(["netflix", "hulu", "apple_tv", "peacock"]);
+  });
+
+  it("keeps unknown section keys after ranked services without dropping them", () => {
+    expect(
+      sortSectionsByProviderProminence(
+        [{ key: "mystery" }, { key: "netflix" }],
+        [],
+      ).map((section) => section.key),
+    ).toEqual(["netflix", "mystery"]);
   });
 });

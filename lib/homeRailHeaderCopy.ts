@@ -52,10 +52,5 @@ export function getHomeDiscoveryRailHeaderCopy(
         kicker: lateNight || evening ? "Nightcap" : "Short",
         title: "Quick",
       };
-    case "rooms":
-      return {
-        kicker: weekend ? "Settle in" : "Watch",
-        title: "Streaming",
-      };
   }
 }

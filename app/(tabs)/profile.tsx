@@ -105,7 +105,6 @@ export default function ProfileTab() {
     api.watchStats.getInsights,
     me ? { utcOffsetMinutes } : "skip",
   ) as WatchInsights | undefined;
-  const unreadNotifications = Number(useQuery(api.notifications.getUnreadCount) ?? 0);
 
   const counts = {
     followers: me?.countsFollowers ?? 0,
@@ -270,22 +269,6 @@ export default function ProfileTab() {
         {/* ── Account ── */}
         <View className="mt-6">
           <GlassSurface radius={16} variant="surface">
-            <MenuRow
-              item={{
-                icon: "notifications-outline",
-                iconBg: "bg-sky-500/15",
-                iconColor: "#38BDF8",
-                label: "Notifications",
-                sublabel:
-                  unreadNotifications > 0
-                    ? `${unreadNotifications.toLocaleString()} unread`
-                    : undefined,
-                route: "/notifications",
-                count: unreadNotifications,
-              }}
-              isLast={false}
-              onPress={() => router.push("/notifications")}
-            />
             <MenuRow
               item={{
                 icon: "settings-outline",

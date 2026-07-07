@@ -17,7 +17,7 @@ const REQUIRED_HOME_BUNDLE_HANDLES = [
   "homeSectionId",
   "home-topbar-profile",
   "home-topbar-search",
-  "home-topbar-calendar",
+  "home-topbar-notifications",
 ];
 
 function withDistFixture(contents: string, run: (distDir: string) => void) {

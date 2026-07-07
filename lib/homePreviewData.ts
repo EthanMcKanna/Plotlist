@@ -293,6 +293,7 @@ export function buildHomePreviewData(
     critics,
     quick,
     streamingRooms,
+    streamingProviderKeys: [],
     catalogDiagnostics: {
       failedCategories: [],
       staleCategories: [],

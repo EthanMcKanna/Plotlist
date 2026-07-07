@@ -28,6 +28,20 @@ export const STREAMING_PROVIDER_KEYS = STREAMING_PROVIDER_OPTIONS.map(
   (option) => option.key,
 );
 
+// Rough US household-reach order, used to sort provider surfaces when the
+// user hasn't picked their own services.
+export const STREAMING_PROVIDER_PROMINENCE: string[] = [
+  "netflix",
+  "prime_video",
+  "disney_plus",
+  "max",
+  "hulu",
+  "paramount_plus",
+  "apple_tv",
+  "peacock",
+  "mgm_plus",
+];
+
 const VALID_KEYS = new Set(STREAMING_PROVIDER_KEYS);
 
 /** Sanitize a stored preference value into known, deduped provider keys. */
@@ -57,6 +71,28 @@ export function filterSectionsToStreamingProviders<T extends { key: string }>(
   const wanted = new Set(selected);
   const filtered = sections.filter((section) => wanted.has(section.key));
   return filtered.length > 0 ? filtered : sections;
+}
+
+/**
+ * Order provider-keyed sections by service prominence. When the user has
+ * picked services in settings, those come first (most prominent selected
+ * service leading), with any remaining services after in prominence order.
+ */
+export function sortSectionsByProviderProminence<T extends { key: string }>(
+  sections: T[],
+  selectedKeys?: string[] | null,
+): T[] {
+  const selected = new Set(normalizeStreamingProviderKeys(selectedKeys));
+  const prominenceRank = (key: string) => {
+    const index = STREAMING_PROVIDER_PROMINENCE.indexOf(key);
+    return index === -1 ? STREAMING_PROVIDER_PROMINENCE.length : index;
+  };
+  return [...sections].sort((left, right) => {
+    const selectedDelta =
+      (selected.has(left.key) ? 0 : 1) - (selected.has(right.key) ? 0 : 1);
+    if (selectedDelta !== 0) return selectedDelta;
+    return prominenceRank(left.key) - prominenceRank(right.key);
+  });
 }
 
 /**

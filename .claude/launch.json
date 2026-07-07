@@ -14,6 +14,12 @@
       "port": 8090
     },
     {
+      "name": "expo-web-preview-2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8091"],
+      "port": 8091
+    },
+    {
       "name": "web-against-prod",
       "runtimeExecutable": "env",
       "runtimeArgs": [

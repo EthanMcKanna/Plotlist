@@ -1,5 +1,5 @@
 import type { SignatureRailItem } from "../components/SignatureRail";
-import type { ProviderItem, ProviderRoom } from "../components/StreamingRooms";
+import type { ProviderItem, ProviderRoom } from "./providerRoom";
 
 import {
   hasCurrentHomeSignal,

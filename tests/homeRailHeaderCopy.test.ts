@@ -16,7 +16,6 @@ describe("home discovery rail header copy", () => {
       expect(getHomeDiscoveryRailHeaderCopy("fresh", { now }).title).toBe("New");
       expect(getHomeDiscoveryRailHeaderCopy("critics", { now }).title).toBe("Acclaimed");
       expect(getHomeDiscoveryRailHeaderCopy("quick", { now }).title).toBe("Quick");
-      expect(getHomeDiscoveryRailHeaderCopy("rooms", { now }).title).toBe("Streaming");
     }
   });
 
@@ -41,18 +40,12 @@ describe("home discovery rail header copy", () => {
     );
   });
 
-  it("leans into weekends for critics and streaming rooms", () => {
+  it("leans into weekends for critics", () => {
     expect(getHomeDiscoveryRailHeaderCopy("critics", { now: SATURDAY }).kicker).toBe(
       "Weekend",
     );
-    expect(getHomeDiscoveryRailHeaderCopy("rooms", { now: SATURDAY }).kicker).toBe(
-      "Settle in",
-    );
     expect(getHomeDiscoveryRailHeaderCopy("critics", { now: TUESDAY_MIDDAY }).kicker).toBe(
       "Quality",
-    );
-    expect(getHomeDiscoveryRailHeaderCopy("rooms", { now: TUESDAY_MIDDAY }).kicker).toBe(
-      "Watch",
     );
   });
 

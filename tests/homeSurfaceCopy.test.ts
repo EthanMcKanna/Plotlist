@@ -73,7 +73,6 @@ describe("home surface copy", () => {
     expect(surfaceCopy).not.toMatch(/>Follow</);
     expect(surfaceCopy).toMatch(/Trending/);
     expect(surfaceCopy).toMatch(/Picks/);
-    expect(surfaceCopy).toMatch(/Streaming/);
     expect(surfaceCopy).toMatch(/Contacts stay private/);
   });
 

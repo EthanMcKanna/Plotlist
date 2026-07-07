@@ -227,17 +227,15 @@ describe("HomeSurface rendered preview", () => {
       expect(screen.UNSAFE_getByProps({ testID: "home-topbar" })).toBeTruthy();
       expect(screen.getByLabelText("Open profile")).toBeTruthy();
       expect(screen.getByLabelText("Search")).toBeTruthy();
-      expect(
-        screen.getByLabelText("Release calendar, 2 upcoming releases"),
-      ).toBeTruthy();
+      expect(screen.getByLabelText("Notifications")).toBeTruthy();
       expect(sectionIds).toEqual([
         "home-section-continue-watching",
         "home-section-tonight",
-        "home-section-rooms",
-        "home-section-for-you",
         "home-section-heat",
+        "home-section-for-you",
         "home-section-fresh",
         "home-section-critics",
+        "home-section-quick",
       ]);
       expect(sectionDataSet).toEqual([
         {
@@ -245,11 +243,11 @@ describe("HomeSurface rendered preview", () => {
           homeSectionId: "home-section-continue-watching",
         },
         { homeSection: "tonight", homeSectionId: "home-section-tonight" },
-        { homeSection: "rooms", homeSectionId: "home-section-rooms" },
-        { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "heat", homeSectionId: "home-section-heat" },
+        { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "fresh", homeSectionId: "home-section-fresh" },
         { homeSection: "critics", homeSectionId: "home-section-critics" },
+        { homeSection: "quick", homeSectionId: "home-section-quick" },
       ]);
       const unlabeledControls = UNSAFE_root.findAll((node: unknown) => {
         const role = getRenderedAccessibilityRole(node);
@@ -286,7 +284,11 @@ describe("HomeSurface rendered preview", () => {
             .filter((label: unknown): label is string => typeof label === "string"),
         ),
       ];
+      // Provider chart rows are canonical ranked lists — a charting show may
+      // legitimately also appear in a discovery rail, so they sit outside the
+      // one-open-action-per-title rule.
       const openActionTitles = openActionLabels
+        .filter((label) => !/\. Number \d+ on /.test(label))
         .map(getOpenActionTitle)
         .filter(Boolean);
       const duplicateOpenActionTitles = [
@@ -297,23 +299,12 @@ describe("HomeSurface rendered preview", () => {
         ),
       ];
       expect(duplicateOpenActionTitles).toEqual([]);
-      const providerRoomTexts: string[] = UNSAFE_root.findAll((node: unknown) => {
-        const testID = getRenderedTestID(node);
-        return typeof testID === "string" && testID.startsWith("provider-room-copy-");
-      }).map(getRenderedText);
-      const posterCardTexts: string[] = UNSAFE_root.findAll((node: unknown) => {
-        const testID = getRenderedTestID(node);
-        return typeof testID === "string" && testID.startsWith("poster-fallback-");
-      }).map(getRenderedText);
-      const repeatedStreamingLeadTitles = [
-        "Off Campus",
-        "Sofia the First: Royal Magic",
-      ].filter(
-        (title) =>
-          providerRoomTexts.some((text) => text.includes(title)) &&
-          posterCardTexts.some((text) => text.includes(title)),
-      );
-      expect(repeatedStreamingLeadTitles).toEqual([]);
+      expect(
+        UNSAFE_root.findAll((node: unknown) => {
+          const testID = getRenderedTestID(node);
+          return typeof testID === "string" && testID.startsWith("provider-room-card-");
+        }),
+      ).toEqual([]);
       expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
       expect(screen.queryByText("Quick hits")).toBeNull();
       expect(screen.queryByText("Quietly excellent")).toBeNull();
@@ -324,13 +315,13 @@ describe("HomeSurface rendered preview", () => {
       [
         "Continue watching rail",
         "Releases rail",
-        "Streaming rail",
         "For you rail",
         "New rail",
         "Trending rail",
       ].forEach((label) => {
         expect(screen.getByLabelText(label)).toBeTruthy();
       });
+      expect(screen.queryByLabelText("Streaming charts rail")).toBeNull();
       expect(screen.queryByLabelText("Lead picks carousel")).toBeNull();
       expect(screen.queryByLabelText("Picks rail")).toBeNull();
       expect(screen.queryByText(/Ben Reilly, an aging/)).toBeNull();
@@ -363,18 +354,17 @@ describe("HomeSurface rendered preview", () => {
       ).toBe(2);
       expect(
         screen.getByLabelText(
-          "Section 03. Settle in. Streaming",
+          "Section 03. Today. Trending",
         ).props.accessibilityRole,
       ).toBe("header");
       expect(
         screen.getByLabelText(
-          "Section 03. Settle in. Streaming",
+          "Section 03. Today. Trending",
         ).props["aria-level"],
       ).toBe(2);
       // The schedule is one dated rail — no tabs, everything visible at once,
       // with clear paths to the dedicated calendar page.
       expect(screen.queryByLabelText("Release schedule")).toBeNull();
-      expect(screen.queryByText("1")).toBeNull();
       expect(
         screen.getByLabelText(
           "Open Sirens. Tonight. S01E01. Premiere · Netflix",
@@ -405,15 +395,15 @@ describe("HomeSurface rendered preview", () => {
         configurable: true,
         value: "ios",
       });
-      expect(getHomeSectionWebDataSet("rooms", "home-section-rooms")).toBeUndefined();
+      expect(getHomeSectionWebDataSet("heat", "home-section-heat")).toBeUndefined();
 
       Object.defineProperty(Platform, "OS", {
         configurable: true,
         value: "web",
       });
-      expect(getHomeSectionWebDataSet("rooms", "home-section-rooms")).toEqual({
-        homeSection: "rooms",
-        homeSectionId: "home-section-rooms",
+      expect(getHomeSectionWebDataSet("heat", "home-section-heat")).toEqual({
+        homeSection: "heat",
+        homeSectionId: "home-section-heat",
       });
     } finally {
       Object.defineProperty(Platform, "OS", {

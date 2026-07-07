@@ -24,7 +24,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { guardedPush } from "../../lib/navigation";
-import { useAction } from "../../lib/plotlist/react";
+import { useAction, useQuery } from "../../lib/plotlist/react";
 import { api } from "../../lib/plotlist/api";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
@@ -46,12 +46,6 @@ import { HOME_TOP_BAR_HEIGHT, HomeTopBar } from "../../components/HomeTopBar";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { SignatureRail, type SignatureRailItem } from "../../components/SignatureRail";
 import {
-  getRoomFeaturedItem,
-  getRoomSupportItems,
-  StreamingRooms,
-  type ProviderRoom,
-} from "../../components/StreamingRooms";
-import {
   type HomeSchedulePreviewState,
   TonightStrip,
   useHomeSchedulePreview,
@@ -69,11 +63,8 @@ import {
 } from "../../lib/homeCurrentSignal";
 import {
   getHomeRailIdentitySet,
-  filterHomeRoomsWithUnpreviewedFeaturedItems,
   getHomeDiscoveryPreviewKeys,
-  limitHomeRoomItemsByTitleAppearances,
   limitHomeRailItemsByTitleAppearances,
-  prioritizeHomeRoomsAgainstPreviewKeys,
   removePreviewedHomeRailItems,
   topUpHomeRailItemsPreservingSources,
 } from "../../lib/homeRailIdentity";
@@ -87,7 +78,6 @@ import {
 import { getHomeDiscoveryRailHeaderCopy } from "../../lib/homeRailHeaderCopy";
 import {
   getHomeDiscoverySectionSignal,
-  getHomeProviderRoomsSectionSignal,
   getHomeSectionDisplayIndexes,
   getHomeSectionPlan,
   getHomeSectionTestID,
@@ -103,8 +93,6 @@ import {
 } from "../../lib/homeStarterShelf";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
 import {
-  sortProviderRoomItemsForFreshness,
-  sortProviderRoomsForFreshness,
   type HomeData,
   useHomeData,
 } from "../../lib/useHomeData";
@@ -115,20 +103,15 @@ const HEAT_ACCENT = "#F59E0B";
 const FRESH_ACCENT = "#38BDF8";
 const CRITICS_ACCENT = "#F472B6";
 const QUICK_ACCENT = "#A3E635";
-const ROOMS_ACCENT = "#F97316";
 const MIN_FEATURE_RAIL_ITEMS = 3;
 const MIN_POSTER_RAIL_ITEMS = 4;
 const MIN_DISTINCT_POSTER_RAIL_ITEMS = 3;
 const MIN_QUICK_RAIL_ITEMS = 2;
-const MIN_PROVIDER_ROOM_ITEMS = 3;
-const MIN_PROVIDER_ROOMS = 4;
 const TARGET_FEATURE_RAIL_ITEMS = 5;
 const TARGET_FRESH_RAIL_ITEMS = 4;
 const TARGET_QUICK_RAIL_ITEMS = 3;
 const FRESH_ROOM_TOP_UP_LIMIT = 8;
 const MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES = 1;
-const MAX_PROVIDER_ROOM_SURFACE_TITLE_APPEARANCES = 1;
-const TARGET_PROVIDER_ROOM_ITEMS = 6;
 export const HOME_NATIVE_INITIAL_RENDER_SECTION_COUNT = 6;
 
 type WebDataSetViewProps = ComponentProps<typeof View> & {
@@ -209,12 +192,10 @@ export function HomeSurface({
       fresh: getHomeDiscoveryRailHeaderCopy("fresh", { now: surfaceNow }),
       critics: getHomeDiscoveryRailHeaderCopy("critics", { now: surfaceNow }),
       quick: getHomeDiscoveryRailHeaderCopy("quick", { now: surfaceNow }),
-      rooms: getHomeDiscoveryRailHeaderCopy("rooms", { now: surfaceNow }),
     }),
     [surfaceNow],
   );
   const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
-  const roomCardWidth = Math.min(Math.max(width - 96, 240), 320);
 
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler({
@@ -240,6 +221,12 @@ export function HomeSurface({
     data.hasProfile && !providedSchedulePreview,
   );
   const schedulePreview = providedSchedulePreview ?? queriedSchedulePreview;
+  const unreadNotifications = Number(
+    useQuery(
+      api.notifications.getUnreadCount,
+      data.hasProfile ? {} : "skip",
+    ) ?? 0,
+  );
   const activeContinueWatchingItems = useMemo(
     () => getActiveContinueWatchingItems(continueWatchingItems),
     [continueWatchingItems],
@@ -265,45 +252,13 @@ export function HomeSurface({
   const visibleEditorialSurfaceItems = visibleOpeningSurfaceItems;
   const railPreviewKeys = personalPreviewKeys;
   const visibleEditorialPreviewKeys = railPreviewKeys;
-  const roomHardPreviewKeys = useMemo(
-    () => new Set([...railPreviewKeys]),
-    [railPreviewKeys],
-  );
-  const streamingRoomLeadPreviewItems = useMemo(() => {
-    const rooms = prioritizeHomeRoomsAgainstPreviewKeys<
-      ProviderRoom["items"][number],
-      ProviderRoom
-    >(
-      data.streamingRooms,
-      roomHardPreviewKeys,
-      MIN_PROVIDER_ROOM_ITEMS,
-    ).map((room) => ({
-      ...room,
-      items: sortProviderRoomItemsForFreshness(room.items, surfaceNow),
-    }));
-    return sortProviderRoomsForFreshness(rooms, surfaceNow)
-      .map((room) => getRoomFeaturedItem(room.items, roomHardPreviewKeys, false))
-      .filter((item): item is ProviderRoom["items"][number] => Boolean(item));
-  }, [data.streamingRooms, roomHardPreviewKeys, surfaceNow]);
-  const streamingRoomLeadSurfaceItems = useMemo(
-    () =>
-      streamingRoomLeadPreviewItems.map((item) => ({
-        key: String(getProviderRoomItemRailKey(item)),
-        title: item.title,
-      })),
-    [streamingRoomLeadPreviewItems],
-  );
-  const streamingRoomLeadPreviewKeys = useMemo(
-    () => getHomeRailIdentitySet(streamingRoomLeadSurfaceItems),
-    [streamingRoomLeadSurfaceItems],
-  );
   const forYouPreviewKeys = useMemo(
-    () => new Set([...visibleEditorialPreviewKeys, ...streamingRoomLeadPreviewKeys]),
-    [streamingRoomLeadPreviewKeys, visibleEditorialPreviewKeys],
+    () => new Set([...visibleEditorialPreviewKeys]),
+    [visibleEditorialPreviewKeys],
   );
   const forYouPrecedingSurfaceItems = useMemo(
-    () => [...visibleOpeningSurfaceItems, ...streamingRoomLeadSurfaceItems],
-    [streamingRoomLeadSurfaceItems, visibleOpeningSurfaceItems],
+    () => [...visibleOpeningSurfaceItems],
+    [visibleOpeningSurfaceItems],
   );
   const primaryShelfItems = useMemo(
     () =>
@@ -651,117 +606,12 @@ export function HomeSurface({
       visibleEditorialSurfaceItems,
     ],
   );
-  const roomSoftPreviewKeys = useMemo(
-    () =>
-      new Set([
-        ...getHomeRailIdentitySet(heatItems),
-        ...getHomeRailIdentitySet(freshItems),
-        ...getHomeRailIdentitySet(criticsItems),
-        ...getHomeRailIdentitySet(quickItems),
-      ]),
-    [heatItems, freshItems, criticsItems, quickItems],
-  );
-  const roomSurfaceItems = useMemo(
-    () => [
-      ...visibleOpeningSurfaceItems,
-      ...forYouItems,
-      ...heatItems,
-      ...freshItems,
-      ...criticsItems,
-      ...quickItems,
-    ],
-    [
-      visibleOpeningSurfaceItems,
-      forYouItems,
-      heatItems,
-      freshItems,
-      criticsItems,
-      quickItems,
-    ],
-  );
-  const roomSurfacePreviewKeys = useMemo(
-    () => getHomeRailIdentitySet(roomSurfaceItems),
-    [roomSurfaceItems],
-  );
-  const streamingRooms = useMemo(
-    (): ProviderRoom[] => {
-      const rooms = prioritizeHomeRoomsAgainstPreviewKeys<
-        ProviderRoom["items"][number],
-        ProviderRoom
-      >(
-        data.streamingRooms,
-        roomHardPreviewKeys,
-        MIN_PROVIDER_ROOM_ITEMS,
-        roomSoftPreviewKeys,
-      );
-      const visibleRooms = rooms.flatMap((room) => {
-        const items = limitHomeRoomItemsByTitleAppearances<
-          ProviderRoom["items"][number]
-        >(
-          room.items,
-          roomSurfaceItems,
-          MAX_PROVIDER_ROOM_SURFACE_TITLE_APPEARANCES,
-          MIN_PROVIDER_ROOM_ITEMS,
-          TARGET_PROVIDER_ROOM_ITEMS,
-        );
-        const sortedItems = sortProviderRoomItemsForFreshness(items, surfaceNow);
-        return sortedItems.length >= MIN_PROVIDER_ROOM_ITEMS
-          ? [{ ...room, items: sortedItems }]
-          : [];
-      });
-      const sortedRooms = sortProviderRoomsForFreshness(visibleRooms, surfaceNow);
-      return filterHomeRoomsWithUnpreviewedFeaturedItems<
-        ProviderRoom["items"][number],
-        ProviderRoom
-      >(
-        sortedRooms,
-        roomSurfacePreviewKeys,
-        (items, mutedTitleKeys) =>
-          getRoomFeaturedItem(items, mutedTitleKeys, false),
-        MIN_PROVIDER_ROOMS,
-      );
-    },
-    [
-      data.streamingRooms,
-      roomHardPreviewKeys,
-      roomSoftPreviewKeys,
-      roomSurfaceItems,
-      roomSurfacePreviewKeys,
-      surfaceNow,
-    ],
-  );
-  const streamingRoomSignalRooms = useMemo(
-    () =>
-      streamingRooms.map((room) => {
-        const featured = getRoomFeaturedItem(
-          room.items,
-          roomSurfacePreviewKeys,
-          false,
-        );
-        const supportItems = getRoomSupportItems({
-          items: room.items,
-          featured,
-          mutedSupportTitleKeys: roomSurfacePreviewKeys,
-          softMutedSupportTitleKeys: roomSurfacePreviewKeys,
-        });
-        return {
-          items: [featured, ...supportItems].filter(
-            (item): item is ProviderRoom["items"][number] => Boolean(item),
-          ),
-        };
-      }),
-    [roomSurfacePreviewKeys, streamingRooms],
-  );
   const discoverySectionSignals = useMemo(
     () => ({
       heat: getHomeDiscoverySectionSignal(heatItems, surfaceNow),
       fresh: getHomeDiscoverySectionSignal(freshItems, surfaceNow),
       critics: getHomeDiscoverySectionSignal(criticsItems, surfaceNow),
       quick: getHomeDiscoverySectionSignal(quickItems, surfaceNow),
-      rooms: getHomeProviderRoomsSectionSignal(
-        streamingRoomSignalRooms,
-        surfaceNow,
-      ),
     }),
     [
       heatItems,
@@ -769,7 +619,6 @@ export function HomeSurface({
       criticsItems,
       quickItems,
       surfaceNow,
-      streamingRoomSignalRooms,
     ],
   );
   const socialSectionSignal = useMemo(
@@ -958,7 +807,6 @@ export function HomeSurface({
     add("fresh", data.loading.fresh || freshItems.length > 0);
     add("critics", data.loading.critics || criticsItems.length > 0);
     add("quick", data.loading.quick || quickItems.length > 0);
-    add("rooms", data.loading.rooms || streamingRooms.length > 0);
     add("friends", data.hasProfile && plannedKinds.has("friends"));
 
     return visible;
@@ -971,7 +819,6 @@ export function HomeSurface({
     data.loading.fresh,
     data.loading.heat,
     data.loading.quick,
-    data.loading.rooms,
     forYouItems.length,
     freshItems.length,
     heatItems.length,
@@ -979,7 +826,6 @@ export function HomeSurface({
     schedulePreview.hasScheduleItems,
     schedulePreview.preview,
     sections,
-    streamingRooms.length,
   ]);
   const sectionDisplayIndexByKind = useMemo(
     () => getHomeSectionDisplayIndexes(sections, visibleNumberedSectionKinds),
@@ -1152,33 +998,6 @@ export function HomeSurface({
           />
         );
       }
-      case "rooms": {
-        if (data.loading.rooms && streamingRooms.length === 0) {
-          return (
-            <RailSkeleton
-              index={getSectionDisplayIndex(item.kind)}
-              kicker={railHeaderCopy.rooms.kicker}
-              title={railHeaderCopy.rooms.title}
-              accent={ROOMS_ACCENT}
-              icon="tv"
-              variant="ribbon"
-            />
-          );
-        }
-        if (streamingRooms.length === 0) return null;
-        return (
-          <StreamingRooms
-            rooms={streamingRooms}
-            index={getSectionDisplayIndex(item.kind)}
-            kicker={railHeaderCopy.rooms.kicker}
-            cardWidth={roomCardWidth}
-            mutedHeroTitleKeys={roomHardPreviewKeys}
-            mutedSupportTitleKeys={roomSurfacePreviewKeys}
-            softMutedSupportTitleKeys={roomSurfacePreviewKeys}
-            allowMutedFeaturedFallback={false}
-          />
-        );
-      }
       case "contact-sync":
         return (
           <View className="mt-6 px-6">
@@ -1262,7 +1081,7 @@ export function HomeSurface({
         displayName={data.me?.displayName ?? data.me?.name ?? null}
         username={data.me?.username ?? null}
         avatarUrl={data.me?.avatarUrl ?? null}
-        notificationCount={schedulePreview.tonightCount + schedulePreview.weekCount}
+        notificationCount={unreadNotifications}
       />
     </View>
   );

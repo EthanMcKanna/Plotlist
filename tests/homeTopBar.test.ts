@@ -26,9 +26,10 @@ import {
   HOME_TOP_BAR_SCROLL_GUARD_HEIGHT,
   HOME_TOP_BAR_TITLE_FADE_END,
   HOME_TOP_BAR_TITLE_FADE_START,
-  getHomeTopBarCalendarAccessibilityLabel,
   getHomeTopBarFirstName,
   getHomeTopBarGreetingLine,
+  getHomeTopBarNotificationsAccessibilityLabel,
+  getHomeTopBarNotificationsBadgeLabel,
   getHomeTopBarTitleChromeState,
   HomeTopBar,
 } from "../components/HomeTopBar";
@@ -60,14 +61,21 @@ describe("home top bar copy", () => {
     ).toBe("Good afternoon");
   });
 
-  it("labels release-calendar updates with the tracked release count", () => {
-    expect(getHomeTopBarCalendarAccessibilityLabel(0)).toBe("Release calendar");
-    expect(getHomeTopBarCalendarAccessibilityLabel(1)).toBe(
-      "Release calendar, 1 upcoming release",
+  it("labels the notifications button with the unread count", () => {
+    expect(getHomeTopBarNotificationsAccessibilityLabel(0)).toBe("Notifications");
+    expect(getHomeTopBarNotificationsAccessibilityLabel(1)).toBe(
+      "Notifications, 1 unread",
     );
-    expect(getHomeTopBarCalendarAccessibilityLabel(3)).toBe(
-      "Release calendar, 3 upcoming releases",
+    expect(getHomeTopBarNotificationsAccessibilityLabel(3)).toBe(
+      "Notifications, 3 unread",
     );
+  });
+
+  it("caps the unread badge and hides it when nothing is unread", () => {
+    expect(getHomeTopBarNotificationsBadgeLabel(0)).toBeNull();
+    expect(getHomeTopBarNotificationsBadgeLabel(7)).toBe("7");
+    expect(getHomeTopBarNotificationsBadgeLabel(99)).toBe("99");
+    expect(getHomeTopBarNotificationsBadgeLabel(120)).toBe("99+");
   });
 
   it("exposes stable handles for homepage Browser QA and top-chrome routing", () => {
@@ -80,18 +88,19 @@ describe("home top bar copy", () => {
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar" })).toBeTruthy();
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" })).toBeTruthy();
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar-search" })).toBeTruthy();
-    expect(screen.UNSAFE_getByProps({ testID: "home-topbar-calendar" })).toBeTruthy();
+    expect(screen.UNSAFE_getByProps({ testID: "home-topbar-notifications" })).toBeTruthy();
     const title = screen.UNSAFE_getByProps({ testID: "home-topbar-title" });
     expect(title.props.accessibilityElementsHidden).toBe(true);
     expect(title.props.importantForAccessibility).toBe("no-hide-descendants");
     expect(screen.queryByText("Plotlist")).toBeNull();
     expect(screen.queryByText(/Ethan/)).toBeNull();
     expect(
-      screen.getByLabelText("Release calendar, 2 upcoming releases"),
+      screen.getByLabelText("Notifications, 2 unread"),
     ).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
 
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-search" }));
-    fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-calendar" }));
+    fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-notifications" }));
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" }));
 
     // Search pushes a fresh focus param so the search input opens the
@@ -102,7 +111,7 @@ describe("home top bar copy", () => {
         params: expect.objectContaining({ focus: expect.any(String) }),
       }),
     );
-    expect(router.push).toHaveBeenCalledWith("/calendar");
+    expect(router.push).toHaveBeenCalledWith("/notifications");
     expect(router.push).toHaveBeenCalledWith("/profile");
   });
 
@@ -116,7 +125,7 @@ describe("home top bar copy", () => {
     [
       "home-topbar-profile",
       "home-topbar-search",
-      "home-topbar-calendar",
+      "home-topbar-notifications",
     ].forEach((testID) => {
       const action = screen.UNSAFE_getByProps({ testID });
       const style = StyleSheet.flatten(action.props.style);

@@ -2,7 +2,6 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   getHomeDiscoverySectionSignal,
-  getHomeProviderRoomsSectionSignal,
   getHomeSectionDisplayIndexes,
   getHomeSectionPlan,
   getHomeSectionTestID,
@@ -47,57 +46,6 @@ describe("home section plan", () => {
     });
   });
 
-  it("counts provider-room currentness before ranking streaming rooms", () => {
-    const signal = getHomeProviderRoomsSectionSignal(
-      [
-        {
-          items: [
-            { year: 2026, homeSignal: "Prime May 27" },
-            { year: 2020, homeSignal: "8.4 TMDB" },
-          ],
-        },
-        {
-          items: [
-            { year: 2025, homeSignal: "Apple TV+ May 29" },
-            { year: 2019, homeSignal: null },
-          ],
-        },
-      ],
-      "2026-05-30T12:00:00.000Z",
-    );
-
-    expect(signal).toEqual({
-      itemCount: 4,
-      currentCount: 2,
-      explicitCurrentCount: 2,
-      providerRoomCount: 2,
-    });
-
-    const strongStreamingSignal = getHomeProviderRoomsSectionSignal(
-      Array.from({ length: 4 }, (_, roomIndex) => ({
-        items: [
-          { year: 2026, homeSignal: "Prime May 27" },
-          { year: 2026, homeSignal: "Apple TV+ May 29" },
-          { year: 2025, homeSignal: roomIndex === 0 ? null : "S2 airing now" },
-        ],
-      })),
-      "2026-05-30T12:00:00.000Z",
-    );
-
-    expect(
-      getRankedHomeDiscoverySections({
-        now: "2026-05-30T20:00:00.000Z",
-        sectionSignals: {
-          heat: { itemCount: 4, currentCount: 1, explicitCurrentCount: 1 },
-          fresh: { itemCount: 4, currentCount: 1, explicitCurrentCount: 1 },
-          critics: { itemCount: 8, currentCount: 0, explicitCurrentCount: 0 },
-          quick: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
-          rooms: strongStreamingSignal,
-        },
-      })[0],
-    ).toBe("rooms");
-  });
-
   it("opens with resume and utility modules for signed-in viewers", () => {
     expect(
       kinds({
@@ -124,10 +72,9 @@ describe("home section plan", () => {
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
           critics: { itemCount: 8, currentCount: 1, explicitCurrentCount: 0 },
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
-          rooms: { itemCount: 24, providerRoomCount: 6 },
         },
       }).slice(2, 6),
-    ).toEqual(["fresh", "for-you", "rooms", "heat"]);
+    ).toEqual(["fresh", "for-you", "heat", "critics"]);
   });
 
   it("keeps discovery rails available for cold-start or signed-out viewers", () => {
@@ -142,7 +89,6 @@ describe("home section plan", () => {
       "fresh",
       "critics",
       "quick",
-      "rooms",
     ]);
   });
 
@@ -228,7 +174,7 @@ describe("home section plan", () => {
       },
       sectionSignals: {
         fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
-        rooms: { itemCount: 24, providerRoomCount: 6 },
+        heat: { itemCount: 8, currentCount: 4, explicitCurrentCount: 3 },
       },
     });
     const visibleKinds = new Set<HomeSectionKind>([
@@ -236,7 +182,7 @@ describe("home section plan", () => {
       "tonight",
       "fresh",
       "for-you",
-      "rooms",
+      "heat",
     ]);
 
     const indexes = getHomeSectionDisplayIndexes(plan, visibleKinds);
@@ -245,7 +191,7 @@ describe("home section plan", () => {
     expect(indexes.get("tonight")).toBe(2);
     expect(indexes.get("fresh")).toBe(3);
     expect(indexes.get("for-you")).toBe(4);
-    expect(indexes.get("rooms")).toBe(5);
+    expect(indexes.get("heat")).toBe(5);
     expect(new Set(indexes.values()).size).toBe(indexes.size);
   });
 
@@ -295,7 +241,6 @@ describe("home section plan", () => {
         fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
         critics: { itemCount: 8, currentCount: 1, explicitCurrentCount: 0 },
         quick: { itemCount: 5, currentCount: 1, explicitCurrentCount: 0 },
-        rooms: { itemCount: 24, providerRoomCount: 6 },
       },
     });
     const handles = plan.map((section) => getHomeSectionTestID(section.kind));
@@ -306,7 +251,7 @@ describe("home section plan", () => {
         "home-section-tonight",
         "home-section-for-you",
         "home-section-fresh",
-        "home-section-rooms",
+        "home-section-heat",
         "home-section-contact-sync",
         "home-section-friends",
       ]),
@@ -323,7 +268,6 @@ describe("home section plan", () => {
         contactNudgeDismissed: false,
         sectionSignals: {
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
-          rooms: { itemCount: 24, providerRoomCount: 6 },
         },
       });
 
@@ -332,12 +276,11 @@ describe("home section plan", () => {
       "tonight",
       "fresh",
       "for-you",
-      "rooms",
       "heat",
+      "critics",
     ]);
-    // Signed-in surfaces carry four discovery rails; the weakest one sits out.
-    expect(plan).toContain("critics");
-    expect(plan).not.toContain("quick");
+    // Signed-in surfaces carry all four discovery rails.
+    expect(plan).toContain("quick");
     expect(plan.indexOf("contact-sync")).toBeGreaterThan(plan.indexOf("heat"));
     expect(
       kinds({
@@ -359,10 +302,9 @@ describe("home section plan", () => {
         sectionSignals: {
           heat: { itemCount: 3, currentCount: 1, explicitCurrentCount: 1 },
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
-          rooms: { itemCount: 24, providerRoomCount: 6 },
         },
       }).slice(2, 7),
-    ).toEqual(["fresh", "friends", "for-you", "rooms", "heat"]);
+    ).toEqual(["fresh", "friends", "for-you", "heat", "critics"]);
 
     expect(
       kinds({
@@ -437,10 +379,9 @@ describe("home section plan", () => {
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
           critics: { itemCount: 8, currentCount: 1, explicitCurrentCount: 0 },
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
-          rooms: { itemCount: 24, providerRoomCount: 6 },
         },
       }).slice(0, 3),
-    ).toEqual(["fresh", "rooms", "heat"]);
+    ).toEqual(["fresh", "heat", "critics"]);
   });
 
   it("moves quick starts up late at night when their rail is substantial", () => {
@@ -452,7 +393,6 @@ describe("home section plan", () => {
           fresh: { itemCount: 4, currentCount: 1, explicitCurrentCount: 1 },
           critics: { itemCount: 6, currentCount: 0, explicitCurrentCount: 0 },
           quick: { itemCount: 8, currentCount: 3, explicitCurrentCount: 2 },
-          rooms: { itemCount: 0, providerRoomCount: 0 },
         },
       }).slice(0, 2),
     ).toEqual(["quick", "heat"]);
@@ -464,7 +404,6 @@ describe("home section plan", () => {
       fresh: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
       critics: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
       quick: { itemCount: 4, currentCount: 0, explicitCurrentCount: 0 },
-      rooms: { itemCount: 0, providerRoomCount: 0 },
     };
 
     const orders = new Set(
@@ -499,7 +438,7 @@ describe("home section plan", () => {
     }
   });
 
-  it("keeps the personal shelf ahead of provider browsing for signed-in viewers", () => {
+  it("keeps the personal shelf ahead of the remaining discovery rails for signed-in viewers", () => {
     expect(
       kinds({
         hasProfile: true,
@@ -507,9 +446,8 @@ describe("home section plan", () => {
         contactNudgeDismissed: null,
         sectionSignals: {
           fresh: { itemCount: 5, currentCount: 5, explicitCurrentCount: 5 },
-          rooms: { itemCount: 24, providerRoomCount: 6 },
         },
       }).slice(2, 6),
-    ).toEqual(["fresh", "for-you", "rooms", "heat"]);
+    ).toEqual(["fresh", "for-you", "heat", "critics"]);
   });
 });

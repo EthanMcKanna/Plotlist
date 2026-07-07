@@ -70,12 +70,16 @@ export function getHomeTopBarGreetingLine(
   return firstName ? `${greeting}, ${firstName}` : greeting;
 }
 
-export function getHomeTopBarCalendarAccessibilityLabel(
+export function getHomeTopBarNotificationsAccessibilityLabel(
   notificationCount = 0,
 ) {
-  if (notificationCount <= 0) return "Release calendar";
-  const releaseWord = notificationCount === 1 ? "release" : "releases";
-  return `Release calendar, ${notificationCount} upcoming ${releaseWord}`;
+  if (notificationCount <= 0) return "Notifications";
+  return `Notifications, ${notificationCount} unread`;
+}
+
+export function getHomeTopBarNotificationsBadgeLabel(notificationCount = 0) {
+  if (notificationCount <= 0) return null;
+  return notificationCount > 99 ? "99+" : String(notificationCount);
 }
 
 export function HomeTopBar({
@@ -201,18 +205,18 @@ export function HomeTopBar({
           <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/calendar");
+              router.push("/notifications");
             }}
-            testID="home-topbar-calendar"
+            testID="home-topbar-notifications"
             accessibilityRole="button"
-            accessibilityLabel={getHomeTopBarCalendarAccessibilityLabel(notificationCount)}
+            accessibilityLabel={getHomeTopBarNotificationsAccessibilityLabel(notificationCount)}
             radius={8}
             style={styles.actionButton}
             surfaceStyle={styles.actionSurface}
             contentStyle={styles.actionButtonContent}
           >
             <Ionicons
-              name="calendar-outline"
+              name="notifications-outline"
               size={18}
               color="#F1F3F7"
               accessible={false}
@@ -220,6 +224,13 @@ export function HomeTopBar({
               aria-hidden={true}
               importantForAccessibility="no"
             />
+            {notificationCount > 0 ? (
+              <View style={styles.badge} pointerEvents="none">
+                <Text style={styles.badgeText} accessible={false}>
+                  {getHomeTopBarNotificationsBadgeLabel(notificationCount)}
+                </Text>
+              </View>
+            ) : null}
           </GlassPressable>
         </View>
       </View>
@@ -289,6 +300,24 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: "center",
     width: 44,
+  },
+  badge: {
+    alignItems: "center",
+    backgroundColor: "#38BDF8",
+    borderRadius: 8,
+    height: 16,
+    justifyContent: "center",
+    minWidth: 16,
+    paddingHorizontal: 4,
+    position: "absolute",
+    right: 5,
+    top: 5,
+  },
+  badgeText: {
+    color: "#0B0D12",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: -0.2,
   },
   pointerBoxNone: {
     pointerEvents: "box-none",
