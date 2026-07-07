@@ -30,6 +30,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useAnimatedRef,
+  useAnimatedScrollHandler,
   withTiming,
   runOnJS,
   interpolate,
@@ -743,8 +745,14 @@ export default function ShowScreen() {
   // Episode sheet gesture animation
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
   const sheetOverlayOpacity = useSharedValue(0);
-  const episodeScrollOffset = useRef(0);
-  const sheetScrollRef = useRef<ScrollView>(null);
+  // Live scroll offset of the sheet's ScrollView, tracked on the UI thread so
+  // the pan gesture can decide (without JS-thread lag) whether the list is at
+  // the top and therefore free to be dragged down to dismiss.
+  const sheetScrollY = useSharedValue(0);
+  const sheetScrollRef = useAnimatedRef<Animated.ScrollView>();
+  const sheetScrollHandler = useAnimatedScrollHandler((e) => {
+    sheetScrollY.value = e.contentOffset.y;
+  });
   // Y offset (within the "px-5" content block, i.e. below the hero) of the
   // rating card that holds the review input, so we can scroll it clear of the
   // keyboard on focus.
@@ -790,10 +798,14 @@ export default function ShowScreen() {
     opacity: sheetOverlayOpacity.value,
   }));
 
+  // Runs simultaneously with the inner ScrollView (via
+  // simultaneousWithExternalGesture) so drag-to-dismiss keeps working even when
+  // the episode has enough content to scroll. We only translate the sheet while
+  // the list is pinned to the top and the finger is moving down; otherwise the
+  // ScrollView owns the gesture and scrolls normally.
   const episodePanGesture = Gesture.Pan()
     .onUpdate((e) => {
-      // Only allow downward drag when scrolled to top
-      if (episodeScrollOffset.current <= 0 && e.translationY > 0) {
+      if (sheetScrollY.value <= 0 && e.translationY > 0) {
         sheetTranslateY.value = e.translationY;
         sheetOverlayOpacity.value = interpolate(
           e.translationY,
@@ -801,23 +813,31 @@ export default function ShowScreen() {
           [1, 0],
           Extrapolation.CLAMP,
         );
+      } else if (sheetTranslateY.value !== 0) {
+        // Finger returned into the scrollable area — snap the sheet home so the
+        // list scrolls instead of half-dragging.
+        sheetTranslateY.value = 0;
+        sheetOverlayOpacity.value = 1;
       }
     })
     .onEnd((e) => {
+      const dragged = sheetTranslateY.value;
       if (
-        e.translationY > DISMISS_THRESHOLD ||
-        e.velocityY > DISMISS_VELOCITY
+        dragged > DISMISS_THRESHOLD ||
+        (e.velocityY > DISMISS_VELOCITY && dragged > 8)
       ) {
         sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
         sheetOverlayOpacity.value = withTiming(0, { duration: 200 });
         runOnJS(closeEpisodeSheet)();
-      } else {
+      } else if (dragged !== 0) {
         sheetTranslateY.value = withTiming(0, { duration: 250 });
         sheetOverlayOpacity.value = withTiming(1, { duration: 150 });
       }
     })
-    .activeOffsetY(10)
-    .failOffsetY(-5);
+    // RNGH/Reanimated ref typings disagree; the runtime ref is correct.
+    .simultaneousWithExternalGesture(sheetScrollRef as never)
+    .activeOffsetY(12)
+    .failOffsetY(-12);
 
   const seasonDetailsByNumberRef = useRef<Record<number, any>>({});
   const seasonLoadStateByNumberRef = useRef<Record<number, SeasonLoadState>>({});
@@ -2756,7 +2776,7 @@ export default function ShowScreen() {
                   }}
                   contentStyle={{ flex: 1 }}
                 >
-                <ScrollView
+                <Animated.ScrollView
                   ref={sheetScrollRef}
                   className="flex-1"
                   showsVerticalScrollIndicator={false}
@@ -2765,10 +2785,8 @@ export default function ShowScreen() {
                   keyboardDismissMode="interactive"
                   automaticallyAdjustKeyboardInsets
                   scrollEventThrottle={16}
-                  onScroll={(e) => {
-                    episodeScrollOffset.current = e.nativeEvent.contentOffset.y;
-                  }}
-                  bounces={episodeScrollOffset.current > 0}
+                  onScroll={sheetScrollHandler}
+                  bounces={false}
                 >
               {/* Hero image with gradient overlay and metadata */}
               <View className="relative" style={{ aspectRatio: 16 / 9 }}>
@@ -2805,8 +2823,16 @@ export default function ShowScreen() {
                 </View>
 
                 <LinearGradient
-                  colors={["rgba(13, 15, 20, 0.4)", "transparent", "rgba(13, 15, 20, 0.85)", "#0D0F14"]}
-                  locations={[0, 0.25, 0.75, 1]}
+                  colors={[
+                    "rgba(13, 15, 20, 0.5)",
+                    "rgba(13, 15, 20, 0)",
+                    "rgba(13, 15, 20, 0)",
+                    "rgba(13, 15, 20, 0.35)",
+                    "rgba(13, 15, 20, 0.72)",
+                    "rgba(13, 15, 20, 0.94)",
+                    "#0D0F14",
+                  ]}
+                  locations={[0, 0.16, 0.42, 0.62, 0.8, 0.93, 1]}
                   style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
                 />
 
@@ -2875,6 +2901,15 @@ export default function ShowScreen() {
                   </GlassSurface>
                 </View>
               </View>
+
+              {/* Seamless bridge: dissolves the still's dark bottom edge into the
+                  sheet material so there's no hard cutoff between thumbnail and
+                  content. Zero net layout height (negative margins cancel). */}
+              <LinearGradient
+                pointerEvents="none"
+                colors={["#0D0F14", "rgba(13, 15, 20, 0)"]}
+                style={{ height: 32, marginTop: -16, marginBottom: -16 }}
+              />
 
               <View className="px-5">
                 {/* Title */}
@@ -3324,7 +3359,7 @@ export default function ShowScreen() {
                   </View>
                 )}
               </View>
-            </ScrollView>
+            </Animated.ScrollView>
                 </GlassSurface>
               </Animated.View>
             </GestureDetector>
