@@ -3,7 +3,20 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Poster } from "./Poster";
 import { Avatar } from "./Avatar";
-import { formatRelativeTime } from "../lib/format";
+import { formatEpisodeCode, formatRelativeTime } from "../lib/format";
+
+export function getReviewRowEpisodeLabel({
+  seasonNumber,
+  episodeNumber,
+}: {
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
+}) {
+  if (typeof seasonNumber !== "number" || typeof episodeNumber !== "number") {
+    return null;
+  }
+  return formatEpisodeCode(seasonNumber, episodeNumber);
+}
 
 export function ReviewRow({
   id,
@@ -16,6 +29,8 @@ export function ReviewRow({
   authorAvatarUrl,
   createdAt,
   spoiler = false,
+  seasonNumber,
+  episodeNumber,
 }: {
   id: string;
   showTitle?: string;
@@ -27,11 +42,14 @@ export function ReviewRow({
   authorAvatarUrl?: string | null;
   createdAt?: number;
   spoiler?: boolean;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
 }) {
   const router = useRouter();
   const titleLabel = authorName ?? showTitle ?? "Review";
   const subtitleLabel = authorName && showTitle ? showTitle : authorUsername ? `@${authorUsername}` : null;
   const hasText = Boolean(reviewText);
+  const episodeLabel = getReviewRowEpisodeLabel({ seasonNumber, episodeNumber });
 
   // Rating-only: compact single-line row
   if (!hasText) {
@@ -56,6 +74,11 @@ export function ReviewRow({
             <Text className="text-xs text-text-tertiary">{subtitleLabel}</Text>
           ) : null}
         </View>
+        {episodeLabel ? (
+          <View className="rounded-full bg-brand-500/10 px-2 py-1">
+            <Text className="text-[11px] font-semibold text-brand-300">{episodeLabel}</Text>
+          </View>
+        ) : null}
         <View className="rounded-full bg-amber-500/12 px-2.5 py-1">
           <Text className="text-xs font-semibold text-amber-300">★ {rating}/5</Text>
         </View>
@@ -100,6 +123,11 @@ export function ReviewRow({
         </View>
 
         <View className="mt-2 flex-row flex-wrap items-center gap-2">
+          {episodeLabel ? (
+            <View className="rounded-full bg-brand-500/10 px-2.5 py-1">
+              <Text className="text-xs font-semibold text-brand-300">{episodeLabel}</Text>
+            </View>
+          ) : null}
           <View className="rounded-full bg-amber-500/12 px-2.5 py-1">
             <Text className="text-xs font-semibold text-amber-300">★ {rating}/5</Text>
           </View>

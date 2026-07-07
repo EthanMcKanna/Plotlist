@@ -21,7 +21,7 @@ import { Comments } from "../../components/Comments";
 import { GlassPressable } from "../../components/NativeGlass";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
-import { formatDate } from "../../lib/format";
+import { formatDate, formatEpisodeCode } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { ReportModal } from "../../components/ReportModal";
 
@@ -158,7 +158,21 @@ export default function ReviewScreen() {
                 <Text className="text-xl font-bold text-text-primary" numberOfLines={2}>
                   {show?.title ?? "Unknown show"}
                 </Text>
-                {review.episodeTitle ? (
+                {typeof review.seasonNumber === "number" &&
+                typeof review.episodeNumber === "number" ? (
+                  <View className="mt-1.5 flex-row items-center gap-2">
+                    <View className="rounded-full bg-brand-500/10 px-2 py-0.5">
+                      <Text className="text-[11px] font-semibold text-brand-300">
+                        {formatEpisodeCode(review.seasonNumber, review.episodeNumber)}
+                      </Text>
+                    </View>
+                    {review.episodeTitle ? (
+                      <Text className="flex-1 text-sm text-text-secondary" numberOfLines={1}>
+                        {review.episodeTitle}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : review.episodeTitle ? (
                   <Text className="mt-1 text-sm text-text-secondary" numberOfLines={1}>
                     {review.episodeTitle}
                   </Text>

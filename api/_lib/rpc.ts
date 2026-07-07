@@ -3228,7 +3228,13 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "reviews:listForShowDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
     const parsed = z.object({ showId: z.string() }).passthrough().parse(args ?? {});
-    const rows = await db.select().from(reviews).where(eq(reviews.showId, parsed.showId)).orderBy(desc(reviews.createdAt));
+    // Show-level reviews only: per-episode ratings live in the episode sheet
+    // (listForEpisodeDetailed) and would flood this rail as star-only rows.
+    const rows = await db
+      .select()
+      .from(reviews)
+      .where(and(eq(reviews.showId, parsed.showId), isNull(reviews.seasonNumber)))
+      .orderBy(desc(reviews.createdAt));
     const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
     return pageRows(await buildReviewDetails(visibleRows, viewer?.id), args);
   },
@@ -4145,15 +4151,30 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "reviews:rateEpisode": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), rating: z.number() }).parse(args ?? {});
+    const parsed = z.object({
+      showId: z.string(),
+      seasonNumber: z.number(),
+      episodeNumber: z.number(),
+      episodeTitle: z.string().optional(),
+      rating: z.number(),
+      // Omitted -> keep the existing note; empty string or null -> clear it.
+      reviewText: z.string().nullable().optional(),
+    }).parse(args ?? {});
     const existing = await db.select().from(reviews).where(and(eq(reviews.authorId, user.id), eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber))).limit(1);
     const now = Date.now();
+    const normalizedText =
+      parsed.reviewText === undefined ? undefined : parsed.reviewText?.trim() || null;
     if (existing[0]) {
-      await db.update(reviews).set({ rating: parsed.rating, episodeTitle: parsed.episodeTitle ?? existing[0].episodeTitle, updatedAt: now }).where(eq(reviews.id, existing[0].id));
+      await db.update(reviews).set({
+        rating: parsed.rating,
+        episodeTitle: parsed.episodeTitle ?? existing[0].episodeTitle,
+        ...(normalizedText !== undefined ? { reviewText: normalizedText } : {}),
+        updatedAt: now,
+      }).where(eq(reviews.id, existing[0].id));
       return existing[0].id;
     }
     const id = createId("review");
-    await db.insert(reviews).values({ id, authorId: user.id, showId: parsed.showId, rating: parsed.rating, reviewText: null, spoiler: false, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null, createdAt: now, updatedAt: now });
+    await db.insert(reviews).values({ id, authorId: user.id, showId: parsed.showId, rating: parsed.rating, reviewText: normalizedText ?? null, spoiler: false, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null, createdAt: now, updatedAt: now });
     return id;
   },
   "reviews:removeEpisodeRating": async ({ args, req }) => {

@@ -195,6 +195,8 @@ export default function ProfileScreen() {
         reviewText={item.review.reviewText}
         createdAt={item.review.createdAt}
         spoiler={item.review.spoiler}
+        seasonNumber={item.review.seasonNumber}
+        episodeNumber={item.review.episodeNumber}
       />
     ),
     [],

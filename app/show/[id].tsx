@@ -65,6 +65,10 @@ import {
   optimisticUnmarkSeasonWatched,
 } from "../../lib/episodeProgressOptimistic";
 import {
+  optimisticRateEpisode,
+  optimisticRemoveEpisodeRating,
+} from "../../lib/episodeRatingOptimistic";
+import {
   INITIAL_VISIBLE_SEASONS,
   getInitialVisibleSeasonCount,
   getNextVisibleSeasonCount,
@@ -532,8 +536,14 @@ export default function ShowScreen() {
       );
     },
   );
-  const rateEpisode = useMutation(api.reviews.rateEpisode);
-  const removeEpisodeRating = useMutation(api.reviews.removeEpisodeRating);
+  const rateEpisode = useMutation(api.reviews.rateEpisode).withOptimisticUpdate(
+    (localStore, args) => optimisticRateEpisode(localStore, args),
+  );
+  const removeEpisodeRating = useMutation(
+    api.reviews.removeEpisodeRating,
+  ).withOptimisticUpdate((localStore, args) =>
+    optimisticRemoveEpisodeRating(localStore, args),
+  );
   const queriedEpisodeRatings = useQuery(
     api.reviews.getMyEpisodeRatings,
     !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
@@ -1209,7 +1219,11 @@ export default function ShowScreen() {
   // Clear episode content after sheet dismiss animation (fallback if onDismiss doesn't fire)
   useEffect(() => {
     if (!episodeSheetVisible && selectedEpisode) {
-      const id = setTimeout(() => setSelectedEpisode(null), 400);
+      const id = setTimeout(() => {
+        setSelectedEpisode(null);
+        setEpisodeReviewExpanded(false);
+        setEpisodeReviewText("");
+      }, 400);
       return () => clearTimeout(id);
     }
   }, [episodeSheetVisible, selectedEpisode]);
@@ -2630,6 +2644,7 @@ export default function ShowScreen() {
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
                   keyboardShouldPersistTaps="handled"
+                  automaticallyAdjustKeyboardInsets
                   scrollEventThrottle={16}
                   onScroll={(e) => {
                     episodeScrollOffset.current = e.nativeEvent.contentOffset.y;
@@ -2824,7 +2839,7 @@ export default function ShowScreen() {
                   </Text>
                 ) : null}
 
-                {/* ─── Your Rating ─── */}
+                {/* ─── Your rating ─── */}
                 {isAuthenticated && sheetIsAvailable && (
                   <GlassSurface
                     radius={18}
@@ -2833,75 +2848,75 @@ export default function ShowScreen() {
                     style={{ marginTop: 24 }}
                     contentStyle={{ padding: 16 }}
                   >
-                    <Text className="mb-3 text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
-                      Your Rating
-                    </Text>
                     <View className="flex-row items-center justify-between">
-	                      <StarRating
-	                        value={myEpRating}
-	                        onChange={(val) => {
-	                          if (val === 0 && myEpRating > 0) {
-	                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isShowPreview) return;
-	                            removeEpisodeRating({
-	                              showId,
-	                              seasonNumber: selectedEpisode.seasonNumber,
-                              episodeNumber: selectedEpisode.episode.episodeNumber,
-                            });
-	                          } else if (val > 0) {
-	                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                              if (isShowPreview) return;
-	                            rateEpisode({
-	                              showId,
-	                              seasonNumber: selectedEpisode.seasonNumber,
-                              episodeNumber: selectedEpisode.episode.episodeNumber,
-                              episodeTitle: selectedEpisode.episode.name,
-                              rating: val,
-                            });
-                          }
-                        }}
-                        size={32}
-                      />
+                      <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                        Your rating
+                      </Text>
                       {myEpRating > 0 && (
                         <Text className="text-sm font-medium text-text-tertiary">
                           {myEpRating}/5
                         </Text>
                       )}
                     </View>
+                    <View className="mt-3">
+                      <StarRating
+                        value={myEpRating}
+                        onChange={(val) => {
+                          if (val === 0 && myEpRating > 0) {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isShowPreview) return;
+                            const removeArgs = {
+                              showId,
+                              seasonNumber: selectedEpisode.seasonNumber,
+                              episodeNumber: selectedEpisode.episode.episodeNumber,
+                            };
+                            const performRemove = () => {
+                              setEpisodeReviewExpanded(false);
+                              setEpisodeReviewText("");
+                              removeEpisodeRating(removeArgs).catch(() => {
+                                Alert.alert(
+                                  "Couldn't remove rating",
+                                  "Check your connection and try again.",
+                                );
+                              });
+                            };
+                            if (myEpReviewText) {
+                              Alert.alert(
+                                "Remove rating?",
+                                "Your episode review will be deleted too.",
+                                [
+                                  { text: "Cancel", style: "cancel" },
+                                  { text: "Remove", style: "destructive", onPress: performRemove },
+                                ],
+                              );
+                            } else {
+                              performRemove();
+                            }
+                          } else if (val > 0) {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            if (isShowPreview) return;
+                            rateEpisode({
+                              showId,
+                              seasonNumber: selectedEpisode.seasonNumber,
+                              episodeNumber: selectedEpisode.episode.episodeNumber,
+                              episodeTitle: selectedEpisode.episode.name,
+                              rating: val,
+                            }).catch(() => {
+                              Alert.alert(
+                                "Couldn't save rating",
+                                "Check your connection and try again.",
+                              );
+                            });
+                          }
+                        }}
+                        size={32}
+                      />
+                    </View>
 
-                    {/* Review text */}
+                    {/* Episode review */}
                     {myEpRating > 0 && (
                       <View className="mt-3">
-                        {myEpReviewText && !episodeReviewExpanded ? (
-                          <GlassPressable
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              setEpisodeReviewText(myEpReviewText);
-                              setEpisodeReviewExpanded(true);
-                            }}
-                            radius={12}
-                            variant="control"
-                            fallbackColor="rgba(255,255,255,0.05)"
-                            contentStyle={{ padding: 12 }}
-                          >
-                            <Text className="text-sm text-text-secondary" numberOfLines={4}>
-                              {myEpReviewText}
-                            </Text>
-                          </GlassPressable>
-                        ) : !episodeReviewExpanded ? (
-                          <Pressable
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              setEpisodeReviewExpanded(true);
-                            }}
-                            className="flex-row items-center gap-1.5 pt-1"
-                          >
-                            <Ionicons name="chatbubble-outline" size={13} color="#9BA1B0" />
-                            <Text className="text-sm text-text-tertiary">
-                              Add a review...
-                            </Text>
-                          </Pressable>
-                        ) : (
+                        {episodeReviewExpanded ? (
                           <View>
                             <GlassSurface
                               radius={12}
@@ -2912,7 +2927,7 @@ export default function ShowScreen() {
                               <TextInput
                                 value={episodeReviewText}
                                 onChangeText={setEpisodeReviewText}
-                                placeholder="What did you think?"
+                                placeholder="What did you think of this episode?"
                                 placeholderTextColor="#5A6070"
                                 multiline
                                 autoFocus
@@ -2926,37 +2941,70 @@ export default function ShowScreen() {
                                 maxLength={5000}
                               />
                             </GlassSurface>
-                            <View className="mt-2 flex-row items-center justify-end gap-3">
+                            <View className="mt-2 flex-row items-center gap-4">
+                              {myEpReviewText ? (
+                                <Pressable
+                                  accessibilityLabel="Delete episode review"
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                    setEpisodeReviewExpanded(false);
+                                    setEpisodeReviewText("");
+                                    if (isShowPreview) return;
+                                    rateEpisode({
+                                      showId,
+                                      seasonNumber: selectedEpisode.seasonNumber,
+                                      episodeNumber: selectedEpisode.episode.episodeNumber,
+                                      episodeTitle: selectedEpisode.episode.name,
+                                      rating: myEpRating,
+                                      reviewText: "",
+                                    }).catch(() => {
+                                      Alert.alert(
+                                        "Couldn't delete review",
+                                        "Check your connection and try again.",
+                                      );
+                                    });
+                                  }}
+                                  hitSlop={8}
+                                >
+                                  <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                                </Pressable>
+                              ) : null}
+                              <View className="flex-1" />
                               <Pressable
                                 onPress={() => {
                                   setEpisodeReviewExpanded(false);
                                   setEpisodeReviewText("");
                                 }}
+                                hitSlop={8}
                               >
                                 <Text className="text-sm text-text-tertiary">Cancel</Text>
                               </Pressable>
                               <Pressable
-	                                onPress={() => {
-	                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                      if (isShowPreview) {
-                                        setEpisodeReviewExpanded(false);
-                                        setEpisodeReviewText("");
-                                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                        return;
-                                      }
-	                                  rateEpisode({
-	                                    showId,
-	                                    seasonNumber: selectedEpisode.seasonNumber,
+                                onPress={() => {
+                                  const draft = episodeReviewText.trim();
+                                  if (!draft) return;
+                                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                  setEpisodeReviewExpanded(false);
+                                  setEpisodeReviewText("");
+                                  if (isShowPreview) return;
+                                  rateEpisode({
+                                    showId,
+                                    seasonNumber: selectedEpisode.seasonNumber,
                                     episodeNumber: selectedEpisode.episode.episodeNumber,
                                     episodeTitle: selectedEpisode.episode.name,
                                     rating: myEpRating,
-                                    reviewText: episodeReviewText || undefined,
+                                    reviewText: draft,
+                                  }).catch(() => {
+                                    setEpisodeReviewText(draft);
+                                    setEpisodeReviewExpanded(true);
+                                    Alert.alert(
+                                      "Couldn't save review",
+                                      "Check your connection and try again.",
+                                    );
                                   });
-                                  setEpisodeReviewExpanded(false);
-                                  setEpisodeReviewText("");
-                                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                                 }}
                                 disabled={!episodeReviewText.trim()}
+                                hitSlop={8}
                               >
                                 <Text
                                   className={`text-sm font-semibold ${
@@ -2970,6 +3018,40 @@ export default function ShowScreen() {
                               </Pressable>
                             </View>
                           </View>
+                        ) : myEpReviewText ? (
+                          <GlassPressable
+                            accessibilityLabel="Edit episode review"
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              setEpisodeReviewText(myEpReviewText);
+                              setEpisodeReviewExpanded(true);
+                            }}
+                            radius={12}
+                            variant="control"
+                            fallbackColor="rgba(255,255,255,0.05)"
+                            contentStyle={{ padding: 12 }}
+                          >
+                            <Text className="text-sm text-text-secondary" numberOfLines={4}>
+                              {myEpReviewText}
+                            </Text>
+                            <View className="mt-1.5 flex-row items-center gap-1">
+                              <Ionicons name="pencil-outline" size={11} color="#5A6070" />
+                              <Text className="text-[11px] text-text-tertiary">Tap to edit</Text>
+                            </View>
+                          </GlassPressable>
+                        ) : (
+                          <Pressable
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              setEpisodeReviewExpanded(true);
+                            }}
+                            className="flex-row items-center gap-1.5 pt-1"
+                          >
+                            <Ionicons name="chatbubble-outline" size={13} color="#9BA1B0" />
+                            <Text className="text-sm text-text-tertiary">
+                              Add a review...
+                            </Text>
+                          </Pressable>
                         )}
                       </View>
                     )}
