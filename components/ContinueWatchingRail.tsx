@@ -18,6 +18,7 @@ import { useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
+import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import type { EpisodeSeasonSummary } from "../lib/episodeProgressState";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
@@ -488,8 +489,6 @@ function ContinueWatchingCard({
   index: number;
   onMarkWatched: (item: ContinueWatchingItem) => void;
 }) {
-  const season = item.nextSeasonNumber ?? 1;
-  const episode = item.nextEpisodeNumber ?? 1;
   const epLabel = getContinueWatchingVisibleBadgeLabel(item);
   const freshnessLabel = getContinueWatchingFreshnessLabel(item);
   const imageUrl =
@@ -508,13 +507,9 @@ function ContinueWatchingCard({
     }
     guardedPush({
       pathname: "/show/[id]",
-      params: {
-        id: item.showId,
-        openSeason: String(season),
-        openEpisode: String(episode),
-      },
+      params: buildEpisodeDeepLinkParams(item, item.showId),
     });
-  }, [complete, episode, item.showId, season]);
+  }, [complete, item]);
 
   return (
     <Animated.View

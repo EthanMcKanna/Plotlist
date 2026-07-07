@@ -10,6 +10,7 @@ import type { Id } from "../lib/plotlist/types";
 import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
+import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 
 type UpNextItem = {
   showId: Id<"shows">;
@@ -103,11 +104,7 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.push({
                   pathname: "/show/[id]",
-                  params: {
-                    id: item.showId,
-                    openSeason: String(nextSeason),
-                    openEpisode: String(nextEpisode),
-                  },
+                  params: buildEpisodeDeepLinkParams(item, item.showId),
                 });
               }}
             >

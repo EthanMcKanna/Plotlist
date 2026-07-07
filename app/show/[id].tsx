@@ -380,7 +380,38 @@ export default function ShowScreen() {
   const showId = isShowPreview ? PREVIEW_SHOW_ID : routeShowId;
   const openSeason = typeof params.openSeason === "string" ? Number(params.openSeason) : undefined;
   const openEpisode = typeof params.openEpisode === "string" ? Number(params.openEpisode) : undefined;
+  const readParam = (value: unknown) =>
+    typeof value === "string" ? value : Array.isArray(value) ? value[0] : undefined;
+  const openEpisodePreview = useMemo(() => {
+    if (openEpisode === undefined || !Number.isFinite(openEpisode)) return null;
+    const name = readParam(params.epName);
+    const still = readParam(params.epStill);
+    const overview = readParam(params.epOverview);
+    const runtimeRaw = readParam(params.epRuntime);
+    const airRaw = readParam(params.epAir);
+    const airMs = airRaw ? Number(airRaw) : NaN;
+    return {
+      id: `preview-S${openSeason}E${openEpisode}`,
+      name: name || `Episode ${openEpisode}`,
+      episodeNumber: openEpisode,
+      overview: overview ?? null,
+      stillPath: still ?? null,
+      runtime: runtimeRaw ? Number(runtimeRaw) : null,
+      airDate: Number.isFinite(airMs) ? new Date(airMs).toISOString() : null,
+      __preview: true as const,
+    };
+    // params objects are recreated each render; key off the primitive values.
+  }, [
+    openSeason,
+    openEpisode,
+    params.epName,
+    params.epStill,
+    params.epOverview,
+    params.epRuntime,
+    params.epAir,
+  ]);
   const [deepLinkConsumed, setDeepLinkConsumed] = useState(false);
+  const autoOpenHandledRef = useRef(false);
 
   const { isAuthenticated: sessionAuthenticated } = useAuth();
   const isAuthenticated = isShowPreview || sessionAuthenticated;
@@ -713,6 +744,22 @@ export default function ShowScreen() {
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
   const sheetOverlayOpacity = useSharedValue(0);
   const episodeScrollOffset = useRef(0);
+  const sheetScrollRef = useRef<ScrollView>(null);
+  // Y offset (within the "px-5" content block, i.e. below the hero) of the
+  // rating card that holds the review input, so we can scroll it clear of the
+  // keyboard on focus.
+  const reviewCardYRef = useRef(0);
+  const revealReviewInput = useCallback(() => {
+    // The hero image is a full-width 16:9 block above the content, so the
+    // review card's absolute scroll offset is heroHeight + its layout Y.
+    const heroHeight = (SCREEN_WIDTH * 9) / 16;
+    const target = Math.max(heroHeight + reviewCardYRef.current - 12, 0);
+    // Let the keyboard begin animating so automaticallyAdjustKeyboardInsets has
+    // expanded the scroll range before we scroll.
+    setTimeout(() => {
+      sheetScrollRef.current?.scrollTo({ y: target, animated: true });
+    }, 140);
+  }, []);
 
   const openEpisodeSheet = useCallback(() => {
     setEpisodeSheetVisible(true);
@@ -1228,24 +1275,33 @@ export default function ShowScreen() {
     }
   }, [episodeSheetVisible, selectedEpisode]);
 
-  // Auto-open episode detail sheet when navigated with openSeason/openEpisode params
+  // Open the episode sheet the instant we arrive from a deep link. We seed it
+  // with the preview episode the caller already had (still/name/overview/
+  // runtime), so the popup appears immediately instead of waiting on the
+  // season-details fetch. The enrich effect below swaps in the full episode
+  // once that data lands.
   useEffect(() => {
     if (
       deepLinkConsumed ||
+      autoOpenHandledRef.current ||
       openSeason === undefined ||
       openEpisode === undefined ||
       !Number.isFinite(openSeason) ||
-      !Number.isFinite(openEpisode)
+      !Number.isFinite(openEpisode) ||
+      !showHasLoaded
     ) {
       return;
     }
 
     const seasonDetails = seasonDetailsByNumber[openSeason];
-    if (!seasonDetails?.episodes) return;
-
-    const episode = seasonDetails.episodes.find(
+    const fullEpisode = seasonDetails?.episodes?.find(
       (ep: any) => ep.episodeNumber === openEpisode,
     );
+
+    // Prefer the fully loaded episode; otherwise fall back to the preview
+    // payload so we never block on the network. Bail only when we have
+    // neither (e.g. a bare deep link with no preview and no season yet).
+    const episode = fullEpisode ?? openEpisodePreview;
     if (!episode) return;
 
     const seasonMeta = seasonsWithEpisodes.find(
@@ -1253,6 +1309,7 @@ export default function ShowScreen() {
     );
     const seasonName = seasonMeta?.name ?? `Season ${openSeason}`;
 
+    autoOpenHandledRef.current = true;
     setDeepLinkConsumed(true);
     setSelectedEpisode({
       episode,
@@ -1260,7 +1317,63 @@ export default function ShowScreen() {
       seasonNumber: openSeason,
     });
     openEpisodeSheet();
-  }, [deepLinkConsumed, openSeason, openEpisode, seasonDetailsByNumber, seasonsWithEpisodes]);
+  }, [
+    deepLinkConsumed,
+    openSeason,
+    openEpisode,
+    openEpisodePreview,
+    seasonDetailsByNumber,
+    seasonsWithEpisodes,
+    showHasLoaded,
+    openEpisodeSheet,
+  ]);
+
+  // Make sure the deep-linked season is actually fetched even if it sits
+  // beyond the initially visible seasons, so the preview upgrades to the full
+  // episode and the season poster/air metadata resolve.
+  useEffect(() => {
+    if (
+      isShowPreview ||
+      openSeason === undefined ||
+      !Number.isFinite(openSeason) ||
+      !show?.externalId
+    ) {
+      return;
+    }
+    if (seasonDetailsByNumberRef.current[openSeason] !== undefined) return;
+    void ensureSeasonDetailsLoaded([openSeason]);
+  }, [isShowPreview, openSeason, show?.externalId, ensureSeasonDetailsLoaded]);
+
+  // Once the deep-linked season's real episode data arrives, replace the
+  // lightweight preview with the full episode (crew, guest stars, exact air
+  // date, still) — but only while the preview is still showing and the user
+  // hasn't navigated to a different episode.
+  useEffect(() => {
+    if (openSeason === undefined || openEpisode === undefined) return;
+    const seasonDetails = seasonDetailsByNumber[openSeason];
+    const fullEpisode = seasonDetails?.episodes?.find(
+      (ep: any) => ep.episodeNumber === openEpisode,
+    );
+    if (!fullEpisode) return;
+    setSelectedEpisode((prev) => {
+      if (
+        !prev ||
+        prev.seasonNumber !== openSeason ||
+        prev.episode?.episodeNumber !== openEpisode ||
+        !prev.episode?.__preview
+      ) {
+        return prev;
+      }
+      const seasonMeta = seasonsWithEpisodes.find(
+        (s: any) => s.season_number === openSeason,
+      );
+      return {
+        episode: fullEpisode,
+        seasonName: seasonMeta?.name ?? prev.seasonName,
+        seasonNumber: openSeason,
+      };
+    });
+  }, [openSeason, openEpisode, seasonDetailsByNumber, seasonsWithEpisodes]);
 
   const visibleSeasonNumbers = useMemo<number[]>(
     () =>
@@ -2616,20 +2729,24 @@ export default function ShowScreen() {
                 style={[
                   {
                     position: "absolute",
-                    top: 48,
+                    // Sit just below the notch / Dynamic Island so the rounded
+                    // top edge is never clipped by the status bar. A small
+                    // constant gap keeps a consistent sliver of backdrop on
+                    // every device (including non-notched ones).
+                    top: Math.max(insets.top, 12) + 6,
                     left: 0,
                     right: 0,
                     bottom: 0,
                     backgroundColor: "transparent",
-                    borderTopLeftRadius: 14,
-                    borderTopRightRadius: 14,
+                    borderTopLeftRadius: 20,
+                    borderTopRightRadius: 20,
                     overflow: "hidden",
                   },
                   episodeSheetStyle,
                 ]}
               >
                 <GlassSurface
-                  radius={14}
+                  radius={20}
                   variant="sheet"
                   fallbackColor="rgba(13,15,20,0.94)"
                   style={{
@@ -2640,10 +2757,12 @@ export default function ShowScreen() {
                   contentStyle={{ flex: 1 }}
                 >
                 <ScrollView
+                  ref={sheetScrollRef}
                   className="flex-1"
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
                   keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="interactive"
                   automaticallyAdjustKeyboardInsets
                   scrollEventThrottle={16}
                   onScroll={(e) => {
@@ -2666,9 +2785,23 @@ export default function ShowScreen() {
                   </View>
                 )}
 
-                {/* Drag indicator overlaid on image */}
-                <View style={{ position: "absolute", top: 6, left: 0, right: 0, alignItems: "center", zIndex: 10 }}>
-                  <View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.35)" }} />
+                {/* Drag grabber overlaid on image */}
+                <View
+                  pointerEvents="none"
+                  style={{ position: "absolute", top: 8, left: 0, right: 0, alignItems: "center", zIndex: 10 }}
+                >
+                  <View
+                    style={{
+                      width: 40,
+                      height: 5,
+                      borderRadius: 2.5,
+                      backgroundColor: "rgba(255,255,255,0.6)",
+                      shadowColor: "#000",
+                      shadowOpacity: 0.35,
+                      shadowRadius: 3,
+                      shadowOffset: { width: 0, height: 1 },
+                    }}
+                  />
                 </View>
 
                 <LinearGradient
@@ -2847,6 +2980,9 @@ export default function ShowScreen() {
                     fallbackColor="rgba(22,26,34,0.66)"
                     style={{ marginTop: 24 }}
                     contentStyle={{ padding: 16 }}
+                    onLayout={(e) => {
+                      reviewCardYRef.current = e.nativeEvent.layout.y;
+                    }}
                   >
                     <View className="flex-row items-center justify-between">
                       <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
@@ -2931,6 +3067,7 @@ export default function ShowScreen() {
                                 placeholderTextColor="#5A6070"
                                 multiline
                                 autoFocus
+                                onFocus={revealReviewInput}
                                 className="text-sm text-text-primary"
                                 style={{
                                   minHeight: 80,
