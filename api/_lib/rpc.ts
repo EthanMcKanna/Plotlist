@@ -36,12 +36,13 @@ import {
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
+import { ensurePhoneIdentity } from "./auth";
 import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
 import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
 import { getStaleReleaseShowIds, refreshTrackedReleaseCalendarForUser } from "./release-refresh";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "./rate-limit";
 import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social";
-import { sendPhoneVerificationCode } from "./twilio";
+import { sendPhoneVerificationCode, verifyPhoneVerificationCode } from "./twilio";
 import { createUploadToken, getRequestOrigin } from "./uploads";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
@@ -2618,6 +2619,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const libraryCounts = await getUserLibraryCounts(user.id);
     return {
       ...toClientUser(user),
+      // Self-only boolean so onboarding can skip the phone step; the hash
+      // itself still never leaves the server.
+      hasVerifiedPhone: Boolean(user.phoneHash),
       countsReviews: libraryCounts.reviews,
       countsLists: libraryCounts.lists,
       countsWatchlist: libraryCounts.watchlist,
@@ -4475,6 +4479,68 @@ export const actionHandlers: Record<string, RpcHandler> = {
       completedAt: null,
     });
     return { ok: true, phone: normalizedPhone };
+  },
+  // One-time phone verification for an already-signed-in user (the optional
+  // "find your friends" onboarding step) — attaches the hash used for
+  // contact matching without making phone a login method.
+  "phone:attachVerified": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ phone: z.string(), code: z.string().min(1) }).parse(args ?? {});
+    const normalizedPhone = normalizePhoneNumber(parsed.phone);
+    if (!normalizedPhone) {
+      throw new ApiError(400, "invalid_phone", "Enter a valid phone number");
+    }
+
+    const usingAppReviewBypass = matchesAppReviewBypass(normalizedPhone, parsed.code.trim());
+    if (!usingAppReviewBypass) {
+      await enforceRateLimit(rateLimitKey("phone-verify", normalizedPhone), 10, 10 * 60 * 1000);
+      await enforceRateLimit(clientRateLimitKey(req, "phone-verify-ip"), 30, 10 * 60 * 1000);
+    }
+
+    const verified =
+      usingAppReviewBypass ||
+      (await verifyPhoneVerificationCode(normalizedPhone, parsed.code));
+    if (!verified) {
+      throw new ApiError(
+        401,
+        "invalid_verification_code",
+        "That code was invalid or expired. Request a new code and try again.",
+      );
+    }
+
+    const now = Date.now();
+    const phoneHash = hashPhoneNumber(normalizedPhone);
+    await db
+      .update(phoneVerificationRequests)
+      .set({ completedAt: now })
+      .where(
+        and(
+          eq(phoneVerificationRequests.phoneHash, phoneHash),
+          isNull(phoneVerificationRequests.completedAt),
+          gte(phoneVerificationRequests.expiresAt, now),
+        ),
+      );
+
+    const conflictRows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.phoneHash, phoneHash))
+      .limit(1);
+    if (conflictRows[0] && conflictRows[0].id !== user.id) {
+      throw new ApiError(
+        409,
+        "phone_in_use",
+        "That number already belongs to another Plotlist account. Sign in with your phone number instead to keep that account's history.",
+      );
+    }
+
+    await db
+      .update(users)
+      .set({ phoneHash, phoneVerificationTime: now })
+      .where(eq(users.id, user.id));
+    await ensurePhoneIdentity(user.id, phoneHash);
+
+    return { ok: true };
   },
   "contacts:syncSnapshot": async ({ args, req }) => {
     const user = await requireAuthUser(req);

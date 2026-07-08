@@ -1,9 +1,20 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { ReactNode } from "react";
 
 const mockStartVerification = jest.fn();
 const mockSignIn = jest.fn();
+const mockSignInWithApple = jest.fn();
+
+jest.mock("../../lib/appleAuth", () => ({
+  isAppleSignInAvailable: () => Promise.resolve(true),
+  signInWithApple: mockSignInWithApple,
+  getAppleButtonComponent: () => {
+    const { Pressable } = require("react-native");
+    return Pressable;
+  },
+  getAppleButtonProps: () => ({ buttonType: 0, buttonStyle: 0 }),
+}));
 
 jest.mock("expo-image", () => ({
   Image: "Image",
@@ -106,10 +117,24 @@ jest.mock("../../lib/plotlist/auth", () => ({
 import SignInScreen from "../../app/(auth)/sign-in";
 
 describe("SignInScreen", () => {
-  it("labels the phone field reached from the protected home redirect", () => {
+  it("offers Apple as the primary sign-in with a phone fallback link", async () => {
     render(<SignInScreen />);
+
+    expect(
+      await screen.findByLabelText("Sign in with phone number instead"),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Phone number")).toBeNull();
+  });
+
+  it("labels the phone field reached from the fallback link", async () => {
+    render(<SignInScreen />);
+
+    fireEvent.press(
+      await screen.findByLabelText("Sign in with phone number instead"),
+    );
 
     expect(screen.getByLabelText("Phone number")).toBeTruthy();
     expect(screen.getByLabelText("Continue with phone number")).toBeTruthy();
+    expect(screen.getByLabelText("Sign in with Apple instead")).toBeTruthy();
   });
 });

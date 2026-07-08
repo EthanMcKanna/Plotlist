@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/cloudflare";
 
+import appleRoute from "../api/auth/apple";
 import logoutRoute from "../api/auth/logout";
 import refreshRoute from "../api/auth/refresh";
 import startVerificationRoute from "../api/auth/start-verification";
@@ -34,6 +35,7 @@ export type WorkerEnv = {
 } & Record<string, unknown>;
 
 const routes: Record<string, NodeStyleHandler> = {
+  "/api/auth/apple": appleRoute as NodeStyleHandler,
   "/api/auth/start-verification": startVerificationRoute as NodeStyleHandler,
   "/api/auth/verify": verifyRoute as NodeStyleHandler,
   "/api/auth/refresh": refreshRoute as NodeStyleHandler,

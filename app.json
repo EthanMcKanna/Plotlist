@@ -15,6 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "entitlements": {
         "aps-environment": "production"
       },
@@ -42,6 +43,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-apple-authentication",
       "expo-secure-store",
       "expo-notifications",
       [

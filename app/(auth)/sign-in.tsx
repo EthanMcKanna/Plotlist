@@ -52,6 +52,12 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "../../lib/plotlist/api";
+import {
+  getAppleButtonComponent,
+  getAppleButtonProps,
+  isAppleSignInAvailable,
+  signInWithApple,
+} from "../../lib/appleAuth";
 import { formatPhoneNumber, normalizePhoneNumber } from "../../lib/phone";
 import { useAuthActions } from "../../lib/plotlist/auth";
 import { useAction } from "../../lib/plotlist/react";
@@ -399,6 +405,12 @@ export default function SignInScreen() {
     Platform.OS === "web" ? {} : { onPress: Keyboard.dismiss };
   const animateOnMount = Platform.OS !== "web";
 
+  // Apple is the primary sign-in; phone OTP stays as the fallback for
+  // existing accounts (and App Review) behind a text link.
+  const [method, setMethod] = useState<"apple" | "phone">(
+    Platform.OS === "ios" ? "apple" : "phone",
+  );
+  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === "ios");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -406,6 +418,22 @@ export default function SignInScreen() {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const verifyingRef = useRef(false);
+
+  const AppleButton = getAppleButtonComponent();
+  const appleButtonProps = getAppleButtonProps();
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    let cancelled = false;
+    void isAppleSignInAvailable().then((available) => {
+      if (cancelled) return;
+      setAppleAvailable(available);
+      if (!available) setMethod("phone");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (secondsRemaining <= 0) return;
@@ -415,6 +443,30 @@ export default function SignInScreen() {
     );
     return () => clearInterval(t);
   }, [secondsRemaining]);
+
+  const handleAppleSignIn = async () => {
+    if (loading) return;
+    setErrorMessage(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setLoading(true);
+    try {
+      const credential = await signInWithApple();
+      if (!credential) {
+        // User dismissed the Apple sheet — nothing to report.
+        return;
+      }
+      await signIn("apple", credential);
+      // On success AuthGate routes to onboarding or home once the profile
+      // loads, so we stay put instead of flashing an intermediate screen.
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const message = readErrorMessage(e);
+      setErrorMessage(message);
+      notifyError("Sign in failed", message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSend = async () => {
     setErrorMessage(null);
@@ -564,7 +616,57 @@ export default function SignInScreen() {
               ) : null}
 
               {/* ── Form ── */}
-              {step === "phone" ? (
+              {method === "apple" ? (
+                <Animated.View
+                  key="method-apple"
+                  entering={
+                    animateOnMount
+                      ? FadeInUp.delay(550).duration(500).springify()
+                      : undefined
+                  }
+                  exiting={animateOnMount ? FadeOutLeft.duration(200) : undefined}
+                >
+                  <Text className="mb-3 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
+                    Sign in or create account
+                  </Text>
+
+                  {AppleButton && appleButtonProps ? (
+                    <View style={{ opacity: loading ? 0.6 : 1 }}>
+                      <AppleButton
+                        {...appleButtonProps}
+                        cornerRadius={16}
+                        onPress={loading ? () => {} : handleAppleSignIn}
+                        style={{ width: "100%", height: 54 }}
+                      />
+                    </View>
+                  ) : null}
+
+                  <Animated.Text
+                    entering={animateOnMount ? FadeIn.delay(850).duration(400) : undefined}
+                    className="mt-5 text-center text-[13px] leading-5 text-text-tertiary"
+                  >
+                    {loading
+                      ? "Signing you in…"
+                      : "One tap with your Apple ID. No passwords, no codes."}
+                  </Animated.Text>
+
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setMethod("phone");
+                      setStep("phone");
+                      setErrorMessage(null);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Sign in with phone number instead"
+                    className="mt-3 self-center py-2 active:opacity-70"
+                  >
+                    <Text className="text-sm font-semibold text-text-secondary">
+                      Sign in with phone number
+                    </Text>
+                  </Pressable>
+                </Animated.View>
+              ) : step === "phone" ? (
                 <Animated.View
                   key="step-phone"
                   entering={
@@ -633,6 +735,24 @@ export default function SignInScreen() {
                   >
                     We'll text you a one-time code.
                   </Animated.Text>
+
+                  {appleAvailable ? (
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setMethod("apple");
+                        setCode("");
+                        setErrorMessage(null);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign in with Apple instead"
+                      className="mt-3 self-center py-2 active:opacity-70"
+                    >
+                      <Text className="text-sm font-semibold text-brand-400">
+                         Sign in with Apple instead
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </Animated.View>
               ) : (
                 <Animated.View

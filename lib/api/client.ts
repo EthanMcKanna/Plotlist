@@ -125,6 +125,24 @@ export const authApi = {
       authenticate: false,
     });
   },
+  async appleSignIn(payload: {
+    identityToken: string;
+    rawNonce?: string;
+    fullName?: { givenName?: string | null; familyName?: string | null } | null;
+  }) {
+    const session = await apiRequest<
+      StoredSession & {
+        user: Record<string, unknown>;
+      }
+    >("/api/auth/apple", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      authenticate: false,
+    });
+
+    await setStoredSession(session);
+    return session;
+  },
   async verify(phone: string, code: string) {
     const session = await apiRequest<
       StoredSession & {

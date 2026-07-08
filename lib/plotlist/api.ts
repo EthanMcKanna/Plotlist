@@ -21,6 +21,7 @@ export const api = {
   },
   phone: {
     startVerification: ref("action", "phone:startVerification"),
+    attachVerified: ref("action", "phone:attachVerified"),
   },
   users: {
     ensureProfile: ref("mutation", "users:ensureProfile"),

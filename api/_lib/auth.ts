@@ -10,6 +10,7 @@ import { hmacSha256, safeEqual, sha256 } from "./crypto";
 const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PHONE_PROVIDER = "phone";
+const APPLE_PROVIDER = "apple";
 
 type SessionSubject = {
   sessionId: string;
@@ -120,74 +121,71 @@ export async function verifyRefreshToken(token: string) {
   };
 }
 
-export async function findUserByPhoneHash(phoneHash: string) {
-  const existing = await db
-    .select({
-      userId: userIdentities.userId,
-    })
+async function findIdentity(provider: string, providerAccountId: string) {
+  const rows = await db
+    .select()
     .from(userIdentities)
     .where(
       and(
-        eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phoneHash),
+        eq(userIdentities.provider, provider),
+        eq(userIdentities.providerAccountId, providerAccountId),
       ),
     )
     .limit(1);
 
-  if (existing.length === 0) {
+  return rows[0] ?? null;
+}
+
+async function findUserByIdentity(provider: string, providerAccountId: string) {
+  const identity = await findIdentity(provider, providerAccountId);
+  if (!identity) {
     return null;
   }
 
   const userRows = await db
     .select()
     .from(users)
-    .where(eq(users.id, existing[0].userId))
+    .where(eq(users.id, identity.userId))
     .limit(1);
 
   return userRows[0] ?? null;
 }
 
-// Phone identities are keyed by the HMAC phone hash so the raw number never
-// lands in the identities table.
-export async function ensurePhoneIdentity(userId: string, phoneHash: string) {
-  const existing = await db
-    .select()
-    .from(userIdentities)
-    .where(
-      and(
-        eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phoneHash),
-      ),
-    )
-    .limit(1);
-
-  const now = Date.now();
-
-  if (existing[0]) {
-    return existing[0];
+async function ensureIdentity(userId: string, provider: string, providerAccountId: string) {
+  const existing = await findIdentity(provider, providerAccountId);
+  if (existing) {
+    return existing;
   }
 
+  const now = Date.now();
   await db.insert(userIdentities).values({
     id: createId("ident"),
     userId,
-    provider: PHONE_PROVIDER,
-    providerAccountId: phoneHash,
+    provider,
+    providerAccountId,
     createdAt: now,
     updatedAt: now,
   });
 
-  const rows = await db
-    .select()
-    .from(userIdentities)
-    .where(
-      and(
-        eq(userIdentities.provider, PHONE_PROVIDER),
-        eq(userIdentities.providerAccountId, phoneHash),
-      ),
-    )
-    .limit(1);
+  return await findIdentity(provider, providerAccountId);
+}
 
-  return rows[0];
+export async function findUserByPhoneHash(phoneHash: string) {
+  return await findUserByIdentity(PHONE_PROVIDER, phoneHash);
+}
+
+export async function findUserByAppleSub(appleSub: string) {
+  return await findUserByIdentity(APPLE_PROVIDER, appleSub);
+}
+
+// Phone identities are keyed by the HMAC phone hash so the raw number never
+// lands in the identities table.
+export async function ensurePhoneIdentity(userId: string, phoneHash: string) {
+  return await ensureIdentity(userId, PHONE_PROVIDER, phoneHash);
+}
+
+export async function ensureAppleIdentity(userId: string, appleSub: string) {
+  return await ensureIdentity(userId, APPLE_PROVIDER, appleSub);
 }
 
 export async function createSession(userId: string) {

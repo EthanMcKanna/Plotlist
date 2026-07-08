@@ -9,6 +9,7 @@ const serverEnvSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().min(1),
   TWILIO_VERIFY_SERVICE_SID: z.string().min(1),
   CONTACT_HASH_SECRET: z.string().min(1),
+  APPLE_BUNDLE_ID: z.string().min(1).default("com.emckanna.Plotlist"),
   GEMINI_API_KEY: z.string().min(1).optional(),
   OMDB_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2-preview"),

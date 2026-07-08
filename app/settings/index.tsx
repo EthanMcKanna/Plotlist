@@ -572,6 +572,22 @@ export default function SettingsScreen() {
         {/* ── Contacts ── */}
         <View className="mt-10">
           <SectionHeader title="Contacts" />
+          {me && me.hasVerifiedPhone === false ? (
+            <>
+              <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+                <SettingsRow
+                  icon="call-outline"
+                  iconColor="#38bdf8"
+                  label="Verify your number to be found by friends"
+                  onPress={() => router.push("/settings/verify-phone")}
+                />
+              </GlassSurface>
+              <Text className="mb-1 mt-2 text-xs leading-4 text-text-tertiary">
+                One-time verification so friends who have your number can find you.
+                We only keep a scrambled hash and never text you afterward.
+              </Text>
+            </>
+          ) : null}
           <View className="mt-2">
             <ContactsSyncCard
               title={contactStatus?.hasSynced ? "Contacts are connected" : "Connect your contacts"}
@@ -654,7 +670,7 @@ export default function SettingsScreen() {
         <Text className="mt-8 text-center text-xs text-text-tertiary">
           {signInPhoneLabel
             ? `Signed in as ${signInPhoneLabel}`
-            : `Signed in as @${me?.username ?? "you"} with phone verification`}
+            : `Signed in as @${me?.username ?? "you"}`}
         </Text>
       </View>
     </Screen>

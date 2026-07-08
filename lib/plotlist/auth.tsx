@@ -125,6 +125,19 @@ export function useAuthActions() {
         return { signingIn: true };
       }
 
+      if (provider === "apple" && typeof params?.identityToken === "string") {
+        await authApi.appleSignIn({
+          identityToken: params.identityToken,
+          rawNonce: typeof params.rawNonce === "string" ? params.rawNonce : undefined,
+          fullName: params.fullName as
+            | { givenName?: string | null; familyName?: string | null }
+            | null
+            | undefined,
+        });
+        session.markSignedIn();
+        return { signingIn: true };
+      }
+
       throw new Error(`Unsupported sign-in provider: ${provider}`);
     },
     async signOut() {

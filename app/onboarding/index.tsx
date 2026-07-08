@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { LoadingScreen } from "../../components/LoadingScreen";
+import { OnboardingPhoneStep } from "../../components/OnboardingPhoneStep";
 import { OnboardingProfileStep } from "../../components/OnboardingProfileStep";
 import { OnboardingTour } from "../../components/OnboardingTour";
 import { Screen } from "../../components/Screen";
@@ -16,7 +17,7 @@ import {
 import { getWelcomeTourSeen, getWelcomeTourSeenCached } from "../../lib/preferences";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
 
-type Stage = "tour" | "profile";
+type Stage = "tour" | "profile" | "phone";
 
 export default function OnboardingWizard() {
   const router = useRouter();
@@ -31,6 +32,16 @@ export default function OnboardingWizard() {
     markOnboardingStep("complete");
     router.replace("/home");
   }, [router, setOnboardingStep]);
+
+  // Phone verification is the optional friend-discovery step — Apple sign-ups
+  // have no phone hash yet, while phone-OTP accounts already verified one.
+  const finishProfileStage = useCallback(async () => {
+    if (me?.hasVerifiedPhone) {
+      await completeOnboarding();
+      return;
+    }
+    setStage("phone");
+  }, [completeOnboarding, me?.hasVerifiedPhone]);
 
   // Resolve the starting stage once `me` has loaded (null means the profile
   // record is still being created — treat it as a brand-new user).
@@ -82,10 +93,17 @@ export default function OnboardingWizard() {
           ctaLabel="Set up my profile"
           onDone={() => setStage("profile")}
         />
-      ) : (
+      ) : stage === "profile" ? (
         <Animated.View entering={FadeInRight.duration(240)} style={styles.stage}>
           <OnboardingProfileStep
-            onComplete={completeOnboarding}
+            onComplete={finishProfileStage}
+            onSkip={finishProfileStage}
+          />
+        </Animated.View>
+      ) : (
+        <Animated.View entering={FadeInRight.duration(240)} style={styles.stage}>
+          <OnboardingPhoneStep
+            onDone={completeOnboarding}
             onSkip={completeOnboarding}
           />
         </Animated.View>
