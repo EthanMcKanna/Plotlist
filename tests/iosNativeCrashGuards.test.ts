@@ -37,6 +37,33 @@ describe("iOS native startup guards", () => {
     expect(podfileLock).toContain("ExpoGlassEffect");
   });
 
+  it("ships the native splash-screen module with the JS bundle and binary in agreement", () => {
+    // expo-splash-screen is mismatch-safe by design: its native entry uses
+    // requireOptionalNativeModule and no-ops when the binary lacks the
+    // module, so unlike ExpoGlassEffect it cannot crash startup. Both sides
+    // should still ship together so splash control actually works.
+    const packageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
+    const podfileLock = readFileSync(
+      join(process.cwd(), "ios", "Podfile.lock"),
+      "utf8",
+    );
+    const splashNativeEntry = readFileSync(
+      join(
+        process.cwd(),
+        "node_modules",
+        "expo-splash-screen",
+        "build",
+        "index.native.js",
+      ),
+      "utf8",
+    );
+
+    expect(packageJson).toContain("expo-splash-screen");
+    expect(podfileLock).toContain("ExpoSplashScreen");
+    expect(splashNativeEntry).toContain("requireOptionalNativeModule");
+    expect(splashNativeEntry).not.toContain("requireNativeModule(");
+  });
+
   it("keeps Liquid Glass behind the guarded NativeGlass choke point", () => {
     const nativeGlass = readFileSync(
       join(process.cwd(), "components", "NativeGlass.tsx"),

@@ -1,5 +1,12 @@
+import { useEffect, useRef } from "react";
 import { Image } from "expo-image";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
 
 // Same asset the app icon uses; the native splash (assets/splash-icon.png)
 // is generated from it by scripts/generate-splash.py: a #0D0F14 canvas with
@@ -8,13 +15,26 @@ const APP_ICON = require("../assets/icon.png");
 
 // Must mirror the generated splash geometry so the native-splash → JS
 // handoff is seamless: the icon keeps its exact size and center position,
-// and only the wordmark fades in beneath it.
+// and only the wordmark eases in beneath it.
 const TILE_RATIO = 0.38;
 const RADIUS_RATIO = 0.2237;
 
 export function LoadingScreen() {
   const { width, height } = useWindowDimensions();
   const iconSize = Math.round(Math.min(width, height) * TILE_RATIO);
+  const wordmark = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.timing(wordmark, {
+      toValue: 1,
+      duration: 480,
+      delay: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [wordmark]);
 
   return (
     <View style={styles.root}>
@@ -28,12 +48,26 @@ export function LoadingScreen() {
         }}
         contentFit="cover"
       />
-      <Text
-        style={[styles.name, { top: height / 2 + iconSize / 2 + 24 }]}
+      <Animated.Text
+        style={[
+          styles.name,
+          {
+            top: height / 2 + iconSize / 2 + 24,
+            opacity: wordmark,
+            transform: [
+              {
+                translateY: wordmark.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [8, 0],
+                }),
+              },
+            ],
+          },
+        ]}
         accessibilityRole="header"
       >
         Plotlist
-      </Text>
+      </Animated.Text>
     </View>
   );
 }

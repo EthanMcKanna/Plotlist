@@ -1,12 +1,12 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import {
   useGlobalSearchParams,
   usePathname,
   useRouter,
   useSegments,
 } from "expo-router";
-import { LoadingScreen } from "./LoadingScreen";
+import { LaunchOverlay } from "./LaunchOverlay";
 import { api } from "../lib/plotlist/api";
 import { PlotlistApiError } from "../lib/api/client";
 import { clearStoredSession } from "../lib/api/session";
@@ -72,6 +72,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const hasEnsuredProfile = useRef(false);
   const hasHandledAuthFailure = useRef(false);
   const [isEnsuringProfile, setIsEnsuringProfile] = useState(false);
+  // True once the redirect effect has run without needing to move the user —
+  // i.e. the route on screen is the one they should actually be on. The
+  // launch overlay stays up until then so redirects happen out of sight.
+  const [isRouteSettled, setIsRouteSettled] = useState(false);
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
 
   // One-time token clear for key rotation
@@ -107,7 +111,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Route protection: redirect based on authentication state
   useEffect(() => {
-    if (isLoading || isProfileLoading) return;
+    if (isLoading || isProfileLoading) {
+      setIsRouteSettled(false);
+      return;
+    }
 
     const inAuthGroup =
       segments[0] === "(auth)" || pathname?.startsWith("/sign-in");
@@ -120,6 +127,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       isAuthenticated && (effectiveOnboardingStep ?? "profile") !== "complete";
 
     if (!isAuthenticated && !inAuthGroup && !inDevPreview) {
+      setIsRouteSettled(false);
       replaceRoute(router, "/sign-in");
       return;
     }
@@ -127,19 +135,25 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (isAuthenticated && needsOnboarding && !inOnboardingGroup) {
       // The wizard resumes at the right stage (tour, profile, follow, taste)
       // from the server-side step and the device-level tour flag.
+      setIsRouteSettled(false);
       replaceRoute(router, ONBOARDING_ROUTE);
       return;
     }
 
     const inWelcomeTour = pathname?.startsWith(WELCOME_TOUR_ROUTE) ?? false;
     if (isAuthenticated && !needsOnboarding && inOnboardingGroup && !inWelcomeTour) {
+      setIsRouteSettled(false);
       replaceRoute(router, "/home");
       return;
     }
 
     if (isAuthenticated && (inAuthGroup || atRoot)) {
+      setIsRouteSettled(false);
       replaceRoute(router, "/home");
+      return;
     }
+
+    setIsRouteSettled(true);
   }, [
     isAuthenticated,
     isLoading,
@@ -187,9 +201,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
       });
   }, [ensureProfile, isAuthenticated, router]);
 
-  if (isLoading || isProfileLoading) {
-    return <LoadingScreen />;
-  }
+  const isBooting = isLoading || isProfileLoading;
 
-  return <>{children}</>;
+  return (
+    <View style={styles.root}>
+      {!isBooting && children}
+      <LaunchOverlay visible={isBooting || !isRouteSettled} />
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: "#0D0F14",
+    flex: 1,
+  },
+});

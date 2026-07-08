@@ -16,6 +16,15 @@ jest.mock("@expo/vector-icons", () => ({
   Ionicons: ({ name }: { name?: string }) => name ?? "icon",
 }));
 
+// The splash-screen module talks to the native launch screen, which jest-expo
+// does not provide; the launch overlay only needs inert stand-ins.
+jest.mock("expo-splash-screen", () => ({
+  preventAutoHideAsync: jest.fn(async () => true),
+  setOptions: jest.fn(),
+  hide: jest.fn(),
+  hideAsync: jest.fn(async () => undefined),
+}));
+
 // The Sentry SDK touches native modules at init time, which jest-expo does
 // not provide; component tests only need inert stand-ins.
 jest.mock("@sentry/react-native", () => ({

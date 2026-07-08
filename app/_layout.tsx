@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Stack, useNavigationContainerRef } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
 
@@ -15,6 +16,11 @@ import { PlotlistSessionProvider } from "../lib/plotlist/auth";
 import { initSentry, navigationIntegration, Sentry } from "../lib/sentry";
 
 initSentry();
+
+// Hold the native splash until the LaunchOverlay (a pixel-match of it) has
+// rendered, then cross-fade — no flash between the native and JS worlds.
+void SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 240, fade: true });
 
 const WEB_APP_MAX_WIDTH = 430;
 
@@ -45,7 +51,14 @@ function RootLayout() {
               <AuthErrorBoundary>
                 <AuthGate>
                   <NotificationsBridge />
-                  <Stack screenOptions={{ headerShown: false }} />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      // Keep transition backdrops dark — the default card
+                      // background is white and flashes during slides.
+                      contentStyle: styles.stackContent,
+                    }}
+                  />
                 </AuthGate>
               </AuthErrorBoundary>
             </GestureHandlerRootView>
@@ -59,6 +72,9 @@ function RootLayout() {
 export default Sentry.wrap(RootLayout);
 
 const styles = StyleSheet.create({
+  stackContent: {
+    backgroundColor: "#0D0F14",
+  },
   host: {
     backgroundColor: "#0D0F14",
     flex: 1,
