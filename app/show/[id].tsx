@@ -4,8 +4,10 @@ import {
   Alert,
   Dimensions,
   Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -599,6 +601,32 @@ export default function ShowScreen() {
     return map;
   }, [myEpisodeRatings]);
   const toggleListItem = useMutation(api.listItems.toggle);
+  const createListWithShow = useMutation(api.lists.create).withOptimisticUpdate(
+    (localStore, args) => {
+      if (!me?._id) return;
+      const now = Date.now();
+      const optimisticDoc = {
+        _id: `optimistic:list:${now}`,
+        _creationTime: now,
+        ownerId: me._id,
+        title: args.title,
+        description: null,
+        isPublic: args.isPublic ?? true,
+        coverUrl: null,
+        createdAt: now,
+        updatedAt: now,
+        itemCount: 1,
+        followerCount: 0,
+        viewerIsFollowing: false,
+        isOwner: true,
+      };
+      localStore.setPaginatedQuery(api.lists.listForUser, { userId: me._id }, (current) => {
+        if (!current) return current;
+        const page = current.page ?? current.results ?? [];
+        return { ...current, page: [optimisticDoc, ...page], results: [optimisticDoc, ...page] };
+      });
+    },
+  );
   const queriedListMembership = useQuery(
     api.listItems.getShowMembership,
     !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
@@ -687,6 +715,9 @@ export default function ShowScreen() {
   const [reviewText, setReviewText] = useState("");
   const [spoiler, setSpoiler] = useState(false);
   const [listPickerVisible, setListPickerVisible] = useState(false);
+  const [newListMode, setNewListMode] = useState(false);
+  const [newListTitle, setNewListTitle] = useState("");
+  const [creatingList, setCreatingList] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
   const [episodeReviewExpanded, setEpisodeReviewExpanded] = useState(false);
   const [episodeReviewText, setEpisodeReviewText] = useState("");
@@ -942,35 +973,9 @@ export default function ShowScreen() {
     showId,
   ]);
 
-  useEffect(() => {
-    if (!isAuthenticated || !watchState || !episodeProgress || !activeDetails) {
-      return;
-    }
-
-    if (activeDetails.status !== "Ended") {
-      return;
-    }
-
-    const totalEpisodes =
-      typeof activeDetails.numberOfEpisodes === "number"
-        ? activeDetails.numberOfEpisodes
-        : 0;
-    if (totalEpisodes <= 0) {
-      return;
-    }
-
-    const watchedCount = episodeProgress.length;
-    if (watchState.status === "watching" && watchedCount >= totalEpisodes) {
-      void setStatus({ showId, status: "completed" });
-    }
-  }, [
-    episodeProgress,
-    activeDetails,
-    isAuthenticated,
-    setStatus,
-    showId,
-    watchState,
-  ]);
+  // Watching → completed promotion for fully watched ended shows happens
+  // server-side (syncWatchStateAfterEpisodeChange) whenever episode progress
+  // changes; the client no longer writes statuses on its own.
 
   const isEpisodeAvailable = useCallback(
     (airDate?: string | null) => {
@@ -1439,55 +1444,6 @@ export default function ShowScreen() {
     visibleSeasonNumbers,
   ]);
 
-  const markCurrentlyAvailableEpisodesWatched = useCallback(async () => {
-    if (!show?.externalId) {
-      return;
-    }
-
-    const seasonsToSync = seasonOptions.map((season: any) => season.season_number);
-    await ensureSeasonDetailsLoaded(seasonsToSync, { forceRetry: true });
-
-    const missingSeasonNumbers = seasonsToSync.filter(
-      (seasonNumber: number) =>
-        seasonDetailsByNumberRef.current[seasonNumber] === undefined,
-    );
-
-    if (missingSeasonNumbers.length > 0) {
-      throw new Error("Couldn't load every season. Try again in a moment.");
-    }
-
-    for (const seasonNumber of seasonsToSync) {
-      const details = seasonDetailsByNumberRef.current[seasonNumber];
-      const airedEpisodes = (details?.episodes ?? []).filter((episode: any) => {
-        if (typeof episode?.episodeNumber !== "number") {
-          return false;
-        }
-        return isEpisodeAvailable(episode.airDate);
-      });
-
-      if (airedEpisodes.length === 0) {
-        continue;
-      }
-
-      await markSeasonWatched({
-        showId,
-        seasonNumber,
-        createLog: false,
-        episodes: airedEpisodes.map((episode: any) => ({
-          episodeNumber: episode.episodeNumber,
-          title: episode.name,
-        })),
-      });
-    }
-  }, [
-    ensureSeasonDetailsLoaded,
-    isEpisodeAvailable,
-    markSeasonWatched,
-    seasonOptions,
-    show?.externalId,
-    showId,
-  ]);
-
   const handleStatus = useCallback(
     (value: WatchStatus) => {
       if (isShowPreview) {
@@ -1500,20 +1456,15 @@ export default function ShowScreen() {
         return;
       }
       setOptimisticStatus(value);
-      void setStatus({ showId, status: value })
-        .then(() => {
-          if (value === "completed") {
-            void markCurrentlyAvailableEpisodesWatched().catch((error) => {
-              Alert.alert("Couldn't sync episodes", String(error));
-            });
-          }
-        })
-        .catch((error) => {
-          setOptimisticStatus(undefined);
-          Alert.alert("Couldn't update status", String(error));
-        });
+      // Choosing "completed" also marks every released episode as watched —
+      // the server backfills progress and diary rows in the same mutation, so
+      // there's no client-side season syncing left to do here.
+      void setStatus({ showId, status: value }).catch((error) => {
+        setOptimisticStatus(undefined);
+        Alert.alert("Couldn't update status", String(error));
+      });
     },
-    [isAuthenticated, isShowPreview, markCurrentlyAvailableEpisodesWatched, setStatus, showId]
+    [isAuthenticated, isShowPreview, setStatus, showId]
   );
 
   const handleRemoveStatus = useCallback(() => {
@@ -1572,6 +1523,10 @@ export default function ShowScreen() {
         Alert.alert("Sign in required", "Add to a list after signing in.");
         return;
       }
+      // Rows inserted optimistically don't exist server-side yet.
+      if (typeof listId === "string" && listId.startsWith("optimistic:")) {
+        return;
+      }
       const isCurrentlyIn = memberSet.has(listId);
       const nextMemberSet = new Set<string>(memberSet);
       if (isCurrentlyIn) {
@@ -1595,6 +1550,50 @@ export default function ShowScreen() {
     },
     [toggleListItem, isAuthenticated, isShowPreview, showId, memberSet],
   );
+
+  const handleCreateListFromPicker = useCallback(async () => {
+    if (!isAuthenticated) {
+      Alert.alert("Sign in required", "Create a list after signing in.");
+      return;
+    }
+    const trimmedTitle = newListTitle.trim();
+    if (!trimmedTitle || creatingList) {
+      return;
+    }
+    setCreatingList(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      if (isShowPreview) {
+        setNewListTitle("");
+        setNewListMode(false);
+        return;
+      }
+      // The server seeds the new list with this show in the same mutation.
+      const newListId = await createListWithShow({ title: trimmedTitle, showId });
+      if (typeof newListId === "string") {
+        setOptimisticMemberSet((prev) => {
+          const next = new Set<string>(prev ?? serverMemberSet);
+          next.add(newListId);
+          return next;
+        });
+      }
+      setNewListTitle("");
+      setNewListMode(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert("Could not create list", String(error));
+    } finally {
+      setCreatingList(false);
+    }
+  }, [
+    createListWithShow,
+    creatingList,
+    isAuthenticated,
+    isShowPreview,
+    newListTitle,
+    serverMemberSet,
+    showId,
+  ]);
 
   const renderReview = useCallback(
     ({ item }: { item: any }) => (
@@ -2246,8 +2245,8 @@ export default function ShowScreen() {
             onMarkSeasonWatched={(seasonNumber, episodes) => {
               if (isShowPreview) return;
               // Explicit season button is a deliberate watch action, so it
-              // opts into diary logs; the status-change backfill sync above
-              // stays createLog: false.
+              // opts into diary logs (the completed-status backfill happens
+              // server-side and writes its own diary rows).
               void markSeasonWatched({
                 showId,
                 seasonNumber,
@@ -2488,9 +2487,15 @@ export default function ShowScreen() {
         animationType="fade"
         onRequestClose={() => setListPickerVisible(false)}
       >
-        <View className="flex-1 justify-end bg-black/50">
+        <KeyboardAvoidingView
+          className="flex-1 justify-end bg-black/50"
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
           <Pressable
-            onPress={() => setListPickerVisible(false)}
+            onPress={() => {
+              Keyboard.dismiss();
+              setListPickerVisible(false);
+            }}
             className="absolute inset-0"
           />
           <GlassSurface
@@ -2510,73 +2515,131 @@ export default function ShowScreen() {
             </Text>
             <View className="px-4">
               {lists.length > 0 ? (
-                <View className="gap-2">
-                  {lists.map((list) => {
-                    const isIn = memberSet.has(list._id);
-                    return (
-                      <GlassPressable
-                        key={list._id}
-                        onPress={() => handleToggleList(list._id)}
-                        radius={14}
-                        variant={isIn ? "prominent" : "control"}
-                        fallbackColor={
-                          isIn ? "rgba(14,165,233,0.12)" : "rgba(255,255,255,0.03)"
-                        }
-                        borderColor={isIn ? "rgba(14,165,233,0.24)" : "transparent"}
-                        contentStyle={{
-                          alignItems: "center",
-                          flexDirection: "row",
-                          gap: 12,
-                          paddingHorizontal: 16,
-                          paddingVertical: 14,
-                        }}
-                      >
-                        <View
-                          className={`h-6 w-6 items-center justify-center rounded-full ${
-                            isIn ? "bg-brand-500" : "border-2 border-dark-border"
-                          }`}
+                <ScrollView
+                  style={{ maxHeight: 320 }}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View className="gap-2">
+                    {lists.map((list) => {
+                      const isIn = memberSet.has(list._id);
+                      return (
+                        <GlassPressable
+                          key={list._id}
+                          onPress={() => handleToggleList(list._id)}
+                          radius={14}
+                          variant={isIn ? "prominent" : "control"}
+                          fallbackColor={
+                            isIn ? "rgba(14,165,233,0.12)" : "rgba(255,255,255,0.03)"
+                          }
+                          borderColor={isIn ? "rgba(14,165,233,0.24)" : "transparent"}
+                          contentStyle={{
+                            alignItems: "center",
+                            flexDirection: "row",
+                            gap: 12,
+                            paddingHorizontal: 16,
+                            paddingVertical: 14,
+                          }}
                         >
+                          <View
+                            className={`h-6 w-6 items-center justify-center rounded-full ${
+                              isIn ? "bg-brand-500" : "border-2 border-dark-border"
+                            }`}
+                          >
+                            {isIn ? (
+                              <Ionicons name="checkmark" size={14} color="#fff" />
+                            ) : null}
+                          </View>
+                          <Text
+                            className={`flex-1 text-base font-medium ${
+                              isIn ? "text-text-primary" : "text-text-secondary"
+                            }`}
+                            numberOfLines={1}
+                          >
+                            {list.title}
+                          </Text>
                           {isIn ? (
-                            <Ionicons name="checkmark" size={14} color="#fff" />
+                            <Text className="text-xs text-brand-400">Added</Text>
                           ) : null}
-                        </View>
-                        <Text
-                          className={`flex-1 text-base font-medium ${
-                            isIn ? "text-text-primary" : "text-text-secondary"
-                          }`}
-                        >
-                          {list.title}
-                        </Text>
-                        {isIn ? (
-                          <Text className="text-xs text-brand-400">Added</Text>
-                        ) : null}
-                      </GlassPressable>
-                    );
-                  })}
+                        </GlassPressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              ) : !newListMode ? (
+                <View className="items-center py-4">
+                  <Ionicons name="list-outline" size={28} color="#5A6070" />
+                  <Text className="mt-2 text-sm text-text-tertiary">
+                    No lists yet — create your first below
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* ── New list (inline create) ── */}
+              {newListMode ? (
+                <View className="mt-3 rounded-2xl border border-dark-border bg-dark-bg p-3">
+                  <TextInput
+                    value={newListTitle}
+                    onChangeText={setNewListTitle}
+                    placeholder="List name"
+                    placeholderTextColor="#5A6070"
+                    autoFocus
+                    maxLength={100}
+                    returnKeyType="done"
+                    onSubmitEditing={handleCreateListFromPicker}
+                    className="rounded-xl border border-dark-border bg-dark-card px-4 py-3 text-base text-text-primary"
+                  />
+                  <View className="mt-3 flex-row items-center justify-end gap-2">
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setNewListMode(false);
+                        setNewListTitle("");
+                      }}
+                      className="rounded-full px-4 py-2.5 active:bg-dark-hover"
+                    >
+                      <Text className="text-sm font-medium text-text-tertiary">Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleCreateListFromPicker}
+                      disabled={!newListTitle.trim() || creatingList}
+                      className={`rounded-full px-5 py-2.5 ${
+                        newListTitle.trim() && !creatingList
+                          ? "bg-brand-500 active:bg-brand-600"
+                          : "bg-dark-elevated"
+                      }`}
+                    >
+                      <Text
+                        className={`text-sm font-semibold ${
+                          newListTitle.trim() && !creatingList
+                            ? "text-white"
+                            : "text-text-tertiary"
+                        }`}
+                      >
+                        {creatingList ? "Creating..." : "Create & add"}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
               ) : (
-                <View className="items-center py-6">
-                  <Ionicons name="list-outline" size={28} color="#5A6070" />
-                  <Text className="mt-2 text-sm text-text-tertiary">No lists yet</Text>
-                  <Pressable
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setListPickerVisible(false);
-                      setTimeout(() => {
-                        router.push({ pathname: "/me/lists", params: { create: "1" } });
-                      }, 0);
-                    }}
-                    className="mt-2"
-                  >
-                    <Text className="text-sm font-medium text-brand-400">
-                      Create a list
-                    </Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setNewListMode(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create a new list"
+                  className="mt-3 flex-row items-center gap-3 rounded-2xl border border-dashed border-dark-border px-4 py-3.5 active:bg-dark-hover"
+                >
+                  <View className="h-6 w-6 items-center justify-center rounded-full bg-brand-500/15">
+                    <Ionicons name="add" size={16} color="#0ea5e9" />
+                  </View>
+                  <Text className="text-base font-medium text-brand-400">New list</Text>
+                </Pressable>
               )}
             </View>
           </GlassSurface>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Review sheet */}

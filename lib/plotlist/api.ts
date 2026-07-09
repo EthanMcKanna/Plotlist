@@ -127,10 +127,14 @@ export const api = {
   },
   lists: {
     create: ref("mutation", "lists:create"),
+    update: ref("mutation", "lists:update"),
     deleteList: ref("mutation", "lists:deleteList"),
+    follow: ref("mutation", "lists:follow"),
+    unfollow: ref("mutation", "lists:unfollow"),
     get: ref("query", "lists:get"),
     listForUser: ref("query", "lists:listForUser"),
     listPublicForUser: ref("query", "lists:listPublicForUser"),
+    listFollowedByUser: ref("query", "lists:listFollowedByUser"),
   },
   listItems: {
     toggle: ref("mutation", "listItems:toggle"),

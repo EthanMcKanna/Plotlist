@@ -1,53 +1,158 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Keyboard,
+  KeyboardAvoidingView,
   LayoutAnimation,
+  Modal,
   Pressable,
   Text,
-  TextInput,
   UIManager,
   Platform,
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { FlashList } from "../../components/FlashList";
-import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Screen } from "../../components/Screen";
+import { Avatar } from "../../components/Avatar";
+import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
+import { ListForm } from "../../components/ListForm";
 import { EmptyState } from "../../components/EmptyState";
+import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
+import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
+import { guardedPush } from "../../lib/navigation";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+function formatListMeta(list: any) {
+  const parts: string[] = [];
+  const itemCount = typeof list.itemCount === "number" ? list.itemCount : null;
+  if (itemCount !== null) {
+    parts.push(`${itemCount} ${itemCount === 1 ? "show" : "shows"}`);
+  }
+  if (list.isPublic) {
+    const followerCount = typeof list.followerCount === "number" ? list.followerCount : 0;
+    if (followerCount > 0) {
+      parts.push(`${followerCount} ${followerCount === 1 ? "follower" : "followers"}`);
+    }
+  } else {
+    parts.push("Private");
+  }
+  return parts.join(" · ");
+}
+
 export default function ListsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { create } = useLocalSearchParams<{ create?: string }>();
   const canGoBack = router.canGoBack();
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me);
+  const meId = me?._id;
+  const listArgs = isAuthenticated && meId ? { userId: meId } : "skip";
   const {
     results: lists,
     status,
     loadMore,
-  } = usePaginatedQuery(
-    api.lists.listForUser,
-    isAuthenticated && me?._id ? { userId: me._id } : "skip",
-    { initialNumItems: 20 },
-  );
+  } = usePaginatedQuery(api.lists.listForUser, listArgs, { initialNumItems: 20 });
+  const {
+    results: followedLists,
+    status: followedStatus,
+    loadMore: loadMoreFollowed,
+  } = usePaginatedQuery(api.lists.listFollowedByUser, isAuthenticated ? {} : "skip", {
+    initialNumItems: 20,
+  });
 
-  const createList = useMutation(api.lists.create);
-  const deleteList = useMutation(api.lists.deleteList);
+  const createList = useMutation(api.lists.create).withOptimisticUpdate(
+    (localStore, args) => {
+      if (!meId) return;
+      const now = Date.now();
+      const optimisticDoc = {
+        _id: `optimistic:list:${now}`,
+        _creationTime: now,
+        ownerId: meId,
+        title: args.title,
+        description: args.description ?? null,
+        isPublic: args.isPublic ?? true,
+        coverUrl: null,
+        createdAt: now,
+        updatedAt: now,
+        itemCount: 0,
+        followerCount: 0,
+        viewerIsFollowing: false,
+        isOwner: true,
+      };
+      localStore.setPaginatedQuery(api.lists.listForUser, { userId: meId }, (current) => {
+        if (!current) return current;
+        const page = current.page ?? current.results ?? [];
+        return { ...current, page: [optimisticDoc, ...page], results: [optimisticDoc, ...page] };
+      });
+    },
+  );
+  const updateList = useMutation(api.lists.update).withOptimisticUpdate(
+    (localStore, args) => {
+      if (!meId) return;
+      localStore.setPaginatedQuery(api.lists.listForUser, { userId: meId }, (current) => {
+        if (!current) return current;
+        const patch = (item: any) =>
+          item._id === args.listId
+            ? {
+                ...item,
+                ...(args.title !== undefined ? { title: args.title } : null),
+                ...(args.description !== undefined ? { description: args.description } : null),
+                ...(args.isPublic !== undefined ? { isPublic: args.isPublic } : null),
+                updatedAt: Date.now(),
+              }
+            : item;
+        const page = (current.page ?? current.results ?? []).map(patch);
+        return { ...current, page, results: page };
+      });
+    },
+  );
+  const deleteList = useMutation(api.lists.deleteList).withOptimisticUpdate(
+    (localStore, args) => {
+      if (!meId) return;
+      localStore.setPaginatedQuery(api.lists.listForUser, { userId: meId }, (current) => {
+        if (!current) return current;
+        const page = (current.page ?? current.results ?? []).filter(
+          (item: any) => item._id !== args.listId,
+        );
+        return { ...current, page, results: page };
+      });
+    },
+  );
+  const unfollowList = useMutation(api.lists.unfollow).withOptimisticUpdate(
+    (localStore, args) => {
+      localStore.setPaginatedQuery(api.lists.listFollowedByUser, {}, (current) => {
+        if (!current) return current;
+        const page = (current.page ?? current.results ?? []).filter(
+          (item: any) => item._id !== args.listId,
+        );
+        return { ...current, page, results: page };
+      });
+    },
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [isPublic, setIsPublic] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  const [selectedList, setSelectedList] = useState<any | null>(null);
+  const [actionsVisible, setActionsVisible] = useState(false);
+  const [followedActionsList, setFollowedActionsList] = useState<any | null>(null);
+
+  const [editingList, setEditingList] = useState<any | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editIsPublic, setEditIsPublic] = useState(true);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     if (create === "1") {
@@ -71,22 +176,26 @@ export default function ListsScreen() {
       Alert.alert("Sign in required", "Create a list after signing in.");
       return;
     }
-    if (!title.trim()) {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
       Alert.alert("Missing title", "Give your list a name.");
       return;
     }
     setCreating(true);
+    // Optimistic insert makes the list visible immediately; clear the form
+    // right away so the screen feels instant even on slow connections.
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setTitle("");
+    setDescription("");
+    setShowForm(false);
+    Keyboard.dismiss();
     try {
       await createList({
-        title: title.trim(),
+        title: trimmedTitle,
         description: description.trim() || undefined,
         isPublic,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setTitle("");
-      setDescription("");
-      setShowForm(false);
-      Keyboard.dismiss();
     } catch (error) {
       Alert.alert("Could not create list", String(error));
     } finally {
@@ -94,11 +203,42 @@ export default function ListsScreen() {
     }
   }, [createList, description, isAuthenticated, isPublic, title]);
 
+  const openEdit = useCallback((list: any) => {
+    setEditingList(list);
+    setEditTitle(list.title ?? "");
+    setEditDescription(list.description ?? "");
+    setEditIsPublic(Boolean(list.isPublic));
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingList) return;
+    const trimmedTitle = editTitle.trim();
+    if (!trimmedTitle) {
+      Alert.alert("Missing title", "Give your list a name.");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await updateList({
+        listId: editingList._id,
+        title: trimmedTitle,
+        description: editDescription.trim() || null,
+        isPublic: editIsPublic,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setEditingList(null);
+    } catch (error) {
+      Alert.alert("Could not save changes", String(error));
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [editDescription, editIsPublic, editTitle, editingList, updateList]);
+
   const handleDelete = useCallback(
-    (listId: string, listTitle: string) => {
+    (list: any) => {
       Alert.alert(
         "Delete list",
-        `Are you sure you want to delete "${listTitle}"? This cannot be undone.`,
+        `Are you sure you want to delete "${list.title}"? This cannot be undone.`,
         [
           { text: "Cancel", style: "cancel" },
           {
@@ -106,7 +246,10 @@ export default function ListsScreen() {
             style: "destructive",
             onPress: () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              deleteList({ listId: listId as any });
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              deleteList({ listId: list._id }).catch((error: unknown) => {
+                Alert.alert("Could not delete list", String(error));
+              });
             },
           },
         ],
@@ -115,16 +258,72 @@ export default function ListsScreen() {
     [deleteList],
   );
 
-  const renderItem = useCallback(
-    ({ item }: { item: any }) => (
+  const handleUnfollow = useCallback(
+    (list: any) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      unfollowList({ listId: list._id }).catch((error: unknown) => {
+        Alert.alert("Could not unfollow list", String(error));
+      });
+    },
+    [unfollowList],
+  );
+
+  const openList = useCallback((list: any) => {
+    if (typeof list._id !== "string" || list._id.startsWith("optimistic:")) {
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    guardedPush(`/list/${list._id}`);
+  }, []);
+
+  const ownListActions: ActionSheetOption[] = useMemo(() => {
+    if (!selectedList) return [];
+    return [
+      {
+        label: "Edit list",
+        icon: "pencil-outline",
+        onPress: () => openEdit(selectedList),
+      },
+      {
+        label: "Delete list",
+        icon: "trash-outline",
+        destructive: true,
+        onPress: () => handleDelete(selectedList),
+      },
+    ];
+  }, [handleDelete, openEdit, selectedList]);
+
+  const followedListActions: ActionSheetOption[] = useMemo(() => {
+    if (!followedActionsList) return [];
+    const options: ActionSheetOption[] = [
+      {
+        label: "Unfollow list",
+        icon: "bookmark-outline",
+        destructive: true,
+        onPress: () => handleUnfollow(followedActionsList),
+      },
+    ];
+    if (followedActionsList.owner?._id) {
+      options.unshift({
+        label: "View creator",
+        icon: "person-circle-outline",
+        onPress: () => guardedPush(`/profile/${followedActionsList.owner._id}`),
+      });
+    }
+    return options;
+  }, [followedActionsList, handleUnfollow]);
+
+  const renderOwnList = useCallback(
+    (item: any) => (
       <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push(`/list/${item._id}`);
-        }}
+        key={item._id}
+        onPress={() => openList(item)}
         onLongPress={() => {
+          if (typeof item._id !== "string" || item._id.startsWith("optimistic:")) return;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          handleDelete(item._id, item.title);
+          setSelectedList(item);
+          setActionsVisible(true);
         }}
         className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
       >
@@ -140,8 +339,11 @@ export default function ListsScreen() {
           />
         </View>
         <View className="flex-1">
-          <Text className="text-base font-semibold text-text-primary">
+          <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
             {item.title}
+          </Text>
+          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={1}>
+            {formatListMeta(item)}
           </Text>
           {item.description ? (
             <Text className="mt-0.5 text-sm text-text-tertiary" numberOfLines={1}>
@@ -152,7 +354,38 @@ export default function ListsScreen() {
         <Ionicons name="chevron-forward" size={16} color="#5A6070" />
       </Pressable>
     ),
-    [handleDelete, router],
+    [openList],
+  );
+
+  const renderFollowedList = useCallback(
+    (item: any) => (
+      <Pressable
+        key={item._id}
+        onPress={() => openList(item)}
+        onLongPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          setFollowedActionsList(item);
+        }}
+        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
+      >
+        <Avatar
+          uri={item.owner?.avatarUrl}
+          label={item.ownerName ?? item.owner?.username}
+          size={40}
+        />
+        <View className="flex-1">
+          <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={1}>
+            {item.ownerName ? `by ${item.ownerName}` : "Shared list"}
+            {formatListMeta(item) ? ` · ${formatListMeta(item)}` : ""}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color="#5A6070" />
+      </Pressable>
+    ),
+    [openList],
   );
 
   return (
@@ -184,6 +417,8 @@ export default function ListsScreen() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               toggleForm();
             }}
+            accessibilityRole="button"
+            accessibilityLabel={showForm ? "Close create list form" : "Create a list"}
             className={`h-10 w-10 items-center justify-center rounded-full ${
               showForm ? "bg-dark-elevated" : "bg-brand-500"
             }`}
@@ -206,99 +441,37 @@ export default function ListsScreen() {
         {/* ── Create form (collapsible) ── */}
         {showForm ? (
           <View className="mt-5 rounded-2xl border border-dark-border bg-dark-card p-4">
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder="List name"
-              placeholderTextColor="#5A6070"
+            <ListForm
+              title={title}
+              description={description}
+              isPublic={isPublic}
+              saving={creating}
+              submitLabel="Create"
+              savingLabel="Creating..."
               autoFocus
-              maxLength={60}
-              className="rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-base text-text-primary"
+              onChangeTitle={setTitle}
+              onChangeDescription={setDescription}
+              onToggleVisibility={() => setIsPublic((prev) => !prev)}
+              onSubmit={handleCreate}
             />
-            <TextInput
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Description (optional)"
-              placeholderTextColor="#5A6070"
-              multiline
-              maxLength={200}
-              className="mt-3 min-h-[72px] rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-base text-text-primary"
-              style={{ textAlignVertical: "top" }}
-            />
-            <View className="mt-4 flex-row items-center justify-between">
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setIsPublic((prev) => !prev);
-                }}
-                className={`flex-row items-center gap-2 rounded-full border px-3.5 py-2 ${
-                  isPublic
-                    ? "border-green-600/40 bg-green-500/10"
-                    : "border-dark-border bg-dark-bg"
-                }`}
-              >
-                <Ionicons
-                  name={isPublic ? "globe-outline" : "lock-closed-outline"}
-                  size={14}
-                  color={isPublic ? "#22C55E" : "#9BA1B0"}
-                />
-                <Text
-                  className={`text-xs font-semibold ${
-                    isPublic ? "text-green-500" : "text-text-secondary"
-                  }`}
-                >
-                  {isPublic ? "Public" : "Private"}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  handleCreate();
-                }}
-                disabled={!title.trim() || creating}
-                className={`rounded-full px-5 py-2.5 ${
-                  title.trim() && !creating
-                    ? "bg-brand-500 active:bg-brand-600"
-                    : "bg-dark-elevated"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${
-                    title.trim() && !creating ? "text-white" : "text-text-tertiary"
-                  }`}
-                >
-                  {creating ? "Creating..." : "Create"}
-                </Text>
-              </Pressable>
-            </View>
           </View>
         ) : null}
 
-        {/* spacer when form is hidden */}
-
-        {/* ── Lists ── */}
+        {/* ── Your lists ── */}
         <View className="mt-6">
+          <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
+            Your Lists
+          </Text>
           {lists.length > 0 ? (
             <>
-              <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
-                Your Lists
-              </Text>
-              <FlashList
-                data={lists}
-                renderItem={renderItem}
-                keyExtractor={(item: any) => item._id}
-                ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-                estimatedItemSize={76}
-                contentContainerStyle={{ paddingBottom: 16 }}
-                scrollEnabled={false}
-              />
+              <View style={{ gap: 10 }}>{lists.map(renderOwnList)}</View>
               {status === "CanLoadMore" ? (
                 <Pressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     loadMore(20);
                   }}
-                  className="mt-2 self-center rounded-full border border-dark-border px-5 py-2.5 active:bg-dark-hover"
+                  className="mt-3 self-center rounded-full border border-dark-border px-5 py-2.5 active:bg-dark-hover"
                 >
                   <Text className="text-xs font-semibold text-text-secondary">
                     Load more
@@ -306,6 +479,15 @@ export default function ListsScreen() {
                 </Pressable>
               ) : null}
             </>
+          ) : status === "LoadingFirstPage" && isAuthenticated ? (
+            <View style={{ gap: 10 }}>
+              {[0, 1, 2].map((index) => (
+                <View
+                  key={index}
+                  className="h-[72px] rounded-2xl border border-dark-border bg-dark-card opacity-50"
+                />
+              ))}
+            </View>
           ) : (
             <EmptyState
               title="No lists yet"
@@ -313,7 +495,90 @@ export default function ListsScreen() {
             />
           )}
         </View>
+
+        {/* ── Following ── */}
+        {followedLists.length > 0 ? (
+          <View className="mt-8">
+            <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
+              Following
+            </Text>
+            <View style={{ gap: 10 }}>{followedLists.map(renderFollowedList)}</View>
+            {followedStatus === "CanLoadMore" ? (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  loadMoreFollowed(20);
+                }}
+                className="mt-3 self-center rounded-full border border-dark-border px-5 py-2.5 active:bg-dark-hover"
+              >
+                <Text className="text-xs font-semibold text-text-secondary">
+                  Load more
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </View>
+
+      {/* ── Own list actions ── */}
+      <ActionSheet
+        visible={actionsVisible}
+        onClose={() => setActionsVisible(false)}
+        title={selectedList?.title}
+        options={ownListActions}
+      />
+
+      {/* ── Followed list actions ── */}
+      <ActionSheet
+        visible={Boolean(followedActionsList)}
+        onClose={() => setFollowedActionsList(null)}
+        title={followedActionsList?.title}
+        options={followedListActions}
+      />
+
+      {/* ── Edit sheet ── */}
+      <Modal
+        visible={Boolean(editingList)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingList(null)}
+      >
+        <KeyboardAvoidingView
+          className="flex-1 justify-end bg-black/50"
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setEditingList(null);
+            }}
+            className="absolute inset-0"
+          />
+          <View
+            className="rounded-t-3xl border border-dark-border bg-dark-card px-4 pt-4"
+            style={{ paddingBottom: insets.bottom + 24 }}
+          >
+            <View className="mb-4 items-center">
+              <View className="h-1 w-10 rounded-full bg-dark-border" />
+            </View>
+            <Text className="mb-4 px-2 text-lg font-semibold text-text-primary">
+              Edit list
+            </Text>
+            <ListForm
+              title={editTitle}
+              description={editDescription}
+              isPublic={editIsPublic}
+              saving={savingEdit}
+              submitLabel="Save"
+              savingLabel="Saving..."
+              onChangeTitle={setEditTitle}
+              onChangeDescription={setEditDescription}
+              onToggleVisibility={() => setEditIsPublic((prev) => !prev)}
+              onSubmit={handleSaveEdit}
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </Screen>
   );
 }

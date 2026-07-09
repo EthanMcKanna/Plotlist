@@ -16,6 +16,7 @@ import {
   follows,
   likes,
   lists,
+  listFollows,
   listItems,
   notifications,
   phoneVerificationRequests,
@@ -69,6 +70,7 @@ import {
   type ReleaseCalendarShowSource,
 } from "../../lib/releaseCalendar";
 import { getReleaseAwareUpNextEpisode } from "../../lib/upNextReleaseMerge";
+import { rankContinueWatchingItems } from "../../lib/continueWatchingOrder";
 import {
   fetchAndCacheSeason,
   findCachedSeasonEpisode,
@@ -84,6 +86,7 @@ import {
   notifyFollowAccepted,
   notifyFollowRequest,
   notifyLike,
+  notifyListFollow,
   resolveTargetOwner,
 } from "./notifications";
 import {
@@ -108,6 +111,12 @@ import {
   isEpisodeVerified,
   normalizeEpisodeSeasonSummaries,
 } from "../../lib/episodeProgressState";
+import {
+  listReleasedEpisodes,
+  readLastAiredEpisode,
+  resolveStatusAfterEpisodeChange,
+  type WatchStatus,
+} from "../../lib/watchStatusTransitions";
 
 type RpcHandler = (input: {
   args: any;
@@ -382,17 +391,26 @@ function isShowEnded(payload: unknown): boolean {
   return typeof status === "string" && /^(ended|canceled|cancelled)$/i.test(status.trim());
 }
 
-// After any episode-progress change, recompute the show's watch status:
-// finishing every known episode of an ended show completes it, and anything
-// else (including unmarking episodes on a completed show) puts it back in
-// "watching". This keeps the watching ↔ completed transition automatic in
-// both directions instead of blindly forcing "watching".
+// After any episode-progress change, recompute the show's watch status via
+// the shared state machine in lib/watchStatusTransitions: marking episodes
+// moves watchlist/dropped/untracked shows into "watching" (or "completed"
+// once every episode of an ended show is watched) but never downgrades an
+// explicit "completed"; unmarking only demotes "completed" back to
+// "watching" and leaves every other explicit status alone.
 async function syncWatchStateAfterEpisodeChange(
   userId: string,
   showId: string,
   updatedAt: number,
+  direction: "marked" | "unmarked",
 ) {
-  let status: "watching" | "completed" = "watching";
+  const existingRows = await db
+    .select()
+    .from(watchStates)
+    .where(and(eq(watchStates.userId, userId), eq(watchStates.showId, showId)))
+    .limit(1);
+  const currentStatus = (existingRows[0]?.status ?? null) as WatchStatus | null;
+
+  let completesShow = false;
   try {
     const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
     const show = showRows[0];
@@ -418,12 +436,19 @@ async function syncWatchStateAfterEpisodeChange(
         watchedEpisodes: progressRows,
         seasons: readSeasonSummaries(payload),
       });
-      if (progressState.isCaughtUp && isShowEnded(payload)) {
-        status = "completed";
-      }
+      completesShow = progressState.isCaughtUp && isShowEnded(payload);
     }
   } catch {
     // Status refinement is best-effort; the progress write already succeeded.
+  }
+
+  const status = resolveStatusAfterEpisodeChange({
+    direction,
+    currentStatus,
+    completesShow,
+  });
+  if (!status) {
+    return;
   }
 
   await db
@@ -442,6 +467,106 @@ async function syncWatchStateAfterEpisodeChange(
         updatedAt,
       },
     });
+}
+
+// Marking a show "completed" is a statement about the whole show, so the
+// server backfills every released-but-unwatched episode into progress and
+// the diary in the same request. This used to live in the client, where it
+// needed one season-details round trip per season and silently died on any
+// failure — the reason completed shows kept showing up with no watched
+// episodes, empty diaries, and missing watch stats.
+async function backfillReleasedEpisodesForCompletedShow(
+  userId: string,
+  showId: string,
+  now: number,
+) {
+  const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
+  const show = showRows[0];
+  if (!show || show.externalSource !== "tmdb") {
+    return;
+  }
+  const payload = await readShowDetailsPayloadForStatusChange(show);
+  const seasons = readSeasonSummaries(payload);
+  if (seasons.length === 0) {
+    return;
+  }
+  const released = listReleasedEpisodes({
+    seasons,
+    isEnded: isShowEnded(payload),
+    lastAiredEpisode: readLastAiredEpisode(payload),
+  });
+  if (released.length === 0) {
+    return;
+  }
+
+  const existing = await db
+    .select({
+      seasonNumber: episodeProgress.seasonNumber,
+      episodeNumber: episodeProgress.episodeNumber,
+    })
+    .from(episodeProgress)
+    .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId)));
+  const watchedKeys = new Set(
+    existing.map((row) => `${row.seasonNumber}:${row.episodeNumber}`),
+  );
+  const missing = released.filter(
+    (episode) => !watchedKeys.has(`${episode.seasonNumber}:${episode.episodeNumber}`),
+  );
+  if (missing.length === 0) {
+    return;
+  }
+
+  // Episode titles come from whatever season cache is already warm; a cold
+  // season just means null titles on the diary rows.
+  const seasonNumbers = Array.from(new Set(missing.map((episode) => episode.seasonNumber)));
+  const cachedSeasons = await readSeasonCacheEntries(
+    seasonNumbers.map((seasonNumber) => ({ externalId: show.externalId, seasonNumber })),
+  );
+  const titleFor = (episode: { seasonNumber: number; episodeNumber: number }) =>
+    findCachedSeasonEpisode(
+      cachedSeasons.get(seasonCacheKey(show.externalId, episode.seasonNumber))?.payload,
+      episode.episodeNumber,
+    )?.name ?? null;
+
+  for (const chunk of chunkForSqlParams(missing, 6, 80)) {
+    await db
+      .insert(episodeProgress)
+      .values(
+        chunk.map((episode) => ({
+          id: createId("episode"),
+          userId,
+          showId,
+          seasonNumber: episode.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          watchedAt: now,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [
+          episodeProgress.userId,
+          episodeProgress.showId,
+          episodeProgress.seasonNumber,
+          episodeProgress.episodeNumber,
+        ],
+      });
+  }
+  // Diary contract: the backfill logs each newly watched episode (so the log
+  // page and stats register the completion) but never fans out to follower
+  // feeds — one tap must not post hundreds of feed items.
+  for (const chunk of chunkForSqlParams(missing, 8, 80)) {
+    await db.insert(watchLogs).values(
+      chunk.map((episode) => ({
+        id: createId("log"),
+        userId,
+        showId,
+        watchedAt: now,
+        note: null,
+        seasonNumber: episode.seasonNumber,
+        episodeNumber: episode.episodeNumber,
+        episodeTitle: titleFor(episode),
+      })),
+    );
+  }
 }
 
 async function readShowSeasonSummaries(showId: string) {
@@ -958,6 +1083,80 @@ function listToDoc(list: typeof lists.$inferSelect | null | undefined) {
   return toDoc(list);
 }
 
+// Loads a list and applies the shared visibility rules: owners always see
+// their lists; everyone else needs the list public AND the owner's profile
+// visible to them (not blocked, private accounts require an approved follow).
+async function getViewableList(listId: string, viewerId: string | null) {
+  const rows = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+  const list = rows[0];
+  if (!list) {
+    return null;
+  }
+  if (viewerId && list.ownerId === viewerId) {
+    return list;
+  }
+  if (!list.isPublic) {
+    return null;
+  }
+  if (!(await getVisibleProfileAudience(viewerId, list.ownerId))) {
+    return null;
+  }
+  return list;
+}
+
+// Attaches owner, follower/show counts, and the viewer's follow state to a
+// page of lists with three batched queries instead of per-row lookups.
+async function enrichListDocs(
+  listRows: Array<typeof lists.$inferSelect>,
+  viewerId: string | null,
+) {
+  if (listRows.length === 0) {
+    return [];
+  }
+  const listIds = listRows.map((list) => list.id);
+  const ownerIds = Array.from(new Set(listRows.map((list) => list.ownerId)));
+
+  const [itemCounts, followerCounts, viewerFollowRows, ownerRows] = await Promise.all([
+    db
+      .select({ listId: listItems.listId, total: count() })
+      .from(listItems)
+      .where(inArray(listItems.listId, listIds))
+      .groupBy(listItems.listId),
+    db
+      .select({ listId: listFollows.listId, total: count() })
+      .from(listFollows)
+      .where(inArray(listFollows.listId, listIds))
+      .groupBy(listFollows.listId),
+    viewerId
+      ? db
+          .select({ listId: listFollows.listId })
+          .from(listFollows)
+          .where(and(eq(listFollows.userId, viewerId), inArray(listFollows.listId, listIds)))
+      : Promise.resolve([] as Array<{ listId: string }>),
+    db.select().from(users).where(inArray(users.id, ownerIds)),
+  ]);
+
+  const itemCountByList = new Map(itemCounts.map((row) => [row.listId, Number(row.total)]));
+  const followerCountByList = new Map(
+    followerCounts.map((row) => [row.listId, Number(row.total)]),
+  );
+  const viewerFollowSet = new Set(viewerFollowRows.map((row) => row.listId));
+  const ownersById = new Map(ownerRows.map((owner) => [owner.id, toClientUser(owner)]));
+
+  return listRows.map((list) => {
+    const owner = ownersById.get(list.ownerId) ?? null;
+    return {
+      ...listToDoc(list),
+      owner,
+      ownerName: owner?.displayName ?? owner?.name ?? owner?.username ?? null,
+      itemCount: itemCountByList.get(list.id) ?? 0,
+      followerCount: followerCountByList.get(list.id) ?? 0,
+      viewerIsFollowing: viewerFollowSet.has(list.id),
+      isOwner: viewerId != null && list.ownerId === viewerId,
+    };
+  });
+}
+
 function catalogFromTmdb(result: any) {
   return {
     externalSource: "tmdb",
@@ -1116,6 +1315,77 @@ function readImdbIdFromDetailsPayload(payload: unknown): string | null {
   const raw = payload as { external_ids?: { imdb_id?: unknown } } | null;
   const imdbId = raw?.external_ids?.imdb_id;
   return typeof imdbId === "string" && imdbId.startsWith("tt") ? imdbId : null;
+}
+
+// Fetch full TMDB details for a show and refresh the details cache (plus the
+// imdb-id/artwork side channels that ride along with a fresh payload).
+async function fetchAndCacheShowDetails(
+  show: typeof shows.$inferSelect,
+  cachedRow?: typeof tmdbDetailsCache.$inferSelect,
+) {
+  const payload = normalizeTmdbShowDetails(
+    await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,recommendations,external_ids" }),
+  );
+  const now = Date.now();
+  // Active shows churn (new episodes, next-episode pointers) so they expire
+  // fast; ended shows barely change and can ride the cache for a week.
+  const isActiveShow =
+    payload?.in_production === true ||
+    payload?.next_episode_to_air != null ||
+    payload?.status === "Returning Series" ||
+    payload?.status === "In Production";
+  const expiresAt = now + (isActiveShow ? 12 : 7 * 24) * 60 * 60 * 1000;
+  const fetchedImdbId = readImdbIdFromDetailsPayload(payload);
+  if (show.imdbId == null && fetchedImdbId) {
+    await db
+      .update(shows)
+      .set({ imdbId: fetchedImdbId, updatedAt: now })
+      .where(eq(shows.id, show.id));
+  }
+  const storedBackdropUrl =
+    typeof show.backdropUrl === "string" && show.backdropUrl.includes("/original/")
+      ? null
+      : show.backdropUrl;
+  if ((!storedBackdropUrl && payload?.backdropPath) || (!show.posterUrl && payload?.posterPath)) {
+    await db
+      .update(shows)
+      .set({
+        backdropUrl: storedBackdropUrl ?? payload.backdropPath ?? null,
+        posterUrl: show.posterUrl ?? payload.posterPath ?? null,
+        updatedAt: now,
+      })
+      .where(eq(shows.id, show.id));
+  }
+  if (cachedRow) {
+    await db.update(tmdbDetailsCache).set({ payload, fetchedAt: now, expiresAt }).where(eq(tmdbDetailsCache.id, cachedRow.id));
+  } else {
+    await db.insert(tmdbDetailsCache).values({ id: createId("tmdbdetails"), externalSource: show.externalSource, externalId: show.externalId, payload, fetchedAt: now, expiresAt });
+  }
+  return payload;
+}
+
+// Details payload for status changes: fresh cache wins, then a live fetch,
+// then a stale cache row — a slightly old released-through pointer beats
+// refusing to backfill at all.
+async function readShowDetailsPayloadForStatusChange(show: typeof shows.$inferSelect) {
+  const cached = await db
+    .select()
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, show.externalSource),
+        eq(tmdbDetailsCache.externalId, show.externalId),
+      ),
+    )
+    .limit(1);
+  if (cached[0] && cached[0].expiresAt > Date.now()) {
+    return cached[0].payload;
+  }
+  try {
+    return await fetchAndCacheShowDetails(show, cached[0]);
+  } catch {
+    return cached[0]?.payload ?? null;
+  }
 }
 
 // Resolve a show's IMDb id, persisting it on the shows row. An empty string
@@ -3082,7 +3352,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
       progressByShow.set(entry.showId, current);
     }
 
-    const rankedEntries = rows
+    const candidateEntries = rows
       .map((row) => {
         const show = showById.get(row.showId);
         if (!show) return null;
@@ -3208,13 +3478,17 @@ export const queryHandlers: Record<string, RpcHandler> = {
           sortTimestamp: releaseAware.sortTimestamp,
         };
       })
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-      .sort((left, right) => right.sortTimestamp - left.sortTimestamp)
-      .slice(0, 10);
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+    // Rank before slicing so shows with a watchable episode always claim the
+    // top-10 ahead of upcoming and caught-up entries.
+    const rankedEntries = rankContinueWatchingItems(candidateEntries).slice(0, 10);
 
     await enrichUpNextEntriesWithSeasonMetadata(rankedEntries, { now, today });
 
-    return rankedEntries.map(
+    // Enrichment can flip an entry to upcoming once season air dates load, so
+    // the final order is settled after it runs.
+    return rankContinueWatchingItems(rankedEntries).map(
       ({
         sortTimestamp: _sortTimestamp,
         externalSource: _externalSource,
@@ -3285,17 +3559,36 @@ export const queryHandlers: Record<string, RpcHandler> = {
         : null,
     };
   },
-  "lists:get": async ({ args }) => {
+  "lists:get": async ({ args, req }) => {
     const listId = z.object({ listId: z.string() }).parse(args ?? {}).listId;
-    const rows = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
-    return listToDoc(rows[0]);
+    const viewer = await getOptionalAuthUser(req);
+    const list = await getViewableList(listId, viewer?.id ?? null);
+    if (!list) {
+      return null;
+    }
+    const [enriched] = await enrichListDocs([list], viewer?.id ?? null);
+    return enriched ?? null;
   },
-  "lists:listForUser": async ({ args }) => {
+  "lists:listForUser": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string().optional() }).passthrough().parse(args ?? {});
     const userId = parsed.userId;
     if (!userId) return pageRows([], args);
+    const viewer = await getOptionalAuthUser(req);
+    const viewerId = viewer?.id ?? null;
+    // Private lists never leave the owner's account.
+    if (viewerId !== userId) {
+      if (!(await getVisibleProfileAudience(viewerId, userId))) {
+        return EMPTY_PAGE;
+      }
+      const rows = await db
+        .select()
+        .from(lists)
+        .where(and(eq(lists.ownerId, userId), eq(lists.isPublic, true)))
+        .orderBy(desc(lists.updatedAt));
+      return pageRows(await enrichListDocs(rows, viewerId), args);
+    }
     const rows = await db.select().from(lists).where(eq(lists.ownerId, userId)).orderBy(desc(lists.updatedAt));
-    return pageRows(rows.map(listToDoc), args);
+    return pageRows(await enrichListDocs(rows, viewerId), args);
   },
   "lists:listPublicForUser": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
@@ -3304,10 +3597,42 @@ export const queryHandlers: Record<string, RpcHandler> = {
       return EMPTY_PAGE;
     }
     const rows = await db.select().from(lists).where(and(eq(lists.ownerId, parsed.userId), eq(lists.isPublic, true))).orderBy(desc(lists.updatedAt));
-    return pageRows(rows.map(listToDoc), args);
+    return pageRows(await enrichListDocs(rows, viewer?.id ?? null), args);
   },
-  "listItems:listDetailed": async ({ args }) => {
+  "lists:listFollowedByUser": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const followRows = await db
+      .select()
+      .from(listFollows)
+      .where(eq(listFollows.userId, user.id))
+      .orderBy(desc(listFollows.createdAt));
+    if (followRows.length === 0) {
+      return pageRows([], args);
+    }
+    const listRows = await db
+      .select()
+      .from(lists)
+      .where(inArray(lists.id, followRows.map((row) => row.listId)));
+    const listsById = new Map(listRows.map((list) => [list.id, list]));
+    // Follows survive a list going private or a block appearing; hide those
+    // rows here instead of surfacing content the viewer may no longer see.
+    const blockedOwnerIds = await getBlockedEitherWayIdSet(
+      user.id,
+      listRows.map((list) => list.ownerId),
+    );
+    const visible = followRows
+      .map((row) => listsById.get(row.listId))
+      .filter((list): list is typeof lists.$inferSelect => Boolean(list))
+      .filter((list) => list.isPublic && !blockedOwnerIds.has(list.ownerId));
+    return pageRows(await enrichListDocs(visible, user.id), args);
+  },
+  "listItems:listDetailed": async ({ args, req }) => {
     const parsed = z.object({ listId: z.string() }).passthrough().parse(args ?? {});
+    const viewer = await getOptionalAuthUser(req);
+    // Same gate as lists:get so private list contents stay private.
+    if (!(await getViewableList(parsed.listId, viewer?.id ?? null))) {
+      return [];
+    }
     const rows = await db.select().from(listItems).where(eq(listItems.listId, parsed.listId)).orderBy(asc(listItems.position));
     const showRows = rows.length ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId))) : [];
     const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)]));
@@ -4103,13 +4428,25 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ showId: z.string(), status: z.enum(["watchlist", "watching", "completed", "dropped"]) }).parse(args ?? {});
     const existing = await db.select().from(watchStates).where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, parsed.showId))).limit(1);
     const now = Date.now();
+    let stateId: string;
     if (existing[0]) {
       await db.update(watchStates).set({ status: parsed.status, updatedAt: now }).where(eq(watchStates.id, existing[0].id));
-      return existing[0].id;
+      stateId = existing[0].id;
+    } else {
+      stateId = createId("state");
+      await db.insert(watchStates).values({ id: stateId, userId: user.id, showId: parsed.showId, status: parsed.status, updatedAt: now });
     }
-    const id = createId("state");
-    await db.insert(watchStates).values({ id, userId: user.id, showId: parsed.showId, status: parsed.status, updatedAt: now });
-    return id;
+    if (parsed.status === "completed") {
+      // The status write above already landed, so a backfill hiccup must not
+      // fail the request (and a retap retries it — the backfill is
+      // idempotent). Only the episode marks are best-effort.
+      try {
+        await backfillReleasedEpisodesForCompletedShow(user.id, parsed.showId, now);
+      } catch (error) {
+        console.error("Completed-status episode backfill failed:", error);
+      }
+    }
+    return stateId;
   },
   "watchStates:removeStatus": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -4196,32 +4533,158 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "lists:create": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = z.object({ title: z.string().min(1), description: z.string().optional(), isPublic: z.boolean().optional() }).parse(args ?? {});
+    const parsed = z
+      .object({
+        title: z.string().min(1).max(100),
+        description: z.string().max(500).optional(),
+        isPublic: z.boolean().optional(),
+        // Seeds the list with a first show so "new list" flows from a show
+        // page land fully formed in one round trip.
+        showId: z.string().optional(),
+      })
+      .parse(args ?? {});
+    const title = parsed.title.trim();
+    if (!title) {
+      throw new ApiError(400, "invalid_title", "Give your list a name.");
+    }
     const id = createId("list");
     const now = Date.now();
-    await db.insert(lists).values({ id, ownerId: user.id, title: parsed.title, description: parsed.description ?? null, isPublic: parsed.isPublic ?? true, coverUrl: null, createdAt: now, updatedAt: now });
+    await db.insert(lists).values({
+      id,
+      ownerId: user.id,
+      title,
+      description: parsed.description?.trim() || null,
+      isPublic: parsed.isPublic ?? true,
+      coverUrl: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    if (parsed.showId) {
+      const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
+      if (showRows[0]) {
+        await db.insert(listItems).values({
+          id: createId("listitem"),
+          listId: id,
+          showId: parsed.showId,
+          position: 1,
+          addedAt: now,
+        });
+      }
+    }
     return id;
+  },
+  "lists:update": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        listId: z.string(),
+        title: z.string().min(1).max(100).optional(),
+        description: z.string().max(500).nullable().optional(),
+        isPublic: z.boolean().optional(),
+      })
+      .parse(args ?? {});
+    const listRows = await db
+      .select()
+      .from(lists)
+      .where(and(eq(lists.id, parsed.listId), eq(lists.ownerId, user.id)))
+      .limit(1);
+    if (!listRows[0]) throw new ApiError(404, "list_not_found", "List not found");
+    const updates: Partial<typeof lists.$inferInsert> = { updatedAt: Date.now() };
+    if (parsed.title !== undefined) {
+      const title = parsed.title.trim();
+      if (!title) {
+        throw new ApiError(400, "invalid_title", "Give your list a name.");
+      }
+      updates.title = title;
+    }
+    if (parsed.description !== undefined) {
+      updates.description = parsed.description?.trim() || null;
+    }
+    if (parsed.isPublic !== undefined) {
+      updates.isPublic = parsed.isPublic;
+    }
+    await db.update(lists).set(updates).where(eq(lists.id, parsed.listId));
+    return { success: true };
   },
   "lists:deleteList": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const listId = z.object({ listId: z.string() }).parse(args ?? {}).listId;
+    const listRows = await db
+      .select()
+      .from(lists)
+      .where(and(eq(lists.id, listId), eq(lists.ownerId, user.id)))
+      .limit(1);
+    if (!listRows[0]) {
+      // Already gone (double-tap or another device) — deleting is idempotent.
+      return { success: true };
+    }
     await db.delete(listItems).where(eq(listItems.listId, listId));
+    await db.delete(listFollows).where(eq(listFollows.listId, listId));
+    await db.delete(comments).where(and(eq(comments.targetType, "list"), eq(comments.targetId, listId)));
+    await db.delete(likes).where(and(eq(likes.targetType, "list"), eq(likes.targetId, listId)));
     await db.delete(lists).where(and(eq(lists.id, listId), eq(lists.ownerId, user.id)));
     return { success: true };
+  },
+  "lists:follow": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const listId = z.object({ listId: z.string() }).parse(args ?? {}).listId;
+    const list = await getViewableList(listId, user.id);
+    if (!list) throw new ApiError(404, "list_not_found", "List not found");
+    if (list.ownerId === user.id) {
+      throw new ApiError(400, "own_list", "You already own this list.");
+    }
+    const existing = await db
+      .select()
+      .from(listFollows)
+      .where(and(eq(listFollows.listId, listId), eq(listFollows.userId, user.id)))
+      .limit(1);
+    if (!existing[0]) {
+      await db.insert(listFollows).values({
+        id: createId("listfollow"),
+        listId,
+        userId: user.id,
+        createdAt: Date.now(),
+      });
+      await notifyListFollow(user, list.ownerId, listId, list.title);
+    }
+    return { following: true };
+  },
+  "lists:unfollow": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const listId = z.object({ listId: z.string() }).parse(args ?? {}).listId;
+    await db
+      .delete(listFollows)
+      .where(and(eq(listFollows.listId, listId), eq(listFollows.userId, user.id)));
+    return { following: false };
   },
   "listItems:toggle": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ listId: z.string(), showId: z.string() }).parse(args ?? {});
     const listRows = await db.select().from(lists).where(and(eq(lists.id, parsed.listId), eq(lists.ownerId, user.id))).limit(1);
     if (!listRows[0]) throw new ApiError(404, "list_not_found", "List not found");
+    const now = Date.now();
     const existing = await db.select().from(listItems).where(and(eq(listItems.listId, parsed.listId), eq(listItems.showId, parsed.showId))).limit(1);
     if (existing[0]) {
       await db.delete(listItems).where(eq(listItems.id, existing[0].id));
+      await db.update(lists).set({ updatedAt: now }).where(eq(lists.id, parsed.listId));
       return false;
     }
-    const rows = await db.select().from(listItems).where(eq(listItems.listId, parsed.listId));
+    // MAX(position) instead of COUNT: removals leave gaps, and count-based
+    // positions collide with survivors (unique list+show index aside, two
+    // rows sharing a position breaks ordering).
+    const maxRows = await db
+      .select({ maxPosition: sql<number>`coalesce(max(${listItems.position}), 0)` })
+      .from(listItems)
+      .where(eq(listItems.listId, parsed.listId));
     const id = createId("listitem");
-    await db.insert(listItems).values({ id, listId: parsed.listId, showId: parsed.showId, position: rows.length + 1, addedAt: Date.now() });
+    await db.insert(listItems).values({
+      id,
+      listId: parsed.listId,
+      showId: parsed.showId,
+      position: Number(maxRows[0]?.maxPosition ?? 0) + 1,
+      addedAt: now,
+    });
+    await db.update(lists).set({ updatedAt: now }).where(eq(lists.id, parsed.listId));
     return true;
   },
   "listItems:reorder": async ({ args, req }) => {
@@ -4230,7 +4693,16 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const listRows = await db.select().from(lists).where(and(eq(lists.id, parsed.listId), eq(lists.ownerId, user.id))).limit(1);
     if (!listRows[0]) throw new ApiError(404, "list_not_found", "List not found");
     const ids = parsed.orderedIds ?? parsed.itemIds ?? [];
-    await Promise.all(ids.map((id, index) => db.update(listItems).set({ position: index + 1 }).where(eq(listItems.id, id))));
+    // Scoped to the list so stray ids can't renumber another list's rows.
+    await Promise.all(
+      ids.map((id, index) =>
+        db
+          .update(listItems)
+          .set({ position: index + 1 })
+          .where(and(eq(listItems.id, id), eq(listItems.listId, parsed.listId))),
+      ),
+    );
+    await db.update(lists).set({ updatedAt: Date.now() }).where(eq(lists.id, parsed.listId));
     return { success: true };
   },
   "episodeProgress:toggleEpisode": async ({ args, req }) => {
@@ -4246,7 +4718,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         seasonNumber: parsed.seasonNumber,
         episodeNumber: parsed.episodeNumber,
       });
-      await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
+      await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked");
       return false;
     }
     await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
@@ -4271,7 +4743,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         fanOutToFeeds: true,
       });
     }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
     return true;
   },
   "episodeProgress:markEpisodeWatched": async ({ args, req }) => {
@@ -4297,7 +4769,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         fanOutToFeeds: true,
       });
     }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
     return true;
   },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
@@ -4339,7 +4811,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         });
       }
     }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
     return { success: true };
   },
   "episodeProgress:unmarkSeasonWatched": async ({ args, req }) => {
@@ -4352,7 +4824,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       showId: parsed.showId,
       seasonNumber: parsed.seasonNumber,
     });
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now);
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked");
     return { success: true };
   },
   "reports:create": async ({ args, req }) => {
@@ -4630,45 +5102,7 @@ export const actionHandlers: Record<string, RpcHandler> = {
     if (show.externalSource !== "tmdb") {
       return null;
     }
-    const payload = normalizeTmdbShowDetails(
-      await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,recommendations,external_ids" }),
-    );
-    const now = Date.now();
-    // Active shows churn (new episodes, next-episode pointers) so they expire
-    // fast; ended shows barely change and can ride the cache for a week.
-    const isActiveShow =
-      payload?.in_production === true ||
-      payload?.next_episode_to_air != null ||
-      payload?.status === "Returning Series" ||
-      payload?.status === "In Production";
-    const expiresAt = now + (isActiveShow ? 12 : 7 * 24) * 60 * 60 * 1000;
-    const fetchedImdbId = readImdbIdFromDetailsPayload(payload);
-    if (show.imdbId == null && fetchedImdbId) {
-      await db
-        .update(shows)
-        .set({ imdbId: fetchedImdbId, updatedAt: now })
-        .where(eq(shows.id, show.id));
-    }
-    const storedBackdropUrl =
-      typeof show.backdropUrl === "string" && show.backdropUrl.includes("/original/")
-        ? null
-        : show.backdropUrl;
-    if ((!storedBackdropUrl && payload?.backdropPath) || (!show.posterUrl && payload?.posterPath)) {
-      await db
-        .update(shows)
-        .set({
-          backdropUrl: storedBackdropUrl ?? payload.backdropPath ?? null,
-          posterUrl: show.posterUrl ?? payload.posterPath ?? null,
-          updatedAt: now,
-        })
-        .where(eq(shows.id, show.id));
-    }
-    if (cached[0]) {
-      await db.update(tmdbDetailsCache).set({ payload, fetchedAt: now, expiresAt }).where(eq(tmdbDetailsCache.id, cached[0].id));
-    } else {
-      await db.insert(tmdbDetailsCache).values({ id: createId("tmdbdetails"), externalSource: show.externalSource, externalId: show.externalId, payload, fetchedAt: now, expiresAt });
-    }
-    return payload;
+    return await fetchAndCacheShowDetails(show, cached[0]);
   },
   "shows:getSeasonDetails": async ({ args }) => {
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});

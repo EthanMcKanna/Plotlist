@@ -11,7 +11,8 @@ export type NotificationType =
   | "follow_accepted"
   | "like"
   | "comment"
-  | "episode";
+  | "episode"
+  | "list_follow";
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
@@ -30,6 +31,7 @@ const CATEGORY_BY_TYPE: Record<NotificationType, NotificationCategory> = {
   like: "likes",
   comment: "comments",
   episode: "episodes",
+  list_follow: "follows",
 };
 
 export function categoryForNotificationType(type: NotificationType): NotificationCategory {
@@ -171,6 +173,13 @@ export function buildFollowNotificationContent(actorName: string) {
   return {
     title: "New follower",
     body: `${actorName} started following you.`,
+  };
+}
+
+export function buildListFollowNotificationContent(actorName: string, listTitle: string) {
+  return {
+    title: "New list follower",
+    body: `${actorName} started following your list “${listTitle}”.`,
   };
 }
 

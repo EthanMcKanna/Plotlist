@@ -37,6 +37,7 @@ export const notificationTypeValues = [
   "like",
   "comment",
   "episode",
+  "list_follow",
 ] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log"] as const;
@@ -478,6 +479,24 @@ export const listItems = sqliteTable(
   (table) => ({
     listPositionIdx: index("list_items_list_position_idx").on(table.listId, table.position),
     listShowIdx: uniqueIndex("list_items_list_show_idx").on(table.listId, table.showId),
+  }),
+);
+
+export const listFollows = sqliteTable(
+  "list_follows",
+  {
+    id: text("id").primaryKey(),
+    listId: text("list_id")
+      .notNull()
+      .references(() => lists.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    listUserIdx: uniqueIndex("list_follows_list_user_idx").on(table.listId, table.userId),
+    userCreatedIdx: index("list_follows_user_created_idx").on(table.userId, table.createdAt),
   }),
 );
 

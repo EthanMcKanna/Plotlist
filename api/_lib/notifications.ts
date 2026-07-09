@@ -18,6 +18,7 @@ import {
   buildFollowAcceptedNotificationContent,
   buildFollowNotificationContent,
   buildFollowRequestNotificationContent,
+  buildListFollowNotificationContent,
   buildLikeNotificationContent,
   categoryForNotificationType,
   EPISODE_DIGEST_LOCAL_HOUR,
@@ -405,6 +406,35 @@ export async function notifyFollow(actor: typeof users.$inferSelect, followeeId:
     ]);
   } catch (error) {
     console.warn("[notifications] follow notification failed", error);
+  }
+}
+
+export async function notifyListFollow(
+  actor: typeof users.$inferSelect,
+  ownerId: string,
+  listId: string,
+  listTitle: string,
+) {
+  try {
+    if (ownerId === actor.id) {
+      return;
+    }
+    const content = buildListFollowNotificationContent(actorDisplayName(actor), listTitle);
+    await createNotificationsAndPush([
+      {
+        userId: ownerId,
+        type: "list_follow",
+        actorId: actor.id,
+        targetType: "list",
+        targetId: listId,
+        title: content.title,
+        body: content.body,
+        data: { url: `/list/${listId}`, targetType: "list", targetId: listId, actorId: actor.id },
+        dedupeKey: `list_follow:${actor.id}:${listId}`,
+      },
+    ]);
+  } catch (error) {
+    console.warn("[notifications] list follow notification failed", error);
   }
 }
 

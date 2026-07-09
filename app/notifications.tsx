@@ -22,6 +22,7 @@ const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   like: "heart",
   comment: "chatbubble-ellipses",
   episode: "tv",
+  list_follow: "list",
 };
 
 const TYPE_ICON_COLORS: Record<string, string> = {
@@ -31,6 +32,7 @@ const TYPE_ICON_COLORS: Record<string, string> = {
   like: "#F472B6",
   comment: "#A78BFA",
   episode: "#22C55E",
+  list_follow: "#38BDF8",
 };
 
 function notificationHref(item: any): Href | null {

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
+  Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -10,9 +13,11 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useLocalSearchParams } from "expo-router";
-import { useMutation, useQuery } from "../../lib/plotlist/react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -27,6 +32,8 @@ import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { Comments } from "../../components/Comments";
 import { Poster } from "../../components/Poster";
+import { Avatar } from "../../components/Avatar";
+import { ListForm } from "../../components/ListForm";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
 import type { Id } from "../../lib/plotlist/types";
@@ -217,6 +224,9 @@ function SortablePosterCard({
 
 export default function ListScreen() {
   const params = useLocalSearchParams();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { isAuthenticated } = useAuth();
   const listId = (typeof params.id === "string" ? params.id : "") as Id<"lists">;
   const list = useQuery(api.lists.get, { listId });
   const me = useQuery(api.users.me);
@@ -230,6 +240,71 @@ export default function ListScreen() {
   );
   const report = useMutation(api.reports.create);
   const reorder = useMutation(api.listItems.reorder);
+  const followList = useMutation(api.lists.follow).withOptimisticUpdate(
+    (localStore) => {
+      const current = localStore.getQuery(api.lists.get, { listId });
+      if (current) {
+        const optimistic = {
+          ...current,
+          viewerIsFollowing: true,
+          followerCount: (current.followerCount ?? 0) + 1,
+        };
+        localStore.setQuery(api.lists.get, { listId }, optimistic);
+        localStore.setPaginatedQuery(api.lists.listFollowedByUser, {}, (page) => {
+          if (!page) return page;
+          const rows = (page.page ?? page.results ?? []).filter(
+            (item: any) => item._id !== listId,
+          );
+          return { ...page, page: [optimistic, ...rows], results: [optimistic, ...rows] };
+        });
+      }
+    },
+  );
+  const unfollowList = useMutation(api.lists.unfollow).withOptimisticUpdate(
+    (localStore) => {
+      const current = localStore.getQuery(api.lists.get, { listId });
+      if (current) {
+        localStore.setQuery(api.lists.get, { listId }, {
+          ...current,
+          viewerIsFollowing: false,
+          followerCount: Math.max(0, (current.followerCount ?? 1) - 1),
+        });
+      }
+      localStore.setPaginatedQuery(api.lists.listFollowedByUser, {}, (page) => {
+        if (!page) return page;
+        const rows = (page.page ?? page.results ?? []).filter(
+          (item: any) => item._id !== listId,
+        );
+        return { ...page, page: rows, results: rows };
+      });
+    },
+  );
+  const updateList = useMutation(api.lists.update).withOptimisticUpdate(
+    (localStore, args) => {
+      const current = localStore.getQuery(api.lists.get, { listId });
+      if (current) {
+        localStore.setQuery(api.lists.get, { listId }, {
+          ...current,
+          ...(args.title !== undefined ? { title: args.title } : null),
+          ...(args.description !== undefined ? { description: args.description } : null),
+          ...(args.isPublic !== undefined ? { isPublic: args.isPublic } : null),
+        });
+      }
+    },
+  );
+  const deleteList = useMutation(api.lists.deleteList).withOptimisticUpdate(
+    (localStore, args) => {
+      const ownerId = localStore.getQuery(api.lists.get, { listId })?.ownerId;
+      if (!ownerId) return;
+      localStore.setPaginatedQuery(api.lists.listForUser, { userId: ownerId }, (page) => {
+        if (!page) return page;
+        const rows = (page.page ?? page.results ?? []).filter(
+          (item: any) => item._id !== args.listId,
+        );
+        return { ...page, page: rows, results: rows };
+      });
+    },
+  );
   const listCoverUrl =
     typeof list?.coverUrl === "string" && list.coverUrl.length > 0
       ? list.coverUrl
@@ -245,6 +320,12 @@ export default function ListScreen() {
   const coverUrl = listCoverUrl ?? resolvedLegacyCoverUrl;
   const [orderedItems, setOrderedItems] = useState(items);
   const [showReport, setShowReport] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editIsPublic, setEditIsPublic] = useState(true);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [followPending, setFollowPending] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const gridHeight = useMemo(() => {
     if (orderedItems.length === 0) return 0;
@@ -304,6 +385,89 @@ export default function ListScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     guardedPush(`/show/${showId}`);
   }, []);
+
+  const handleToggleFollow = useCallback(async () => {
+    if (!isAuthenticated) {
+      Alert.alert("Sign in required", "Follow lists after signing in.");
+      return;
+    }
+    if (followPending) {
+      return;
+    }
+    setFollowPending(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      if (list?.viewerIsFollowing) {
+        await unfollowList({ listId });
+      } else {
+        await followList({ listId });
+      }
+    } catch (error) {
+      Alert.alert("Something went wrong", String(error));
+    } finally {
+      setFollowPending(false);
+    }
+  }, [followList, followPending, isAuthenticated, list?.viewerIsFollowing, listId, unfollowList]);
+
+  const openEdit = useCallback(() => {
+    if (!list) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditTitle(list.title ?? "");
+    setEditDescription(list.description ?? "");
+    setEditIsPublic(Boolean(list.isPublic));
+    setEditVisible(true);
+  }, [list]);
+
+  const handleSaveEdit = useCallback(async () => {
+    const trimmedTitle = editTitle.trim();
+    if (!trimmedTitle) {
+      Alert.alert("Missing title", "Give your list a name.");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await updateList({
+        listId,
+        title: trimmedTitle,
+        description: editDescription.trim() || null,
+        isPublic: editIsPublic,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setEditVisible(false);
+    } catch (error) {
+      Alert.alert("Could not save changes", String(error));
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [editDescription, editIsPublic, editTitle, listId, updateList]);
+
+  const handleDelete = useCallback(() => {
+    Alert.alert(
+      "Delete list",
+      `Are you sure you want to delete "${list?.title ?? "this list"}"? This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setEditVisible(false);
+              await deleteList({ listId });
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              if (router.canGoBack()) {
+                router.back();
+              } else {
+                router.replace("/me/lists");
+              }
+            } catch (error) {
+              Alert.alert("Could not delete list", String(error));
+            }
+          },
+        },
+      ],
+    );
+  }, [deleteList, list?.title, listId, router]);
 
   const handleDragStart = useCallback((itemId: string, index: number) => {
     const position = getGridPosition(index);
@@ -396,14 +560,104 @@ export default function ListScreen() {
         scrollEnabled={!draggingId}
       >
         <View className="px-6 pb-10 pt-6">
-          <Text className="text-2xl font-semibold text-text-primary">
-            {list?.title ?? "List"}
-          </Text>
-          {list?.description ? (
+          {list === null ? (
+            <View className="mt-10">
+              <EmptyState
+                title="List unavailable"
+                description="This list may be private or no longer exists."
+              />
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (router.canGoBack()) {
+                    router.back();
+                  } else {
+                    router.replace("/home");
+                  }
+                }}
+                className="mt-4 self-center rounded-full border border-dark-border px-5 py-2.5 active:bg-dark-hover"
+              >
+                <Text className="text-sm font-semibold text-text-secondary">Go back</Text>
+              </Pressable>
+            </View>
+          ) : list === undefined ? (
+            <View className="mt-16 items-center">
+              <ActivityIndicator color="#5A6070" />
+            </View>
+          ) : (
+            <>
+          <View className="flex-row items-start justify-between gap-3">
+            <Text className="flex-1 text-2xl font-semibold text-text-primary">
+              {list.title}
+            </Text>
+            {isOwner ? (
+              <Pressable
+                onPress={openEdit}
+                accessibilityRole="button"
+                accessibilityLabel="Edit list"
+                className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+              >
+                <Ionicons name="pencil" size={16} color="#9BA1B0" />
+              </Pressable>
+            ) : null}
+          </View>
+
+          {list.description ? (
             <Text className="mt-2 text-sm text-text-secondary">
               {list.description}
             </Text>
           ) : null}
+
+          {/* ── Creator + meta ── */}
+          {list.owner ? (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                guardedPush(`/profile/${list.owner._id}`);
+              }}
+              className="mt-4 flex-row items-center gap-3 self-start rounded-full py-1 pr-3 active:opacity-70"
+            >
+              <Avatar
+                uri={list.owner.avatarUrl}
+                label={list.ownerName ?? list.owner.username}
+                size={32}
+              />
+              <View>
+                <Text className="text-sm font-semibold text-text-primary">
+                  {list.ownerName ?? "Unknown"}
+                </Text>
+                {list.owner.username ? (
+                  <Text className="text-xs text-text-tertiary">@{list.owner.username}</Text>
+                ) : null}
+              </View>
+            </Pressable>
+          ) : null}
+
+          <View className="mt-3 flex-row flex-wrap items-center gap-2">
+            <View className="flex-row items-center gap-1.5 rounded-full bg-dark-elevated px-3 py-1.5">
+              <Ionicons
+                name={list.isPublic ? "globe-outline" : "lock-closed-outline"}
+                size={12}
+                color="#9BA1B0"
+              />
+              <Text className="text-xs font-semibold text-text-secondary">
+                {list.isPublic ? "Public" : "Private"}
+              </Text>
+            </View>
+            <View className="rounded-full bg-dark-elevated px-3 py-1.5">
+              <Text className="text-xs font-semibold text-text-secondary">
+                {orderedItems.length} {orderedItems.length === 1 ? "show" : "shows"}
+              </Text>
+            </View>
+            {list.isPublic ? (
+              <View className="rounded-full bg-dark-elevated px-3 py-1.5">
+                <Text className="text-xs font-semibold text-text-secondary">
+                  {list.followerCount ?? 0}{" "}
+                  {(list.followerCount ?? 0) === 1 ? "follower" : "followers"}
+                </Text>
+              </View>
+            ) : null}
+          </View>
 
           {coverUrl ? (
             <Image
@@ -413,14 +667,52 @@ export default function ListScreen() {
             />
           ) : null}
 
-          {!isOwner ? (
+          {!isOwner && list.isPublic ? (
+            <View className="mt-4 flex-row items-center gap-2">
+              <Pressable
+                onPress={handleToggleFollow}
+                disabled={followPending}
+                accessibilityRole="button"
+                accessibilityLabel={list.viewerIsFollowing ? "Unfollow list" : "Follow list"}
+                className={`flex-1 flex-row items-center justify-center gap-2 rounded-full px-5 py-2.5 ${
+                  list.viewerIsFollowing
+                    ? "border border-dark-border bg-dark-card active:bg-dark-hover"
+                    : "bg-brand-500 active:bg-brand-600"
+                }`}
+              >
+                <Ionicons
+                  name={list.viewerIsFollowing ? "checkmark" : "bookmark-outline"}
+                  size={15}
+                  color={list.viewerIsFollowing ? "#9BA1B0" : "#fff"}
+                />
+                <Text
+                  className={`text-sm font-semibold ${
+                    list.viewerIsFollowing ? "text-text-secondary" : "text-white"
+                  }`}
+                >
+                  {list.viewerIsFollowing ? "Following" : "Follow list"}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowReport(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Report list"
+                className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card active:bg-dark-hover"
+              >
+                <Ionicons name="flag-outline" size={16} color="#9BA1B0" />
+              </Pressable>
+            </View>
+          ) : !isOwner ? (
             <View className="mt-4">
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setShowReport(true);
                 }}
-                className="rounded-full border border-dark-border bg-dark-card px-4 py-2"
+                className="self-start rounded-full border border-dark-border bg-dark-card px-4 py-2"
               >
                 <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
                   Report list
@@ -453,6 +745,8 @@ export default function ListScreen() {
           <View className="mt-8">
             <Comments targetType="list" targetId={listId} />
           </View>
+            </>
+          )}
         </View>
       </ScrollView>
       </KeyboardAvoidingView>
@@ -468,6 +762,56 @@ export default function ListScreen() {
           }
         }}
       />
+
+      {/* ── Edit sheet (owner) ── */}
+      <Modal
+        visible={editVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditVisible(false)}
+      >
+        <KeyboardAvoidingView
+          className="flex-1 justify-end bg-black/50"
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setEditVisible(false);
+            }}
+            className="absolute inset-0"
+          />
+          <View
+            className="rounded-t-3xl border border-dark-border bg-dark-card px-4 pt-4"
+            style={{ paddingBottom: insets.bottom + 24 }}
+          >
+            <View className="mb-4 items-center">
+              <View className="h-1 w-10 rounded-full bg-dark-border" />
+            </View>
+            <Text className="mb-4 px-2 text-lg font-semibold text-text-primary">
+              Edit list
+            </Text>
+            <ListForm
+              title={editTitle}
+              description={editDescription}
+              isPublic={editIsPublic}
+              saving={savingEdit}
+              submitLabel="Save"
+              savingLabel="Saving..."
+              onChangeTitle={setEditTitle}
+              onChangeDescription={setEditDescription}
+              onToggleVisibility={() => setEditIsPublic((prev) => !prev)}
+              onSubmit={handleSaveEdit}
+            />
+            <Pressable
+              onPress={handleDelete}
+              className="mt-4 items-center rounded-xl border border-red-500/30 bg-red-500/10 py-3.5 active:bg-red-500/20"
+            >
+              <Text className="text-sm font-semibold text-red-400">Delete list</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </Screen>
   );
 }

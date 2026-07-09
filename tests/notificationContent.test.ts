@@ -5,6 +5,7 @@ import {
   buildEpisodeNotificationContent,
   buildFollowNotificationContent,
   buildLikeNotificationContent,
+  buildListFollowNotificationContent,
   categoryForNotificationType,
   EPISODE_DIGEST_LOCAL_HOUR,
   getLocalDateStringForTimezone,
@@ -155,6 +156,13 @@ describe("social notification copy", () => {
     const { body } = buildCommentNotificationContent("Ana", "review", long);
     expect(body.length).toBeLessThan(120);
     expect(body).toContain("…");
+  });
+
+  it("builds list follow copy and routes it to the follows category", () => {
+    const content = buildListFollowNotificationContent("Ana", "Cozy Mysteries");
+    expect(content.title).toBe("New list follower");
+    expect(content.body).toBe("Ana started following your list “Cozy Mysteries”.");
+    expect(categoryForNotificationType("list_follow")).toBe("follows");
   });
 });
 
