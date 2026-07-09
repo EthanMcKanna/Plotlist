@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Image } from "expo-image";
@@ -21,8 +22,10 @@ import { guardedPush } from "../lib/navigation";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import type { EpisodeSeasonSummary } from "../lib/episodeProgressState";
+import { rankContinueWatchingItems } from "../lib/continueWatchingOrder";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { RailSkeleton } from "./RailSkeleton";
 
 export type ContinueWatchingItem = {
   showId: Id<"shows">;
@@ -60,13 +63,22 @@ type ContinueWatchingRailProps = {
   index?: number;
 };
 
-// Continue watching leads the home surface, so its cards run larger than any
-// other rail — episode stills (16:9 thumbnails) are reserved for this rail.
-const CARD_WIDTH = 300;
-const IMAGE_HEIGHT = Math.round((CARD_WIDTH * 9) / 16);
 const ACCENT = "#0EA5E9";
+const CARD_GAP = 14;
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";
 export const CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET = 44;
+
+// Continue watching leads the home surface, so its cards run near-full-bleed
+// banners — episode stills (16:9 art) are reserved for this rail. Sized off
+// the window so a slice of the next card always peeks in.
+export function getContinueWatchingCardMetrics(windowWidth: number) {
+  const cardWidth = Math.round(Math.min(Math.max(windowWidth - 80, 260), 360));
+  return {
+    cardWidth,
+    cardHeight: Math.round(cardWidth * 0.6),
+    gap: CARD_GAP,
+  };
+}
 
 export function getContinueWatchingSubtitle(item: {
   isUpcoming?: boolean;
@@ -268,8 +280,13 @@ export function getActiveContinueWatchingItems(
   // Items an optimistic update just marked caught-up stay in the rail (shown
   // as "Complete") until the server confirms — dropping them immediately
   // makes the card vanish and flash back whenever more episodes exist.
-  return (items ?? []).filter(
-    (item) => !isContinueWatchingComplete(item) || item.optimisticCaughtUp === true,
+  // Ranking keeps watchable episodes ahead of not-yet-aired ones even when
+  // the payload came from an older server or an optimistic rewrite.
+  return rankContinueWatchingItems(
+    (items ?? []).filter(
+      (item) =>
+        !isContinueWatchingComplete(item) || item.optimisticCaughtUp === true,
+    ),
   );
 }
 
@@ -297,11 +314,30 @@ export function shouldRenderContinueWatchingEmptyState(
   return Array.isArray(items) && items.length === 0 && !hideWhenEmpty;
 }
 
+export function ContinueWatchingRailSkeleton({ index = 1 }: { index?: number }) {
+  const { width } = useWindowDimensions();
+  const { cardWidth, cardHeight } = getContinueWatchingCardMetrics(width);
+  return (
+    <RailSkeleton
+      index={index}
+      kicker="Resume"
+      title="Continue"
+      accent={ACCENT}
+      icon="play"
+      variant="banner"
+      cardWidth={cardWidth}
+      cardHeight={cardHeight}
+    />
+  );
+}
+
 export function ContinueWatchingRail({
   items: providedItems,
   hideWhenEmpty = false,
   index = 1,
 }: ContinueWatchingRailProps = {}) {
+  const { width } = useWindowDimensions();
+  const { cardWidth, cardHeight, gap } = getContinueWatchingCardMetrics(width);
   const queriedItems = useContinueWatchingItems(providedItems === undefined);
   const items = providedItems === undefined ? queriedItems : providedItems ?? undefined;
   const markEpisodeWatched = useMutation(
@@ -337,7 +373,9 @@ export function ContinueWatchingRail({
   );
 
   if (!items) {
-    return null;
+    // Loading: hold the section's exact footprint with shimmer banners so the
+    // headlining rail never pops in or shifts the surface below it.
+    return <ContinueWatchingRailSkeleton index={index} />;
   }
 
   if (items.length === 0 && !shouldRenderContinueWatchingEmptyState(items, hideWhenEmpty)) {
@@ -464,7 +502,7 @@ export function ContinueWatchingRail({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.rail}
         decelerationRate="fast"
-        snapToInterval={CARD_WIDTH + 14}
+        snapToInterval={cardWidth + gap}
         snapToAlignment="start"
       >
         {activeItems.map((item, index) => (
@@ -472,6 +510,8 @@ export function ContinueWatchingRail({
             key={item.showId}
             item={item}
             index={index}
+            cardWidth={cardWidth}
+            cardHeight={cardHeight}
             onMarkWatched={handleMarkWatched}
           />
         ))}
@@ -483,10 +523,14 @@ export function ContinueWatchingRail({
 function ContinueWatchingCard({
   item,
   index,
+  cardWidth,
+  cardHeight,
   onMarkWatched,
 }: {
   item: ContinueWatchingItem;
   index: number;
+  cardWidth: number;
+  cardHeight: number;
   onMarkWatched: (item: ContinueWatchingItem) => void;
 }) {
   const epLabel = getContinueWatchingVisibleBadgeLabel(item);
@@ -498,6 +542,7 @@ function ContinueWatchingCard({
   const progressRatio = getContinueWatchingProgressRatio(item);
   const complete = isContinueWatchingComplete(item);
   const showProgressBar = !item.isUpcoming && (item.totalEpisodes ?? 0) > 0;
+  const showMarkWatched = !item.isUpcoming && !complete;
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -518,103 +563,111 @@ function ContinueWatchingCard({
           ? FadeInRight.delay(index * 35).duration(300)
           : undefined
       }
-      style={{ width: CARD_WIDTH }}
+      style={{ width: cardWidth }}
     >
-      <View style={styles.cardWrap}>
+      <View style={[styles.cardWrap, { width: cardWidth }]}>
         <Pressable
           onPress={handlePress}
           accessibilityRole="button"
           accessibilityLabel={getContinueWatchingAccessibilityLabel(item)}
-          style={styles.card}
+          style={[styles.card, { height: cardHeight, width: cardWidth }]}
           className="active:opacity-90"
         >
-          <View style={styles.media}>
-            {imageUrl ? (
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.image}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                priority="high"
-                transition={200}
-              />
-            ) : (
-              <HomeArtworkFallback
-                testID={`continue-artwork-fallback-${item.showId}`}
-                title={item.show.title}
-                subtitle={null}
-                accent={ACCENT}
-                compact
-                markVisible={false}
-              />
-            )}
-
-            <LinearGradient
-              colors={["rgba(13,15,20,0.30)", "rgba(13,15,20,0.0)", "rgba(13,15,20,0.55)"]}
-              locations={[0, 0.4, 1]}
-              style={[StyleSheet.absoluteFill, styles.pointerNone]}
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.image}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              priority="high"
+              transition={200}
             />
+          ) : (
+            <HomeArtworkFallback
+              testID={`continue-artwork-fallback-${item.showId}`}
+              title={item.show.title}
+              subtitle={null}
+              accent={ACCENT}
+              compact
+              markVisible={false}
+            />
+          )}
 
-            <View style={styles.badgeRow}>
-              <View
-                testID={`continue-episode-chip-${item.showId}`}
-                style={styles.epBadge}
+          {/* One scrim, three jobs: legible chips up top, clean art through
+              the middle, and a deep floor for the copy block. */}
+          <LinearGradient
+            colors={[
+              "rgba(13,15,20,0.34)",
+              "rgba(13,15,20,0.02)",
+              "rgba(13,15,20,0.42)",
+              "rgba(13,15,20,0.92)",
+            ]}
+            locations={[0, 0.3, 0.62, 1]}
+            style={[StyleSheet.absoluteFill, styles.pointerNone]}
+          />
+
+          <View style={styles.badgeRow}>
+            <View
+              testID={`continue-episode-chip-${item.showId}`}
+              style={styles.epBadge}
+            >
+              <Text
+                className="text-[10px] font-bold text-white/85"
+                style={{ letterSpacing: 0.2 }}
               >
-                <Text
-                  className="text-[10px] font-bold text-white/85"
-                  style={{ letterSpacing: 0.2 }}
-                >
-                  {epLabel}
-                </Text>
-              </View>
-              {freshnessLabel ? (
-                <View
-                  testID={`continue-freshness-chip-${item.showId}`}
-                  style={styles.freshBadge}
-                >
-                  <Text className="text-[10px] font-black text-white" style={{ letterSpacing: 0.4 }}>
-                    {freshnessLabel}
-                  </Text>
-                </View>
-              ) : null}
+                {epLabel}
+              </Text>
             </View>
-
-            {showProgressBar ? (
+            {freshnessLabel ? (
               <View
-                testID={`continue-progress-track-${item.showId}`}
-                style={styles.progressTrack}
+                testID={`continue-freshness-chip-${item.showId}`}
+                style={styles.freshBadge}
               >
-                <View
-                  testID={`continue-progress-fill-${item.showId}`}
-                  style={[styles.progressFill, { width: `${Math.round(progressRatio * 100)}%` }]}
-                />
+                <Text className="text-[10px] font-black text-white" style={{ letterSpacing: 0.4 }}>
+                  {freshnessLabel}
+                </Text>
               </View>
             ) : null}
           </View>
 
-          <View style={styles.meta}>
-            <View style={styles.metaCopy}>
-              <Text
-                className="text-[11px] font-semibold text-text-secondary uppercase"
-                style={{ letterSpacing: 0.6 }}
-                numberOfLines={1}
-              >
-                {item.show.title}
-              </Text>
-              <Text
-                className="text-[15px] font-bold text-text-primary mt-0.5"
-                numberOfLines={1}
-              >
-                {episodeTitle}
-              </Text>
-              <Text className="text-[12px] text-text-tertiary mt-0.5" numberOfLines={1}>
-                {metaLine}
-              </Text>
-            </View>
+          <View
+            style={[
+              styles.overlayCopy,
+              showMarkWatched ? styles.overlayCopyWithAction : null,
+            ]}
+          >
+            <Text
+              className="text-[11px] font-semibold text-white/60 uppercase"
+              style={{ letterSpacing: 1 }}
+              numberOfLines={1}
+            >
+              {item.show.title}
+            </Text>
+            <Text
+              className="text-[16px] font-black text-white mt-1"
+              numberOfLines={1}
+            >
+              {episodeTitle}
+            </Text>
+            <Text className="text-[12px] font-semibold text-white/60 mt-0.5" numberOfLines={1}>
+              {metaLine}
+            </Text>
           </View>
+
+          {showProgressBar ? (
+            <View
+              testID={`continue-progress-track-${item.showId}`}
+              style={styles.progressTrack}
+            >
+              <View
+                testID={`continue-progress-fill-${item.showId}`}
+                style={[styles.progressFill, { width: `${Math.round(progressRatio * 100)}%` }]}
+              />
+            </View>
+          ) : null}
         </Pressable>
 
-        {!item.isUpcoming && !complete ? (
+        {showMarkWatched ? (
           <Pressable
             onPress={() => {
               onMarkWatched(item);
@@ -648,40 +701,32 @@ function ContinueWatchingCard({
 
 const styles = StyleSheet.create({
   rail: {
-    gap: 12,
+    gap: CARD_GAP,
     paddingHorizontal: 24,
-    paddingTop: 12,
+    paddingTop: 14,
   },
   cardWrap: {
     position: "relative",
-    width: CARD_WIDTH,
   },
   card: {
     backgroundColor: "#161A22",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 12,
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 20,
     borderWidth: 1,
     overflow: "hidden",
     position: "relative",
-    width: CARD_WIDTH,
-  },
-  media: {
-    height: IMAGE_HEIGHT,
-    position: "relative",
-    width: "100%",
   },
   image: {
-    height: "100%",
-    width: "100%",
+    ...StyleSheet.absoluteFillObject,
   },
   badgeRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 6,
-    left: 10,
+    left: 12,
     position: "absolute",
-    right: 10,
-    top: 10,
+    right: 12,
+    top: 12,
   },
   epBadge: {
     backgroundColor: "rgba(13,15,20,0.55)",
@@ -697,6 +742,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
+  overlayCopy: {
+    bottom: 15,
+    left: 14,
+    position: "absolute",
+    right: 14,
+  },
+  overlayCopyWithAction: {
+    right: 58,
+  },
   progressTrack: {
     backgroundColor: "rgba(255,255,255,0.22)",
     bottom: 0,
@@ -709,23 +763,13 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
     height: "100%",
   },
-  meta: {
-    alignItems: "center",
-    flexDirection: "row",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  metaCopy: {
-    flex: 1,
-    paddingRight: 44,
-  },
   checkButton: {
     alignItems: "center",
-    bottom: 8,
+    bottom: 14,
     height: CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET,
     justifyContent: "center",
     position: "absolute",
-    right: 6,
+    right: 8,
     width: CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET,
   },
   checkButtonGlyph: {

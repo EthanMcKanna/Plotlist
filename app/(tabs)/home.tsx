@@ -91,6 +91,7 @@ import {
   buildPersonalHomeShelfItems,
   promoteContextualHomeShelfLead,
 } from "../../lib/homeStarterShelf";
+import { getHomeWarmScheduleSnapshot } from "../../lib/homeWarmCache";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
 import {
   type HomeData,
@@ -221,6 +222,16 @@ export function HomeSurface({
     data.hasProfile && !providedSchedulePreview,
   );
   const schedulePreview = providedSchedulePreview ?? queriedSchedulePreview;
+  // Whether last session's schedule had content decides if the tonight strip
+  // holds its slot with a skeleton or stays collapsed while loading.
+  const [warmScheduleHasItems] = useState(() => {
+    const snapshot = getHomeWarmScheduleSnapshot();
+    return Boolean(
+      snapshot && (snapshot.tonightCount > 0 || snapshot.weekCount > 0),
+    );
+  });
+  const scheduleLoading =
+    data.hasProfile && !schedulePreview.preview && schedulePreview.loading;
   const unreadNotifications = Number(
     useQuery(
       api.notifications.getUnreadCount,
@@ -789,15 +800,19 @@ export function HomeSurface({
     add(
       "continue-watching",
       data.hasProfile &&
-        Array.isArray(continueWatchingItems) &&
-        (continueWatchingItems.length > 0 ||
-          shouldRenderContinueWatchingEmptyState(continueWatchingItems, true)),
+        (continueWatchingItems === undefined ||
+          (Array.isArray(continueWatchingItems) &&
+            (continueWatchingItems.length > 0 ||
+              shouldRenderContinueWatchingEmptyState(
+                continueWatchingItems,
+                true,
+              )))),
     );
     add(
       "tonight",
       data.hasProfile &&
-        Boolean(schedulePreview.preview) &&
-        schedulePreview.hasScheduleItems,
+        ((Boolean(schedulePreview.preview) && schedulePreview.hasScheduleItems) ||
+          (scheduleLoading && warmScheduleHasItems)),
     );
     add(
       "for-you",
@@ -823,9 +838,11 @@ export function HomeSurface({
     freshItems.length,
     heatItems.length,
     quickItems.length,
+    scheduleLoading,
     schedulePreview.hasScheduleItems,
     schedulePreview.preview,
     sections,
+    warmScheduleHasItems,
   ]);
   const sectionDisplayIndexByKind = useMemo(
     () => getHomeSectionDisplayIndexes(sections, visibleNumberedSectionKinds),
@@ -852,6 +869,18 @@ export function HomeSurface({
         );
       case "tonight":
         if (!data.hasProfile) return null;
+        if (scheduleLoading && warmScheduleHasItems) {
+          return (
+            <RailSkeleton
+              index={getSectionDisplayIndex(item.kind)}
+              kicker="Schedule"
+              title="Releases"
+              accent="#38BDF8"
+              icon="radio"
+              variant="ribbon"
+            />
+          );
+        }
         return (
           <TonightStrip
             schedule={schedulePreview}

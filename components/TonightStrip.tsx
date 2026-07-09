@@ -10,6 +10,7 @@ import { guardedPush } from "../lib/navigation";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
+import { recordHomeWarmSchedule } from "../lib/homeWarmCache";
 import { getLocalDateString } from "../lib/releaseCalendar";
 import { queryClient } from "../lib/queryClient";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
@@ -174,6 +175,13 @@ export function useHomeSchedulePreview(enabled = true): HomeSchedulePreviewState
   );
   const tonightCount = tonightItems.length;
   const weekCount = upcomingItems.length;
+
+  // Remember what the schedule looked like so the next cold start can decide
+  // whether to hold the strip's slot with a skeleton before data arrives.
+  useEffect(() => {
+    if (!enabled || !isAuthenticated || preview === undefined) return;
+    recordHomeWarmSchedule({ today, tonightCount, weekCount });
+  }, [enabled, isAuthenticated, preview, today, tonightCount, weekCount]);
 
   useEffect(() => {
     if (!enabled || !isAuthenticated) return;

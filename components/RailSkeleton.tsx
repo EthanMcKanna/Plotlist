@@ -21,7 +21,10 @@ type RailSkeletonProps = {
   subtitle?: string;
   accent: string;
   icon?: IconName;
-  variant: "feature" | "poster" | "ribbon" | "hero";
+  variant: "feature" | "poster" | "ribbon" | "hero" | "banner";
+  /** Banner variant only: match the live card's exact footprint. */
+  cardWidth?: number;
+  cardHeight?: number;
 };
 
 /** Hook that shares a single 0→1 oscillating shimmer value. */
@@ -73,6 +76,8 @@ export function RailSkeleton({
   accent,
   icon,
   variant,
+  cardWidth,
+  cardHeight,
 }: RailSkeletonProps) {
   if (variant === "hero") {
     return (
@@ -99,8 +104,13 @@ export function RailSkeleton({
         contentContainerStyle={styles.rail}
         scrollEnabled={false}
       >
-        {Array.from({ length: 4 }).map((_, idx) => (
-          <SkeletonCard key={idx} variant={variant} />
+        {Array.from({ length: variant === "banner" ? 2 : 4 }).map((_, idx) => (
+          <SkeletonCard
+            key={idx}
+            variant={variant}
+            cardWidth={cardWidth}
+            cardHeight={cardHeight}
+          />
         ))}
       </ScrollView>
     </View>
@@ -109,9 +119,22 @@ export function RailSkeleton({
 
 function SkeletonCard({
   variant,
+  cardWidth,
+  cardHeight,
 }: {
-  variant: "feature" | "poster" | "ribbon";
+  variant: "feature" | "poster" | "ribbon" | "banner";
+  cardWidth?: number;
+  cardHeight?: number;
 }) {
+  if (variant === "banner") {
+    return (
+      <ShimmerBlock
+        width={cardWidth ?? 320}
+        height={cardHeight ?? 192}
+        radius={20}
+      />
+    );
+  }
   if (variant === "poster") {
     return (
       <View style={styles.posterColumn}>

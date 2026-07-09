@@ -92,7 +92,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void getWelcomeTourSeen().catch(() => undefined);
   }, []);
 
-  const isProfileLoading = isAuthenticated && (me === undefined || isEnsuringProfile);
+  // A known profile (fresh or hydrated from the warm-start cache) renders
+  // immediately; ensureProfile then verifies in the background. Gating on it
+  // would unmount and remount the navigator mid-boot, resetting navigation
+  // state to the index route and looping the launch redirect.
+  const hasProfileIdentity = Boolean(me?._id ?? me?.id);
+  const isProfileLoading =
+    isAuthenticated &&
+    (me === undefined || (isEnsuringProfile && !hasProfileIdentity));
 
   // Attach the signed-in user to crash reports; cleared on sign-out.
   useEffect(() => {

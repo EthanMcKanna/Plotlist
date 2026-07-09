@@ -33,6 +33,12 @@ import {
 } from "./providerRoomFreshness";
 import { getHomepageCatalogDiagnostics } from "./homepageCatalogHealth";
 import {
+  getHomeWarmCatalog,
+  getHomeWarmForYou,
+  recordHomeWarmCatalog,
+  recordHomeWarmForYou,
+} from "./homeWarmCache";
+import {
   buildStreamingAvailabilityIndex,
   filterSectionsToStreamingProviders,
   leanItemsToStreamingAvailability,
@@ -1687,21 +1693,44 @@ export function useHomeData(): HomeData {
   const getPersonalized = useAction(api.embeddings.getPersonalizedRecommendations);
   const getSimilarTasteUsers = useAction(api.embeddings.getSimilarTasteUsers);
 
-  const [forYouRaw, setForYouRaw] = useState<AnyShowItem[]>([]);
-  const [risingRaw, setRisingRaw] = useState<CatalogItem[]>([]);
-  const [premieresRaw, setPremieresRaw] = useState<CatalogItem[]>([]);
-  const [criticsRaw, setCriticsRaw] = useState<CatalogItem[]>([]);
-  const [quickRaw, setQuickRaw] = useState<CatalogItem[]>([]);
+  // Warm start: last session's catalog renders the discovery rails on the
+  // first frame; the network load below replaces it as soon as it lands.
+  const [warmCatalog] = useState<HomeCatalogPayload | null>(() => {
+    if (!isAuthenticated) return null;
+    const cached = getHomeWarmCatalog();
+    return cached ? normalizeHomeCatalogPayload(cached) : null;
+  });
+  const [forYouRaw, setForYouRaw] = useState<AnyShowItem[]>(
+    () => (isAuthenticated ? (getHomeWarmForYou() as AnyShowItem[] | null) : null) ?? [],
+  );
+  const [risingRaw, setRisingRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.risingNow ?? [],
+  );
+  const [premieresRaw, setPremieresRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.breakoutPremieres ?? [],
+  );
+  const [criticsRaw, setCriticsRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.criticsChoice ?? [],
+  );
+  const [quickRaw, setQuickRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.quickPicks ?? [],
+  );
   const [currentDemandSeedRaw, setCurrentDemandSeedRaw] = useState<CatalogItem[]>([]);
   const [newOrBackSeedRaw, setNewOrBackSeedRaw] = useState<CatalogItem[]>([]);
   const [qualitySeedRaw, setQualitySeedRaw] = useState<CatalogItem[]>([]);
   const [quickSeedRaw, setQuickSeedRaw] = useState<CatalogItem[]>([]);
-  const [airingRaw, setAiringRaw] = useState<CatalogItem[]>([]);
-  const [tmdbDailyTrendingRaw, setTmdbDailyTrendingRaw] = useState<CatalogItem[]>([]);
-  const [tmdbTrendingRaw, setTmdbTrendingRaw] = useState<CatalogItem[]>([]);
+  const [airingRaw, setAiringRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.airingToday ?? [],
+  );
+  const [tmdbDailyTrendingRaw, setTmdbDailyTrendingRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.trendingDay ?? [],
+  );
+  const [tmdbTrendingRaw, setTmdbTrendingRaw] = useState<CatalogItem[]>(
+    () => warmCatalog?.trendingWeek ?? [],
+  );
   const [providerCatalogProviders, setProviderCatalogProviders] = useState<
     HomeCatalogPayload["providers"] | null
-  >(null);
+  >(() => warmCatalog?.providers ?? null);
   const [catalogDiagnostics, setCatalogDiagnostics] = useState<HomeCatalogDiagnostics>(
     () => getEmptyHomeCatalogDiagnostics(),
   );
@@ -1779,6 +1808,9 @@ export function useHomeData(): HomeData {
       () => getPersonalized({ limit: 12 }),
       (value) => {
         setForYouRaw(value);
+        if (Array.isArray(value)) {
+          recordHomeWarmForYou(value);
+        }
       },
       () => setForYouLoading(false),
     );
@@ -1795,6 +1827,7 @@ export function useHomeData(): HomeData {
         setTmdbTrendingRaw(payload.trendingWeek ?? []);
         setProviderCatalogProviders(payload.providers ?? {});
         setCatalogDiagnostics(payload.diagnostics);
+        recordHomeWarmCatalog(payload);
       },
       () => {
         setRisingLoading(false);

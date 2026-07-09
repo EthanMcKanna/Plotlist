@@ -9,6 +9,7 @@ import {
   subscribeToSessionCleared,
 } from "../api/session";
 import { unregisterPushTokenFromServer } from "../pushToken";
+import { clearHomeWarmCache } from "../homeWarmCache";
 
 type PlotlistSessionContextValue = {
   isApiAuthenticated: boolean;
@@ -145,6 +146,9 @@ export function useAuthActions() {
       await unregisterPushTokenFromServer().catch(() => undefined);
       await authApi.logout().catch(() => undefined);
       await clearStoredSession();
+      // The warm-start snapshot belongs to this account; never let it leak
+      // into another sign-in on the same device.
+      clearHomeWarmCache();
       session.markSignedOut();
       return { ok: true };
     },
