@@ -87,7 +87,8 @@ describe("home top bar copy", () => {
 
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar" })).toBeTruthy();
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" })).toBeTruthy();
-    expect(screen.UNSAFE_getByProps({ testID: "home-topbar-search" })).toBeTruthy();
+    // Search moved to the tab bar; the header carries one quiet action.
+    expect(screen.UNSAFE_queryByProps({ testID: "home-topbar-search" })).toBeNull();
     expect(screen.UNSAFE_getByProps({ testID: "home-topbar-notifications" })).toBeTruthy();
     const title = screen.UNSAFE_getByProps({ testID: "home-topbar-title" });
     expect(title.props.accessibilityElementsHidden).toBe(true);
@@ -99,18 +100,9 @@ describe("home top bar copy", () => {
     ).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
 
-    fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-search" }));
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-notifications" }));
     fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" }));
 
-    // Search pushes a fresh focus param so the search input opens the
-    // keyboard on every entry from home.
-    expect(router.push).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pathname: "/search",
-        params: expect.objectContaining({ focus: expect.any(String) }),
-      }),
-    );
     expect(router.push).toHaveBeenCalledWith("/notifications");
     expect(router.push).toHaveBeenCalledWith("/profile");
   });
@@ -124,7 +116,6 @@ describe("home top bar copy", () => {
 
     [
       "home-topbar-profile",
-      "home-topbar-search",
       "home-topbar-notifications",
     ].forEach((testID) => {
       const action = screen.UNSAFE_getByProps({ testID });

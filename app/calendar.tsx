@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -23,6 +23,7 @@ import {
   getLocalDateString,
   RELEASE_CALENDAR_MAX_ITEMS,
 } from "../lib/releaseCalendar";
+import { queryClient } from "../lib/queryClient";
 import {
   buildReleaseDiaryRows,
   getReleaseDiaryCounts,
@@ -431,6 +432,7 @@ export function CalendarSurface({
 export default function CalendarScreen() {
   const { isAuthenticated } = useAuth();
   const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
+  const staleRefreshKeyRef = useRef<string | null>(null);
   const today = useMemo(() => getLocalDateString(), []);
   const data = useQuery(
     api.releaseCalendar.listForMe,
@@ -439,14 +441,36 @@ export default function CalendarScreen() {
       : "skip",
   );
 
+  // A show just added to Watching has no synced release events yet, so it
+  // arrives in staleShowIds. Sync it, then refetch — actions don't invalidate
+  // queries on their own, and without the refetch the new show's releases
+  // only appeared after an app restart. The key ref stops a failed sync from
+  // re-firing on every render while still allowing a retry when the stale
+  // set (or day) changes.
   useEffect(() => {
     if (!isAuthenticated || !data || data.staleShowIds.length === 0) {
+      staleRefreshKeyRef.current = null;
       return;
     }
 
-    void refreshForMe({ today }).catch(() => {
-      // Render cached data even if refresh fails.
-    });
+    const staleKey = `${today}:${[...data.staleShowIds].sort().join("|")}`;
+    if (staleRefreshKeyRef.current === staleKey) return;
+    staleRefreshKeyRef.current = staleKey;
+
+    void refreshForMe({ today })
+      .then(() =>
+        queryClient.invalidateQueries({
+          queryKey: ["plotlist-rpc"],
+          refetchType: "active",
+        }),
+      )
+      .catch(() => {
+        // Render cached data even if refresh fails; clear the key so a later
+        // pass can retry.
+        if (staleRefreshKeyRef.current === staleKey) {
+          staleRefreshKeyRef.current = null;
+        }
+      });
   }, [data, isAuthenticated, refreshForMe, today]);
 
   return (

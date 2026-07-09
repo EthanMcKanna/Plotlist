@@ -226,7 +226,8 @@ describe("HomeSurface rendered preview", () => {
       expect(screen.UNSAFE_getByProps({ testID: "home-surface-list" })).toBeTruthy();
       expect(screen.UNSAFE_getByProps({ testID: "home-topbar" })).toBeTruthy();
       expect(screen.getByLabelText("Open profile")).toBeTruthy();
-      expect(screen.getByLabelText("Search")).toBeTruthy();
+      // Header search was retired; the tab bar owns search entry.
+      expect(screen.queryByLabelText("Search")).toBeNull();
       expect(screen.getByLabelText("Notifications")).toBeTruthy();
       expect(sectionIds).toEqual([
         "home-section-continue-watching",

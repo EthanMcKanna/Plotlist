@@ -12,7 +12,6 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "./Avatar";
-import { GlassPressable } from "./NativeGlass";
 
 type HomeTopBarProps = {
   scrollY: SharedValue<number>;
@@ -22,7 +21,7 @@ type HomeTopBarProps = {
   notificationCount?: number;
 };
 
-export const HOME_TOP_BAR_HEIGHT = 56;
+export const HOME_TOP_BAR_HEIGHT = 48;
 export const HOME_TOP_BAR_SCROLL_GUARD_HEIGHT = 18;
 export const HOME_TOP_BAR_TITLE_FADE_START = 24;
 export const HOME_TOP_BAR_TITLE_FADE_END = 88;
@@ -172,67 +171,36 @@ export function HomeTopBar({
           </Animated.View>
         </View>
 
-        <View style={styles.actions}>
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              // Fresh focus value per tap so the search screen re-focuses
-              // (and opens the keyboard) every time, not just the first.
-              router.push({
-                pathname: "/search",
-                params: { focus: String(Date.now()) },
-              });
-            }}
-            testID="home-topbar-search"
-            accessibilityRole="button"
-            accessibilityLabel="Search"
-            radius={8}
-            style={styles.actionButton}
-            surfaceStyle={styles.actionSurface}
-            contentStyle={styles.actionButtonContent}
-          >
-            <Ionicons
-              name="search"
-              size={18}
-              color="#F1F3F7"
-              accessible={false}
-              accessibilityElementsHidden
-              aria-hidden={true}
-              importantForAccessibility="no"
-            />
-          </GlassPressable>
-
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/notifications");
-            }}
-            testID="home-topbar-notifications"
-            accessibilityRole="button"
-            accessibilityLabel={getHomeTopBarNotificationsAccessibilityLabel(notificationCount)}
-            radius={8}
-            style={styles.actionButton}
-            surfaceStyle={styles.actionSurface}
-            contentStyle={styles.actionButtonContent}
-          >
-            <Ionicons
-              name="notifications-outline"
-              size={18}
-              color="#F1F3F7"
-              accessible={false}
-              accessibilityElementsHidden
-              aria-hidden={true}
-              importantForAccessibility="no"
-            />
-            {notificationCount > 0 ? (
-              <View style={styles.badge} pointerEvents="none">
-                <Text style={styles.badgeText} accessible={false}>
-                  {getHomeTopBarNotificationsBadgeLabel(notificationCount)}
-                </Text>
-              </View>
-            ) : null}
-          </GlassPressable>
-        </View>
+        {/* Search lives on the tab bar; the header keeps a single quiet
+            action so its chrome matches the avatar's scale. */}
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/notifications");
+          }}
+          testID="home-topbar-notifications"
+          accessibilityRole="button"
+          accessibilityLabel={getHomeTopBarNotificationsAccessibilityLabel(notificationCount)}
+          style={styles.notificationsButton}
+          className="active:opacity-70"
+        >
+          <Ionicons
+            name="notifications-outline"
+            size={24}
+            color="#F1F3F7"
+            accessible={false}
+            accessibilityElementsHidden
+            aria-hidden={true}
+            importantForAccessibility="no"
+          />
+          {notificationCount > 0 ? (
+            <View style={styles.badge} pointerEvents="none">
+              <Text style={styles.badgeText} accessible={false}>
+                {getHomeTopBarNotificationsBadgeLabel(notificationCount)}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
     </View>
   );
@@ -276,26 +244,13 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0,
   },
-  actions: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 4,
-  },
   profileButton: {
     alignItems: "center",
     height: 44,
     justifyContent: "center",
     width: 44,
   },
-  actionButton: {
-    height: 44,
-    width: 44,
-  },
-  actionSurface: {
-    height: 44,
-    width: 44,
-  },
-  actionButtonContent: {
+  notificationsButton: {
     alignItems: "center",
     height: 44,
     justifyContent: "center",
@@ -310,8 +265,8 @@ const styles = StyleSheet.create({
     minWidth: 16,
     paddingHorizontal: 4,
     position: "absolute",
-    right: 5,
-    top: 5,
+    right: 4,
+    top: 4,
   },
   badgeText: {
     color: "#0B0D12",

@@ -16,7 +16,6 @@ const REQUIRED_HOME_BUNDLE_HANDLES = [
   "homeSection",
   "homeSectionId",
   "home-topbar-profile",
-  "home-topbar-search",
   "home-topbar-notifications",
 ];
 

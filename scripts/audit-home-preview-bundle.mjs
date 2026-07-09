@@ -28,7 +28,6 @@ const requiredProductionPatterns = [
   "homeSection",
   "homeSectionId",
   "home-topbar-profile",
-  "home-topbar-search",
   "home-topbar-notifications",
 ];
 
