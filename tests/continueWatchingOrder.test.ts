@@ -40,6 +40,23 @@ describe("getContinueWatchingOrderTier", () => {
       getContinueWatchingOrderTier({ isCaughtUp: true, optimisticCaughtUp: true }),
     ).toBe(CONTINUE_WATCHING_TIER_READY);
   });
+
+  it("treats a future release date as upcoming even when flags claim otherwise", () => {
+    // A UTC-clocked server (or a stale cache) can mark tomorrow's episode as
+    // released; the clock is the source of truth.
+    expect(
+      getContinueWatchingOrderTier(
+        {
+          isUpcoming: false,
+          nextReleaseDate: NOW + DAY_MS,
+          nextEpisodeReleasedToday: true,
+          totalWatched: 3,
+          totalEpisodes: 10,
+        },
+        NOW,
+      ),
+    ).toBe(CONTINUE_WATCHING_TIER_UPCOMING_DATED);
+  });
 });
 
 describe("rankContinueWatchingItems", () => {
@@ -57,7 +74,7 @@ describe("rankContinueWatchingItems", () => {
         totalEpisodes: 10,
         lastWatchedAt: NOW - 5 * DAY_MS,
       },
-    ]);
+    ], NOW);
 
     expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
       "ready-older-activity",
@@ -87,7 +104,7 @@ describe("rankContinueWatchingItems", () => {
         totalEpisodes: 9,
         lastWatchedAt: NOW - DAY_MS / 2,
       },
-    ]);
+    ], NOW);
 
     expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
       "aired-today",
@@ -116,7 +133,7 @@ describe("rankContinueWatchingItems", () => {
         nextAirDate: null,
         lastWatchedAt: NOW,
       },
-    ]);
+    ], NOW);
 
     expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
       "airs-tomorrow",
@@ -140,7 +157,7 @@ describe("rankContinueWatchingItems", () => {
         totalEpisodes: 6,
         lastWatchedAt: NOW - 8 * DAY_MS,
       },
-    ]);
+    ], NOW);
 
     expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
       "ready",
@@ -151,18 +168,50 @@ describe("rankContinueWatchingItems", () => {
 
   it("respects the server sortTimestamp hint when present", () => {
     expect(
-      getContinueWatchingRecencyScore({
-        lastWatchedAt: NOW - 10 * DAY_MS,
-        sortTimestamp: NOW - DAY_MS,
-      }),
+      getContinueWatchingRecencyScore(
+        {
+          lastWatchedAt: NOW - 10 * DAY_MS,
+          sortTimestamp: NOW - DAY_MS,
+        },
+        NOW,
+      ),
     ).toBe(NOW - DAY_MS);
+  });
+
+  it("keeps tomorrow's drops out of the top even when flagged as released", () => {
+    const ranked = rankContinueWatchingItems(
+      [
+        {
+          id: "flagged-released-but-future",
+          isUpcoming: false,
+          nextReleaseDate: NOW + DAY_MS,
+          nextEpisodeReleasedToday: true,
+          totalWatched: 5,
+          totalEpisodes: 10,
+          lastWatchedAt: NOW - 1000,
+          sortTimestamp: NOW + DAY_MS,
+        },
+        {
+          id: "genuinely-ready",
+          totalWatched: 2,
+          totalEpisodes: 10,
+          lastWatchedAt: NOW - 3 * DAY_MS,
+        },
+      ],
+      NOW,
+    );
+
+    expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
+      "genuinely-ready",
+      "flagged-released-but-future",
+    ]);
   });
 
   it("is stable for items without any timestamps", () => {
     const ranked = rankContinueWatchingItems([
       { id: "first", totalWatched: 1, totalEpisodes: 5 },
       { id: "second", totalWatched: 2, totalEpisodes: 5 },
-    ]);
+    ], NOW);
     expect(ranked.map((item) => (item as { id: string }).id)).toEqual([
       "first",
       "second",

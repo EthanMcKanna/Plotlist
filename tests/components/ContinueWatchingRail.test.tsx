@@ -321,6 +321,35 @@ describe("ContinueWatchingRail helpers", () => {
     ).toBeNull();
   });
 
+  it("never marks an episode New before its release moment", () => {
+    const now = Date.parse("2026-07-08T20:00:00.000Z");
+    // Timezone-skewed payloads can claim tomorrow's episode already dropped.
+    expect(
+      getContinueWatchingFreshnessLabel(
+        {
+          isUpcoming: false,
+          nextEpisodeReleasedToday: true,
+          nextReleaseDate: now + 24 * 60 * 60 * 1000,
+          totalWatched: 4,
+          totalEpisodes: 10,
+        },
+        now,
+      ),
+    ).toBeNull();
+    expect(
+      getContinueWatchingFreshnessLabel(
+        {
+          isUpcoming: false,
+          nextEpisodeReleasedToday: true,
+          nextReleaseDate: now - 60 * 60 * 1000,
+          totalWatched: 4,
+          totalEpisodes: 10,
+        },
+        now,
+      ),
+    ).toBe("New");
+  });
+
   it("exports active show identities so recommendations avoid resume duplicates", () => {
     const previewKeys = getHomeRailIdentitySet(
       getContinueWatchingPreviewItems([

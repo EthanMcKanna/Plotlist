@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Redirect } from "expo-router";
 
 import {
@@ -9,7 +9,6 @@ import {
   buildReleaseCalendarData,
   getDateOnlyTimestamp,
   type ReleaseCalendarShowSource,
-  type ReleaseCalendarView,
 } from "../../lib/releaseCalendar";
 
 const PREVIEW_TODAY = "2026-06-01";
@@ -114,23 +113,16 @@ export default function DevCalendarPreviewScreen() {
 }
 
 function DevCalendarPreviewSurface() {
-  const [view, setView] = useState<ReleaseCalendarView>("upcoming");
   const data = useMemo<CalendarSurfaceData>(() => {
     return buildReleaseCalendarData({
       shows: PREVIEW_SHOWS,
       today: PREVIEW_TODAY,
-      view,
+      view: "upcoming",
       limit: 25,
     });
-  }, [view]);
+  }, []);
 
   return (
-    <CalendarSurface
-      data={data}
-      isAuthenticated
-      onViewChange={setView}
-      today={PREVIEW_TODAY}
-      view={view}
-    />
+    <CalendarSurface data={data} isAuthenticated today={PREVIEW_TODAY} />
   );
 }

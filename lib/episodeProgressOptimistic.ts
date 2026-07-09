@@ -1,5 +1,6 @@
 import { api } from "./plotlist/api";
 import type { LocalStore } from "./plotlist/react";
+import { getUpNextQueryArgs } from "./upNextQueryArgs";
 import {
   compareEpisodePositions,
   getEpisodeProgressState,
@@ -193,7 +194,9 @@ function updateUpNextCaches(
   nextProgress: ProgressEntry[] | undefined,
   mode: "mark" | "unmark",
 ) {
-  for (const args of [undefined, {}] as const) {
+  // Legacy no-arg keys plus the timezone-scoped key the rails query with —
+  // all shapes must be patched for the optimistic update to be visible.
+  for (const args of [undefined, {}, getUpNextQueryArgs()]) {
     const current = localStore.getQuery(api.episodeProgress.getUpNext, args);
     if (!Array.isArray(current)) {
       continue;

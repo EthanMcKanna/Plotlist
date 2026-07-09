@@ -47,6 +47,8 @@ import { RailSkeleton } from "../../components/RailSkeleton";
 import { SignatureRail, type SignatureRailItem } from "../../components/SignatureRail";
 import {
   type HomeSchedulePreviewState,
+  SCHEDULE_CARD_HEIGHT,
+  SCHEDULE_CARD_WIDTH,
   TonightStrip,
   useHomeSchedulePreview,
 } from "../../components/TonightStrip";
@@ -877,7 +879,9 @@ export function HomeSurface({
               title="Releases"
               accent="#38BDF8"
               icon="radio"
-              variant="ribbon"
+              variant="banner"
+              cardWidth={SCHEDULE_CARD_WIDTH}
+              cardHeight={SCHEDULE_CARD_HEIGHT}
             />
           );
         }

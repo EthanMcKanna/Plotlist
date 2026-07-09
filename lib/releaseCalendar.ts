@@ -200,6 +200,35 @@ export function addDaysToDateOnlyString(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Resolve "today" for a user from their UTC offset. Server code must use this
+ * instead of its own clock/timezone: Workers run in UTC, so a Wednesday
+ * evening in the US already reads as Thursday there — which made Thursday
+ * episodes flash "New" a day early. Falls back to process-local time when the
+ * client didn't send an offset (older app builds).
+ */
+export function getUserLocalDayContext(
+  now: number,
+  utcOffsetMinutes: number | null | undefined,
+) {
+  if (
+    typeof utcOffsetMinutes !== "number" ||
+    !Number.isFinite(utcOffsetMinutes)
+  ) {
+    return {
+      today: getLocalDateString(new Date(now)),
+      todayStartTs: getStartOfLocalDayTimestamp(new Date(now)),
+    };
+  }
+  const offsetMs = utcOffsetMinutes * 60_000;
+  const today = new Date(now + offsetMs).toISOString().slice(0, 10);
+  return {
+    today,
+    // Real UTC instant of the user's local midnight.
+    todayStartTs: Date.parse(`${today}T00:00:00Z`) - offsetMs,
+  };
+}
+
 export function getStartOfLocalDayTimestamp(value = new Date()) {
   return new Date(
     value.getFullYear(),

@@ -22,7 +22,11 @@ import { guardedPush } from "../lib/navigation";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import type { EpisodeSeasonSummary } from "../lib/episodeProgressState";
-import { rankContinueWatchingItems } from "../lib/continueWatchingOrder";
+import {
+  isContinueWatchingFutureRelease,
+  rankContinueWatchingItems,
+} from "../lib/continueWatchingOrder";
+import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { RailSkeleton } from "./RailSkeleton";
@@ -177,16 +181,22 @@ export function getContinueWatchingVisibleContextLine(item: {
   return episodeName;
 }
 
-export function getContinueWatchingFreshnessLabel(item: {
-  isUpcoming?: boolean;
-  nextAirDate?: number | null;
-  nextReleaseDate?: number | null;
-  nextEpisodeReleasedToday?: boolean;
-  totalEpisodes?: number;
-  totalWatched?: number;
-  isCaughtUp?: boolean;
-}) {
+export function getContinueWatchingFreshnessLabel(
+  item: {
+    isUpcoming?: boolean;
+    nextAirDate?: number | null;
+    nextReleaseDate?: number | null;
+    nextEpisodeReleasedToday?: boolean;
+    totalEpisodes?: number;
+    totalWatched?: number;
+    isCaughtUp?: boolean;
+  },
+  now = Date.now(),
+) {
   if (isContinueWatchingComplete(item)) return null;
+  // A release date still in the future can never read "New" — stale caches
+  // and timezone-skewed payloads land here until fresh data arrives.
+  if (isContinueWatchingFutureRelease(item, now)) return null;
   if (item.nextEpisodeReleasedToday) return "New";
   if (item.isUpcoming) return null;
   if (item.nextReleaseDate) return "New";
@@ -287,13 +297,14 @@ export function getActiveContinueWatchingItems(
       (item) =>
         !isContinueWatchingComplete(item) || item.optimisticCaughtUp === true,
     ),
+    Date.now(),
   );
 }
 
 export function useContinueWatchingItems(enabled = true) {
   return useQuery(
     api.episodeProgress.getUpNext,
-    enabled ? {} : "skip",
+    enabled ? getUpNextQueryArgs() : "skip",
   ) as ContinueWatchingItem[] | undefined;
 }
 

@@ -11,6 +11,7 @@ import { api } from "../lib/plotlist/api";
 import { formatShortDate } from "../lib/format";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
+import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 
 type UpNextItem = {
   showId: Id<"shows">;
@@ -37,7 +38,7 @@ export function UpNextRail() {
 export function UpNextRailContent({ enabled }: { enabled: boolean }) {
   const upNextItems = useQuery(
     api.episodeProgress.getUpNext,
-    enabled ? {} : "skip",
+    enabled ? getUpNextQueryArgs() : "skip",
   ) as
     | UpNextItem[]
     | undefined;

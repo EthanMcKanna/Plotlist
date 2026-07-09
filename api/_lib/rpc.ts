@@ -63,7 +63,7 @@ import {
   getDateOnlyStartTimestamp,
   getLocalDateString,
   getReleaseCalendarShowIds,
-  getStartOfLocalDayTimestamp,
+  getUserLocalDayContext,
   isDateOnlyString,
   RELEASE_CALENDAR_MAX_ITEMS,
   RELEASE_CALENDAR_PROVIDER_OPTIONS,
@@ -3236,8 +3236,11 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, showId)));
     return rows.map(toDoc);
   },
-  "episodeProgress:getUpNext": async ({ req }) => {
+  "episodeProgress:getUpNext": async ({ args, req }) => {
     const user = await requireAuthUser(req);
+    const parsedArgs = z
+      .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
+      .parse(args ?? {});
     const [watchingRows, completedRows] = await Promise.all([
       db
         .select()
@@ -3263,8 +3266,12 @@ export const queryHandlers: Record<string, RpcHandler> = {
 
     const showIds = rows.map((row) => row.showId);
     const now = Date.now();
-    const today = getLocalDateString(new Date(now));
-    const todayStartTs = getStartOfLocalDayTimestamp(new Date(now));
+    // Release days resolve in the user's timezone; the worker clock runs UTC,
+    // which would surface tomorrow's episodes as "tonight" for US evenings.
+    const { today, todayStartTs } = getUserLocalDayContext(
+      now,
+      parsedArgs.utcOffsetMinutes ?? null,
+    );
     const [showRows, progressRows, releaseRows] = await Promise.all([
       db.select().from(shows).where(inArray(shows.id, showIds)),
       db
@@ -3482,13 +3489,13 @@ export const queryHandlers: Record<string, RpcHandler> = {
 
     // Rank before slicing so shows with a watchable episode always claim the
     // top-10 ahead of upcoming and caught-up entries.
-    const rankedEntries = rankContinueWatchingItems(candidateEntries).slice(0, 10);
+    const rankedEntries = rankContinueWatchingItems(candidateEntries, now).slice(0, 10);
 
     await enrichUpNextEntriesWithSeasonMetadata(rankedEntries, { now, today });
 
     // Enrichment can flip an entry to upcoming once season air dates load, so
     // the final order is settled after it runs.
-    return rankContinueWatchingItems(rankedEntries).map(
+    return rankContinueWatchingItems(rankedEntries, now).map(
       ({
         sortTimestamp: _sortTimestamp,
         externalSource: _externalSource,

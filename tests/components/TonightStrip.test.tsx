@@ -398,8 +398,10 @@ describe("TonightStrip", () => {
     expect(
       screen.getByLabelText("Open Alpha. Tonight. S02E05. The Return · Max"),
     ).toBeTruthy();
+    // Banner-style copy block: show kicker, episode headline, quiet meta.
     expect(screen.getByText("Alpha")).toBeTruthy();
-    expect(screen.getByText("The Return · Max")).toBeTruthy();
+    expect(screen.getByText("The Return")).toBeTruthy();
+    expect(screen.getByText("S02E05 · Max")).toBeTruthy();
     expect(screen.queryByText("FINALE")).toBeNull();
     expect(screen.queryByText("TONIGHT")).toBeNull();
 
@@ -429,10 +431,12 @@ describe("TonightStrip", () => {
     render(<TonightStrip />);
 
     expect(screen.getByText("Love Island USA")).toBeTruthy();
-    expect(screen.getByText("Premiere · Peacock")).toBeTruthy();
+    expect(screen.getByText("Premiere")).toBeTruthy();
+    expect(screen.getByText("Peacock")).toBeTruthy();
     expect(screen.queryByText("Season premiere · Peacock")).toBeNull();
+    // Premieres don't need an episode pointer anywhere on the card.
     expect(screen.queryByText("S02E05")).toBeNull();
-    expect(screen.queryByText("PREMIERE")).toBeNull();
+    expect(screen.queryByText(/S02E05/)).toBeNull();
     expect(
       screen.getByLabelText(
         "Open Love Island USA. Tonight. S02E05. Season premiere · Peacock",
@@ -457,9 +461,10 @@ describe("TonightStrip", () => {
     render(<TonightStrip />);
 
     expect(screen.getByText("Alpha")).toBeTruthy();
-    expect(screen.getByText("The Return · Max")).toBeTruthy();
+    expect(screen.getByText("The Return")).toBeTruthy();
     expect(screen.getAllByText("Alpha")).toHaveLength(1);
-    expect(screen.getAllByText("The Return · Max")).toHaveLength(1);
+    expect(screen.getAllByText("The Return")).toHaveLength(1);
+    expect(screen.getAllByText("S02E05 · Max")).toHaveLength(1);
   });
 
   it("does not route malformed schedule items to an undefined show page", () => {

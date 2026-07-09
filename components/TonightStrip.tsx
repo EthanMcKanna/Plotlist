@@ -36,8 +36,12 @@ export type HomeSchedulePreviewState = {
 };
 
 const ACCENT = "#38BDF8";
-const CARD_WIDTH = 224;
-const CARD_HEIGHT = (CARD_WIDTH * 9) / 16;
+// Kept in the same visual family as the continue rail's banners: 16:9 art,
+// text over a scrim, one size smaller so resume stays the headliner.
+export const SCHEDULE_CARD_WIDTH = 240;
+export const SCHEDULE_CARD_HEIGHT = Math.round((SCHEDULE_CARD_WIDTH * 9) / 16);
+const CARD_WIDTH = SCHEDULE_CARD_WIDTH;
+const CARD_HEIGHT = SCHEDULE_CARD_HEIGHT;
 const SCHEDULE_TODAY_POLL_INTERVAL_MS = 60 * 1000;
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";
 
@@ -263,6 +267,23 @@ export function getScheduleCardVisibleSubline(item: any) {
   return [episodeSignal, providerName].filter(Boolean).join(" · ");
 }
 
+/** Bold line of the card: the episode's own title or its signal moment. */
+export function getScheduleCardHeadline(item: any) {
+  return (
+    getScheduleCardVisibleEpisodeSignal(item) ??
+    formatEpisodeCode(item.seasonNumber, item.episodeNumber)
+  );
+}
+
+/** Quiet line under the headline: episode code and provider. */
+export function getScheduleCardMetaLine(item: any) {
+  const headline = getScheduleCardHeadline(item);
+  const code = formatEpisodeCode(item.seasonNumber, item.episodeNumber);
+  const providerName = getScheduleProviderName(item);
+  const showCode = headline !== code && !item.isPremiere;
+  return [showCode ? code : null, providerName].filter(Boolean).join(" · ");
+}
+
 export function getScheduleCardAccessibilityLabel({
   item,
   dateLabel,
@@ -402,11 +423,9 @@ function ScheduleCard({
 }) {
   const imageUrl = item.show?.backdropUrl ?? item.show?.posterUrl ?? null;
   const dateLabel = getScheduleCardDateLabel(item, today);
-  const visibleSubline = getScheduleCardVisibleSubline(item);
-  const visibleEpisodeCode = item.isPremiere
-    ? null
-    : formatEpisodeCode(item.seasonNumber, item.episodeNumber);
-  const hasVisibleEpisodeRow = Boolean(visibleEpisodeCode);
+  const isTonight = item.airDate === today;
+  const headline = getScheduleCardHeadline(item);
+  const metaLine = getScheduleCardMetaLine(item);
 
   return (
     <Animated.View
@@ -441,7 +460,7 @@ function ScheduleCard({
           <HomeArtworkFallback
             testID={`schedule-artwork-fallback-${item.show?._id ?? "show"}`}
             title={item.show?.title}
-            subtitle={visibleSubline}
+            subtitle={getScheduleCardVisibleSubline(item)}
             accent={ACCENT}
             compact
             copyVisible={false}
@@ -451,16 +470,30 @@ function ScheduleCard({
           />
         )}
 
+        {/* Same scrim recipe as the continue banners: readable chips up top,
+            art in the middle, deep floor under the copy. */}
         <LinearGradient
-          colors={["rgba(13,15,20,0.0)", "rgba(13,15,20,0.92)"]}
-          locations={[0.32, 1]}
+          colors={[
+            "rgba(13,15,20,0.34)",
+            "rgba(13,15,20,0.02)",
+            "rgba(13,15,20,0.42)",
+            "rgba(13,15,20,0.92)",
+          ]}
+          locations={[0, 0.3, 0.62, 1]}
           style={[StyleSheet.absoluteFill, styles.pointerNone]}
         />
 
-        <View style={styles.dateBadge}>
+        <View
+          testID={`schedule-date-chip-${item.show?._id ?? "show"}`}
+          style={[styles.dateBadge, isTonight ? styles.dateBadgeTonight : null]}
+        >
           <Text
-            className="text-[10px] font-bold text-white/85"
-            style={{ letterSpacing: 0 }}
+            className={
+              isTonight
+                ? "text-[10px] font-black text-white"
+                : "text-[10px] font-bold text-white/85"
+            }
+            style={{ letterSpacing: isTonight ? 0.4 : 0.2 }}
           >
             {dateLabel}
           </Text>
@@ -468,37 +501,24 @@ function ScheduleCard({
 
         <View style={styles.bottomContent}>
           {item.show?.title ? (
-            <View
-              style={[
-                styles.cardCopy,
-                !hasVisibleEpisodeRow && styles.cardCopyLast,
-              ]}
+            <Text
+              className="text-[10px] font-semibold text-white/60 uppercase"
+              style={{ letterSpacing: 1 }}
+              numberOfLines={1}
             >
-              <Text
-                className="text-[14px] font-black text-white"
-                numberOfLines={1}
-              >
-                {item.show?.title}
-              </Text>
-              {visibleSubline ? (
-                <Text
-                  className="mt-0.5 text-[11px] font-bold text-white/65"
-                  numberOfLines={1}
-                >
-                  {visibleSubline}
-                </Text>
-              ) : null}
-            </View>
+              {item.show?.title}
+            </Text>
           ) : null}
-          {hasVisibleEpisodeRow ? (
-            <View style={styles.episodeRow}>
-              <Text
-                className="text-[10px] font-black text-white"
-                style={{ letterSpacing: 0 }}
-              >
-                {visibleEpisodeCode}
-              </Text>
-            </View>
+          <Text className="mt-0.5 text-[14px] font-black text-white" numberOfLines={1}>
+            {headline}
+          </Text>
+          {metaLine ? (
+            <Text
+              className="mt-0.5 text-[11px] font-semibold text-white/60"
+              numberOfLines={1}
+            >
+              {metaLine}
+            </Text>
           ) : null}
         </View>
       </Pressable>
@@ -514,8 +534,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: "#161A22",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 8,
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 18,
     borderWidth: 1,
     height: CARD_HEIGHT,
     overflow: "hidden",
@@ -526,32 +546,25 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   dateBadge: {
-    backgroundColor: "rgba(13,15,20,0.66)",
-    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(13,15,20,0.55)",
+    borderColor: "rgba(255,255,255,0.10)",
     borderRadius: 999,
     borderWidth: 1,
     left: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     position: "absolute",
     top: 12,
   },
+  dateBadgeTonight: {
+    backgroundColor: "rgba(56,189,248,0.92)",
+    borderColor: "transparent",
+  },
   bottomContent: {
-    bottom: 11,
-    left: 11,
+    bottom: 13,
+    left: 13,
     position: "absolute",
-    right: 11,
-  },
-  cardCopy: {
-    marginBottom: 7,
-  },
-  cardCopyLast: {
-    marginBottom: 0,
-  },
-  episodeRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
+    right: 13,
   },
   tailCard: {
     alignItems: "flex-start",
