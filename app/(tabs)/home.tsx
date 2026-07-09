@@ -38,7 +38,6 @@ import {
 } from "../../components/ContinueWatchingRail";
 import {
   FriendsActivity,
-  getFriendsActivityFeedItems,
   getFriendsActivityPeople,
 } from "../../components/FriendsActivity";
 import { LoadingScreen } from "../../components/LoadingScreen";
@@ -646,7 +645,7 @@ export function HomeSurface({
         viewerId,
       );
       return {
-        feedItemCount: getFriendsActivityFeedItems(data.feedItems, viewerId).length,
+        feedItemCount: data.friendActivity.length,
         peopleSuggestionCount: displayablePeople.length,
         hasSyncedContacts: data.hasSyncedContacts,
         contactStatusKnown: data.contactStatusKnown,
@@ -656,8 +655,8 @@ export function HomeSurface({
       data.contactMatches,
       data.contactMatches.length,
       data.contactStatusKnown,
-      data.feedItems,
-      data.feedItems.length,
+      data.friendActivity,
+      data.friendActivity.length,
       data.hasSyncedContacts,
       data.me?._id,
       data.similarTaste,
@@ -1054,7 +1053,7 @@ export function HomeSurface({
             contactMatches={data.contactMatches}
             similarTaste={data.similarTaste}
             suggested={data.suggested}
-            feedItems={data.feedItems}
+            activity={data.friendActivity}
             feedEmpty={data.feedEmpty}
             onSyncContacts={handleSyncContacts}
             syncingContacts={syncing}

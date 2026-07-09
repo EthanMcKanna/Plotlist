@@ -28,11 +28,10 @@ import { router } from "expo-router";
 import {
   FRIENDS_ACTIVITY_TOUCH_TARGET,
   FriendsActivity,
-  getFriendsActivityFeedItems,
   getFriendsActivityPeople,
   type PersonPreview,
 } from "../../components/FriendsActivity";
-import type { FeedItemProps } from "../../components/FeedItem";
+import { buildFriendActivity } from "../../lib/friendsActivity";
 
 function person(
   id: string,
@@ -112,38 +111,20 @@ describe("getFriendsActivityPeople", () => {
   });
 });
 
-describe("getFriendsActivityFeedItems", () => {
-  function feedItem(userId: string | null): FeedItemProps {
-    return {
-      type: "started",
-      timestamp: Date.now(),
-      user: userId
-        ? {
-            _id: userId,
-            displayName: userId,
-            username: userId,
-          }
-        : null,
-      show: {
-        _id: "show-1",
-        title: "Show",
+function activityFor(userId: string, viewerId: string | null = null) {
+  return buildFriendActivity(
+    [
+      {
+        type: "log",
+        timestamp: Date.now(),
+        actor: { _id: userId, displayName: userId, username: userId },
+        show: { _id: "show-1", title: "Show" },
+        log: { seasonNumber: 1, episodeNumber: 1 },
       },
-    };
-  }
-
-  it("keeps self and anonymous feed rows from counting as friend activity", () => {
-    const items = getFriendsActivityFeedItems(
-      [
-        feedItem("viewer"),
-        feedItem(null),
-        feedItem("friend"),
-      ],
-      "viewer" as PersonPreview["user"]["_id"],
-    );
-
-    expect(items.map((item) => item.user?._id)).toEqual(["friend"]);
-  });
-});
+    ],
+    { viewerId },
+  );
+}
 
 describe("FriendsActivity", () => {
   beforeEach(() => {
@@ -157,7 +138,7 @@ describe("FriendsActivity", () => {
     contactMatches: [],
     similarTaste: [],
     suggested: [],
-    feedItems: [],
+    activity: [],
     feedEmpty: true,
   };
 
@@ -290,26 +271,17 @@ describe("FriendsActivity", () => {
   });
 
   it("shows the empty invite card instead of a blank section when feed rows are self-only", () => {
+    // The viewer's own fan-out rows are filtered during grouping, so the
+    // section receives no entries and falls back to the invite card.
+    const selfOnly = activityFor("viewer", "viewer");
+    expect(selfOnly).toHaveLength(0);
+
     render(
       React.createElement(FriendsActivity, {
         ...emptyProps,
         viewerId: "viewer" as PersonPreview["user"]["_id"],
         feedEmpty: false,
-        feedItems: [
-          {
-            type: "started",
-            timestamp: Date.now(),
-            user: {
-              _id: "viewer",
-              displayName: "Viewer",
-              username: "viewer",
-            },
-            show: {
-              _id: "show-1",
-              title: "Show",
-            },
-          },
-        ],
+        activity: selfOnly,
       }),
     );
 
@@ -318,33 +290,50 @@ describe("FriendsActivity", () => {
     expect(screen.queryByText("Contacts stay private")).toBeNull();
   });
 
-  it("keeps the friend activity action icon-only while preserving the accessible command", () => {
+  it("renders one grouped activity row per friend and show", () => {
+    const activity = buildFriendActivity([
+      {
+        type: "log",
+        timestamp: 2000,
+        actor: { _id: "friend", displayName: "Friend", username: "friend" },
+        show: { _id: "show-1", title: "Silo" },
+        log: { seasonNumber: 1, episodeNumber: 2 },
+      },
+      {
+        type: "log",
+        timestamp: 1000,
+        actor: { _id: "friend", displayName: "Friend", username: "friend" },
+        show: { _id: "show-1", title: "Silo" },
+        log: { seasonNumber: 1, episodeNumber: 1 },
+      },
+    ]);
+
     render(
       React.createElement(FriendsActivity, {
         ...emptyProps,
         feedEmpty: false,
-        feedItems: [
-          {
-            type: "started",
-            timestamp: Date.now(),
-            user: {
-              _id: "friend" as PersonPreview["user"]["_id"],
-              displayName: "Friend",
-              username: "friend",
-            },
-            show: {
-              _id: "show-1",
-              title: "Show",
-            },
-          },
-        ],
+        activity,
       }),
     );
 
-    expect(screen.queryByText("See all")).toBeNull();
+    // One row, not one per episode — and it aggregates the episode count.
+    expect(screen.getByLabelText("Friend started Silo")).toBeTruthy();
+    expect(screen.getByText("2 episodes")).toBeTruthy();
+  });
 
-    fireEvent.press(screen.getByLabelText("Open See all from Friends"));
+  it("routes the header action to the dedicated friends screen", () => {
+    render(
+      React.createElement(FriendsActivity, {
+        ...emptyProps,
+        feedEmpty: false,
+        activity: activityFor("friend"),
+      }),
+    );
 
-    expect(router.push).toHaveBeenCalledWith("/search");
+    expect(screen.queryByText("All activity")).toBeNull();
+
+    fireEvent.press(screen.getByLabelText("Open All activity from Friends"));
+
+    expect(router.push).toHaveBeenCalledWith("/friends");
   });
 });

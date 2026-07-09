@@ -21,7 +21,8 @@ function UserRowSkeleton() {
 
 export function UserListSkeleton({ rows = 8 }: { rows?: number }) {
   return (
-    <View className="py-4">
+    // Matches the 10pt ItemSeparatorComponent gap the real lists render with.
+    <View className="py-4" style={{ gap: 10 }}>
       {Array.from({ length: rows }, (_, index) => (
         <UserRowSkeleton key={index} />
       ))}

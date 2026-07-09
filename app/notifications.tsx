@@ -172,6 +172,7 @@ export default function NotificationsScreen() {
               keyExtractor={(item: any) => item._id}
               estimatedItemSize={88}
               contentContainerStyle={listContentStyle}
+              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               onEndReached={() => {
                 if (status === "CanLoadMore") {
                   loadMore(30);

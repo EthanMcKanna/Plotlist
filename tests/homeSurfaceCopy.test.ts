@@ -6,7 +6,6 @@ const HOMEPAGE_SURFACE_FILES = [
   "app/(tabs)/home.tsx",
   "components/HeroCarousel.tsx",
   "components/ContinueWatchingRail.tsx",
-  "components/FeedItem.tsx",
   "components/HomeCuratedEdits.tsx",
   "components/FriendsActivity.tsx",
   "components/SignatureRail.tsx",

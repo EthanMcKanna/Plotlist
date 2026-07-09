@@ -14,8 +14,15 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp } from "react-native-reanimated";
 
 import { Avatar } from "./Avatar";
-import { FeedItem, type FeedItemProps } from "./FeedItem";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { Poster } from "./Poster";
+import { formatRelativeTime } from "../lib/format";
+import {
+  getFriendActivityActorName,
+  getFriendWatchedPhrase,
+  type FriendActivityEntry,
+} from "../lib/friendsActivity";
+import { guardedPush } from "../lib/navigation";
 import { useMutation } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import type { Id } from "../lib/plotlist/types";
@@ -47,7 +54,7 @@ type FriendsActivityProps = {
   contactMatches: PersonPreview[];
   similarTaste: PersonPreview[];
   suggested: PersonPreview[];
-  feedItems: FeedItemProps[];
+  activity: FriendActivityEntry[];
   feedEmpty: boolean;
   onSyncContacts?: () => void;
   syncingContacts?: boolean;
@@ -90,20 +97,142 @@ export function getFriendsActivityPeople(
   return out;
 }
 
-export function getFriendsActivityFeedItems(
-  items: FeedItemProps[],
-  viewerId?: Id<"users"> | null,
-  limit = 3,
-): FeedItemProps[] {
-  const out: FeedItemProps[] = [];
-  for (const item of items) {
-    const userId = item.user?._id;
-    if (!userId) continue;
-    if (viewerId && userId === viewerId) continue;
-    out.push(item);
-    if (out.length >= limit) return out;
+function ActivityStars({ rating }: { rating: number }) {
+  return (
+    <View className="flex-row items-center" style={styles.starRow}>
+      {Array.from({ length: 5 }, (_, index) => {
+        const name =
+          rating >= index + 1 ? "star" : rating >= index + 0.5 ? "star-half" : "star-outline";
+        return (
+          <Ionicons
+            key={index}
+            name={name}
+            size={12}
+            color={name === "star-outline" ? "#4B5563" : "#F59E0B"}
+            accessible={false}
+            accessibilityElementsHidden
+            aria-hidden={true}
+            importantForAccessibility="no"
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+export function getFriendActivityRowLabel(entry: FriendActivityEntry) {
+  const name = getFriendActivityActorName(entry.actor);
+  const title = entry.show.title ?? "a show";
+  if (entry.kind === "review") {
+    return `${name} rated ${title}`;
   }
-  return out;
+  const phrase = getFriendWatchedPhrase(entry);
+  return `${name} ${phrase} ${title}`;
+}
+
+// One diary-style line per moment: avatar, "<name> watched <show>" headline,
+// meta line (episode / stars · time), optional review snippet, poster on the
+// right. Shared between the home Friends section and the /friends screen.
+export function FriendActivityRow({
+  entry,
+  isLast,
+}: {
+  entry: FriendActivityEntry;
+  isLast: boolean;
+}) {
+  const name = getFriendActivityActorName(entry.actor);
+  const title = entry.show.title ?? "a show";
+  const isReview = entry.kind === "review";
+  const verbPhrase = isReview ? "rated" : getFriendWatchedPhrase(entry);
+  const timeLabel = formatRelativeTime(entry.timestamp);
+  const metaLabel = entry.episodeLabel;
+
+  const openTarget = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (isReview) {
+      router.push(`/review/${entry.reviewId}`);
+      return;
+    }
+    guardedPush(`/show/${entry.show._id}`);
+  };
+
+  const openProfile = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/profile/${entry.actor._id}`);
+  };
+
+  // Avatar and row content are sibling pressables (never nested) so the web
+  // output stays valid HTML — a button may not contain another button.
+  return (
+    <View
+      className="flex-row items-center gap-3 py-3"
+      style={isLast ? undefined : styles.rowDivider}
+    >
+      <Pressable
+        onPress={openProfile}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${name}'s profile`}
+        hitSlop={6}
+        className="active:opacity-80"
+      >
+        <Avatar uri={entry.avatarUrl} label={name} size={40} />
+      </Pressable>
+
+      <Pressable
+        onPress={openTarget}
+        accessibilityRole="button"
+        accessibilityLabel={getFriendActivityRowLabel(entry)}
+        className="min-w-0 flex-1 flex-row items-center gap-3 active:opacity-85"
+      >
+        <View className="min-w-0 flex-1">
+          <Text className="text-[14px] leading-[19px] text-text-secondary" numberOfLines={2}>
+            <Text className="font-bold text-text-primary">{name}</Text>
+            {` ${verbPhrase} `}
+            <Text className="font-semibold text-text-primary">{title}</Text>
+          </Text>
+
+          <View className="mt-1 flex-row items-center gap-2">
+            {isReview ? <ActivityStars rating={entry.rating} /> : null}
+            {metaLabel ? (
+              <Text className="text-[12px] font-semibold text-brand-300" numberOfLines={1}>
+                {metaLabel}
+              </Text>
+            ) : null}
+            <Text className="text-[11px] font-medium text-text-tertiary" numberOfLines={1}>
+              {timeLabel}
+            </Text>
+          </View>
+
+          {isReview && entry.reviewText && !entry.spoiler ? (
+            <Text
+              className="mt-1 text-[13px] leading-[18px] text-text-tertiary"
+              numberOfLines={2}
+            >
+              {entry.reviewText}
+            </Text>
+          ) : null}
+          {isReview && entry.spoiler ? (
+            <View className="mt-1 flex-row items-center gap-1">
+              <Ionicons
+                name="eye-off-outline"
+                size={11}
+                color="#5A6070"
+                accessible={false}
+                accessibilityElementsHidden
+                aria-hidden={true}
+                importantForAccessibility="no"
+              />
+              <Text className="text-[11px] font-medium text-text-tertiary">
+                Spoilers hidden
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Poster uri={entry.show.posterUrl} width={40} />
+      </Pressable>
+    </View>
+  );
 }
 
 export function FriendsActivity({
@@ -112,7 +241,7 @@ export function FriendsActivity({
   contactMatches,
   similarTaste,
   suggested,
-  feedItems,
+  activity,
   feedEmpty,
   onSyncContacts,
   syncingContacts = false,
@@ -130,13 +259,10 @@ export function FriendsActivity({
       ),
     [contactMatches, similarTaste, suggested, viewerId],
   );
-  const visibleFeed = useMemo(
-    () => getFriendsActivityFeedItems(feedItems, viewerId, 3),
-    [feedItems, viewerId],
-  );
-  const feedSettled = feedEmpty || feedItems.length > 0;
+  const visibleActivity = useMemo(() => activity.slice(0, 3), [activity]);
+  const feedSettled = feedEmpty || activity.length > 0;
 
-  if (people.length === 0 && visibleFeed.length === 0 && feedSettled) {
+  if (people.length === 0 && visibleActivity.length === 0 && feedSettled) {
     const syncLabel = hasSyncedContacts ? "Refresh contacts" : "Sync contacts";
 
     return (
@@ -247,17 +373,37 @@ export function FriendsActivity({
         title="Friends"
         accent={ACCENT}
         icon="people"
-        actionLabel={visibleFeed.length > 0 ? "See all" : undefined}
+        actionLabel={visibleActivity.length > 0 ? "All activity" : undefined}
         actionLabelVisible={false}
         onAction={
-          visibleFeed.length > 0
-            ? () => router.push("/search")
+          visibleActivity.length > 0
+            ? () => router.push("/friends")
             : undefined
         }
       />
 
+      {visibleActivity.length > 0 ? (
+        <View className="mt-2 px-6">
+          {visibleActivity.map((entry, idx) => (
+            <Animated.View
+              key={entry.key}
+              entering={
+                ENABLE_ENTRY_ANIMATIONS
+                  ? FadeInUp.delay(idx * 35).duration(280)
+                  : undefined
+              }
+            >
+              <FriendActivityRow
+                entry={entry}
+                isLast={idx === visibleActivity.length - 1}
+              />
+            </Animated.View>
+          ))}
+        </View>
+      ) : null}
+
       {people.length > 0 ? (
-        <View className="mt-4">
+        <View className={visibleActivity.length > 0 ? "mt-2" : "mt-4"}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -270,28 +416,11 @@ export function FriendsActivity({
           </ScrollView>
         </View>
       ) : null}
-
-      {visibleFeed.length > 0 ? (
-        <View className="mt-5 gap-5 px-6">
-          {visibleFeed.map((item, idx) => (
-            <Animated.View
-              key={`${item.type}-${idx}-${item.timestamp}`}
-              entering={
-                ENABLE_ENTRY_ANIMATIONS
-                  ? FadeInUp.delay(idx * 35).duration(280)
-                  : undefined
-              }
-            >
-              <FeedItem item={item} />
-            </Animated.View>
-          ))}
-        </View>
-      ) : null}
     </View>
   );
 }
 
-function PersonChip({
+export function PersonChip({
   person,
   index,
 }: {
@@ -387,6 +516,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 24,
     paddingTop: 4,
+    paddingBottom: 2,
   },
   personCard: {
     alignItems: "center",
@@ -411,6 +541,13 @@ const styles = StyleSheet.create({
     minHeight: FRIENDS_ACTIVITY_TOUCH_TARGET,
     minWidth: FRIENDS_ACTIVITY_TOUCH_TARGET,
     width: FRIENDS_ACTIVITY_TOUCH_TARGET,
+  },
+  rowDivider: {
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  starRow: {
+    gap: 1,
   },
   emptyCard: {
     backgroundColor: "#161A22",

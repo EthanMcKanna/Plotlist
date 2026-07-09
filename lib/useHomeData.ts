@@ -44,13 +44,12 @@ import {
   leanItemsToStreamingAvailability,
   normalizeStreamingProviderKeys,
 } from "./streamingProviders";
-import { toHomeFeedItem } from "./homeFeedItems";
+import { buildFriendActivity, type FriendActivityEntry } from "./friendsActivity";
 import { getHomeRailIdentityKeys } from "./homeRailIdentity";
 import { shouldLoadEditorialSeedRail } from "./homeRailHealth";
 import type { HeroSlide } from "../components/HeroCarousel";
 import type { ProviderRoom } from "./providerRoom";
 import type { SignatureRailItem } from "../components/SignatureRail";
-import type { FeedItemProps } from "../components/FeedItem";
 
 export {
   sortProviderRoomItemsForFreshness,
@@ -1649,7 +1648,7 @@ export type HomeData = {
   contactMatches: any[];
   similarTaste: any[];
   suggested: any[];
-  feedItems: FeedItemProps[];
+  friendActivity: FriendActivityEntry[];
   feedEmpty: boolean;
   /** Contact sync state for the small nudge pill. */
   showContactSyncNudge: boolean;
@@ -2169,17 +2168,16 @@ export function useHomeData(): HomeData {
   const showContactSyncNudge =
     hasProfile && contactStatus?.hasSynced === false;
 
-  const feedItems = useMemo(() => {
-    const cutoff = Date.now() - FRESH_FEED_WINDOW_MS;
-    return feed
-      .flatMap((item: any) => {
-        if (typeof item?.timestamp !== "number" || item.timestamp < cutoff) return [];
-        const feedItem = toHomeFeedItem(item);
-        return feedItem ? [feedItem] : [];
-      })
-      .slice(0, 6);
-  }, [feed]);
-  const feedEmpty = feedItems.length === 0 && feedStatus !== "LoadingFirstPage";
+  const viewerId = me?._id ?? null;
+  const friendActivity = useMemo(
+    () =>
+      buildFriendActivity(feed, {
+        viewerId,
+        sinceMs: FRESH_FEED_WINDOW_MS,
+      }).slice(0, 6),
+    [feed, viewerId],
+  );
+  const feedEmpty = friendActivity.length === 0 && feedStatus !== "LoadingFirstPage";
 
   const heroLoading = heroSlides.length === 0 && (forYouLoading || tmdbTrendingLoading);
 
@@ -2213,7 +2211,7 @@ export function useHomeData(): HomeData {
     contactMatches,
     similarTaste,
     suggested,
-    feedItems,
+    friendActivity,
     feedEmpty,
     showContactSyncNudge,
     hasSyncedContacts: Boolean(contactStatus?.hasSynced),

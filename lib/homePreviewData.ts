@@ -311,7 +311,7 @@ export function buildHomePreviewData(
     contactMatches: [],
     similarTaste: [],
     suggested: [],
-    feedItems: [],
+    friendActivity: [],
     feedEmpty: true,
     showContactSyncNudge: false,
     hasSyncedContacts: false,

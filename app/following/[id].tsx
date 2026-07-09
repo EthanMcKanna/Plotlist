@@ -69,6 +69,7 @@ export default function FollowingScreen() {
               keyExtractor={(item: any) => item.user._id}
               estimatedItemSize={92}
               contentContainerStyle={listContentStyle}
+              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               onEndReached={() => {
                 if (status === "CanLoadMore") {
                   loadMore(30);
