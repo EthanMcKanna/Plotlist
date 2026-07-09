@@ -874,7 +874,6 @@ export default function ShowScreen() {
   const seasonLoadStateByNumberRef = useRef<Record<number, SeasonLoadState>>({});
   const seasonLoadErrorByNumberRef = useRef<Record<number, string>>({});
   const seasonLoadPromisesRef = useRef<Map<number, Promise<any>>>(new Map());
-  const seasonLoadQueueRef = useRef<Promise<void>>(Promise.resolve());
   const activeShowExternalIdRef = useRef<string | null>(null);
   const queriedEpisodeCommunityReviews = useQuery(
     api.reviews.listForEpisodeDetailed,
@@ -1141,13 +1140,9 @@ export default function ShowScreen() {
         }
       };
 
-      const queuedLoad = seasonLoadQueueRef.current.then(runLoad, runLoad);
-      seasonLoadPromisesRef.current.set(seasonNumber, queuedLoad);
-      seasonLoadQueueRef.current = queuedLoad.then(
-        () => undefined,
-        () => undefined,
-      );
-      return await queuedLoad;
+      const inFlightLoad = runLoad();
+      seasonLoadPromisesRef.current.set(seasonNumber, inFlightLoad);
+      return await inFlightLoad;
     },
     [cacheSeasonDetails, getSeasonDetails, setSeasonRequestState, show?.externalId, showId],
   );
@@ -1157,25 +1152,29 @@ export default function ShowScreen() {
       const loadedSeasonDetails = new Map<number, any>();
       const uniqueSeasonNumbers = Array.from(new Set(seasonNumbers));
 
-      for (const seasonNumber of uniqueSeasonNumbers) {
-        const existingDetails = seasonDetailsByNumberRef.current[seasonNumber];
-        if (existingDetails !== undefined) {
-          loadedSeasonDetails.set(seasonNumber, existingDetails);
-          continue;
-        }
+      // Seasons load concurrently — each is an independent TMDB proxy call
+      // and loadSeasonDetails dedupes per-season in-flight requests.
+      await Promise.all(
+        uniqueSeasonNumbers.map(async (seasonNumber) => {
+          const existingDetails = seasonDetailsByNumberRef.current[seasonNumber];
+          if (existingDetails !== undefined) {
+            loadedSeasonDetails.set(seasonNumber, existingDetails);
+            return;
+          }
 
-        const requestState = seasonLoadStateByNumberRef.current[seasonNumber] ?? "idle";
-        if (requestState === "error" && !options?.forceRetry) {
-          continue;
-        }
+          const requestState = seasonLoadStateByNumberRef.current[seasonNumber] ?? "idle";
+          if (requestState === "error" && !options?.forceRetry) {
+            return;
+          }
 
-        try {
-          const details = await loadSeasonDetails(seasonNumber, options);
-          loadedSeasonDetails.set(seasonNumber, details);
-        } catch (error) {
-          console.error("Failed to fetch season details:", error);
-        }
-      }
+          try {
+            const details = await loadSeasonDetails(seasonNumber, options);
+            loadedSeasonDetails.set(seasonNumber, details);
+          } catch (error) {
+            console.error("Failed to fetch season details:", error);
+          }
+        }),
+      );
 
       return loadedSeasonDetails;
     },
@@ -1205,7 +1204,6 @@ export default function ShowScreen() {
     setSeasonLoadErrorByNumber({});
     seasonLoadErrorByNumberRef.current = {};
     seasonLoadPromisesRef.current = new Map();
-    seasonLoadQueueRef.current = Promise.resolve();
     setVisibleSeasonCount(INITIAL_VISIBLE_SEASONS);
     setSelectedEpisode(null);
     setEpisodeSheetVisible(false);
@@ -1717,6 +1715,8 @@ export default function ShowScreen() {
         contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bounces={false}
+        overScrollMode="never"
       >
         {/* ─── Cinematic Hero ─── */}
         <View style={{ height: BACKDROP_HEIGHT + POSTER_HEIGHT * 0.45 }}>

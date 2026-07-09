@@ -42,10 +42,12 @@ export function TextField({
       <Text className="mb-2 text-sm font-semibold text-text-secondary">
         {label}
       </Text>
+      {/* Text fields live in the content layer, so they render the solid
+          surface treatment — Liquid Glass is reserved for floating controls. */}
       <GlassSurface
         radius={8}
-        variant="control"
-        borderColor={error ? "#EF4444" : undefined}
+        variant="surface"
+        borderColor={error ? "#EF4444" : "rgba(255,255,255,0.14)"}
         fallbackColor="rgba(22,26,34,0.84)"
         contentStyle={{
           alignItems: "center",

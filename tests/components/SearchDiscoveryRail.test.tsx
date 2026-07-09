@@ -5,11 +5,7 @@ jest.mock("expo-image", () => ({
   Image: "Image",
 }));
 
-import {
-  SearchDiscoveryRail,
-  getSearchDiscoveryItemAccessibilityLabel,
-  getSearchDiscoveryRailAccessibilityLabel,
-} from "../../components/SearchDiscoveryRail";
+import { SearchDiscoveryRail } from "../../components/SearchDiscoveryRail";
 
 const section = {
   key: "fresh_premieres",
@@ -35,7 +31,7 @@ const section = {
 };
 
 describe("SearchDiscoveryRail", () => {
-  it("renders a home-aligned discovery section with accessible poster actions", () => {
+  it("renders the home rail treatment with accessible poster actions", () => {
     const onPressItem = jest.fn();
 
     render(
@@ -48,17 +44,31 @@ describe("SearchDiscoveryRail", () => {
     );
 
     expect(screen.getByText("Fresh Premieres")).toBeTruthy();
-    expect(screen.getByText("The Agency")).toBeTruthy();
-    expect(screen.getByText("Long Bright River")).toBeTruthy();
+    expect(screen.getByLabelText("Fresh Premieres rail")).toBeTruthy();
+    // Home header keeps the section context in the accessibility label only —
+    // no icon chip renders next to the title.
     expect(
-      screen.getByLabelText("Fresh Premieres. 2 shows"),
+      screen.getByLabelText("Section 02. Discover. Fresh Premieres"),
     ).toBeTruthy();
 
-    fireEvent.press(
-      screen.getByLabelText("Open The Agency. 2026. Fresh Premieres"),
-    );
+    fireEvent.press(screen.getByLabelText("Open The Agency. 2026"));
 
     expect(onPressItem).toHaveBeenCalledWith(section.items[0]);
+  });
+
+  it("does not caption posters with a visible dot/year line", () => {
+    render(
+      <SearchDiscoveryRail
+        section={section}
+        accent="#38BDF8"
+        onPressItem={jest.fn()}
+      />,
+    );
+
+    // Poster cards are pure artwork: the year appears in accessibility labels
+    // but never as a rendered caption under the poster.
+    expect(screen.queryByText("2026")).toBeNull();
+    expect(screen.queryByText("2025")).toBeNull();
   });
 
   it("keeps provider actions tappable without hijacking poster presses", () => {
@@ -84,21 +94,5 @@ describe("SearchDiscoveryRail", () => {
 
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(onPressItem).not.toHaveBeenCalled();
-  });
-
-  it("builds stable labels for rail and poster accessibility", () => {
-    expect(
-      getSearchDiscoveryRailAccessibilityLabel({
-        label: "Hidden Gems",
-        count: 1,
-      }),
-    ).toBe("Hidden Gems. 1 show");
-
-    expect(
-      getSearchDiscoveryItemAccessibilityLabel(
-        { title: "Pluribus", year: 2025, posterUrl: "poster.jpg" },
-        "Critic Favorites",
-      ),
-    ).toBe("Open Pluribus. 2025. Critic Favorites");
   });
 });

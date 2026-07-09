@@ -141,6 +141,8 @@ export default function ReviewScreen() {
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           keyboardShouldPersistTaps="handled"
+          bounces={false}
+          overScrollMode="never"
         >
           <View className="px-6 pb-10 pt-4">
             <Pressable

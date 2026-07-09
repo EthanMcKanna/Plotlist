@@ -558,6 +558,8 @@ export default function ListScreen() {
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!draggingId}
+        bounces={false}
+        overScrollMode="never"
       >
         <View className="px-6 pb-10 pt-6">
           {list === null ? (

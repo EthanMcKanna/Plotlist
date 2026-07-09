@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Dimensions, Pressable, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "../../components/FlashList";
 import { useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 
 import { Screen } from "../../components/Screen";
+import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { EmptyState } from "../../components/EmptyState";
 import { Poster } from "../../components/Poster";
 import { FilterDropdown } from "../../components/FilterDropdown";
-import { SegmentedControl } from "../../components/SegmentedControl";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
 
@@ -41,10 +42,10 @@ function parseFilter(raw?: string): StatusFilter {
   return raw && VALID_FILTERS.has(raw) ? (raw as StatusFilter) : "all";
 }
 
-const sortOptions = [
-  { value: "date", label: "Recent" },
-  { value: "title", label: "A-Z" },
-  { value: "year", label: "Year" },
+const sortOptions: { value: SortOption; label: string }[] = [
+  { value: "date", label: "Recently added" },
+  { value: "title", label: "Title A–Z" },
+  { value: "year", label: "Release year" },
 ];
 
 const statusLabels: Record<string, string> = {
@@ -68,6 +69,17 @@ export default function WatchlistScreen() {
   const params = useLocalSearchParams<{ filter?: string }>();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(parseFilter(params.filter));
   const [sortBy, setSortBy] = useState<SortOption>("date");
+  const [sortSheetVisible, setSortSheetVisible] = useState(false);
+
+  const sortSheetOptions = useMemo<ActionSheetOption[]>(
+    () =>
+      sortOptions.map((option) => ({
+        label: option.label,
+        icon: option.value === sortBy ? "checkmark" : undefined,
+        onPress: () => setSortBy(option.value),
+      })),
+    [sortBy],
+  );
 
   useEffect(() => {
     setStatusFilter(parseFilter(params.filter));
@@ -227,11 +239,35 @@ export default function WatchlistScreen() {
 
   return (
     <Screen>
+      <ActionSheet
+        visible={sortSheetVisible}
+        onClose={() => setSortSheetVisible(false)}
+        title="Sort by"
+        options={sortSheetOptions}
+      />
       <View className="flex-1 px-6 pt-6">
-        <Text className="text-2xl font-semibold text-text-primary">My Shows</Text>
-        <Text className="mt-1 text-sm text-text-tertiary">
-          Track what you're watching
-        </Text>
+        <View className="flex-row items-start justify-between gap-3">
+          <View className="flex-1">
+            <Text className="text-2xl font-semibold text-text-primary">My Shows</Text>
+            <Text className="mt-1 text-sm text-text-tertiary">
+              Track what you're watching
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setSortSheetVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Sort shows. Currently ${
+              sortOptions.find((option) => option.value === sortBy)?.label ?? "Recently added"
+            }`}
+            hitSlop={8}
+            className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card active:bg-dark-hover"
+          >
+            <Ionicons name="swap-vertical" size={17} color="#9BA1B0" />
+          </Pressable>
+        </View>
 
         {/* Filter dropdown */}
         <View className="mt-4">
@@ -239,15 +275,6 @@ export default function WatchlistScreen() {
             options={filterOptions}
             value={statusFilter}
             onChange={(v) => setStatusFilter(v as StatusFilter)}
-          />
-        </View>
-
-        {/* Sort picker */}
-        <View className="mt-4">
-          <SegmentedControl
-            options={sortOptions}
-            value={sortBy}
-            onChange={(v) => setSortBy(v as SortOption)}
           />
         </View>
 

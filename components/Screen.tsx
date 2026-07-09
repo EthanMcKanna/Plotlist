@@ -31,6 +31,10 @@ export function Screen({
           <ScrollView
             contentInsetAdjustmentBehavior="automatic"
             keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+            // No top rubber-band: overscroll exposes the hard cutoff above
+            // page headers.
+            bounces={false}
+            overScrollMode="never"
             className={className}
           >
             {children}

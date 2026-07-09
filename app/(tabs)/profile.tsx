@@ -9,7 +9,7 @@ import { Screen } from "../../components/Screen";
 import { Avatar } from "../../components/Avatar";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { formatWatchTimeLabel } from "../../lib/format";
-import { useQuery } from "../../lib/plotlist/react";
+import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import type { WatchInsights } from "../../lib/watchInsights";
 
 type MenuItemDef = {
@@ -105,6 +105,20 @@ export default function ProfileTab() {
     api.watchStats.getInsights,
     me ? { utcOffsetMinutes } : "skip",
   ) as WatchInsights | undefined;
+
+  // Warm the exact caches behind "View public profile" and the follower /
+  // following screens (same query keys) so tapping through renders instantly.
+  useQuery(api.users.profile, me?._id ? { userId: me._id } : "skip");
+  usePaginatedQuery(
+    api.follows.listFollowersDetailed,
+    me?._id ? { userId: me._id } : "skip",
+    { initialNumItems: 30 },
+  );
+  usePaginatedQuery(
+    api.follows.listFollowingDetailed,
+    me?._id ? { userId: me._id } : "skip",
+    { initialNumItems: 30 },
+  );
 
   const counts = {
     followers: me?.countsFollowers ?? 0,
@@ -217,7 +231,10 @@ export default function ProfileTab() {
           <GlassPressable
             onPress={pressWithHaptic(() => router.push("/me/stats"))}
             radius={16}
-            variant="prominent"
+            // Content-layer card: solid tinted surface, no Liquid Glass.
+            variant="surface"
+            fallbackColor="rgba(14,165,233,0.20)"
+            borderColor="rgba(125,211,252,0.28)"
             style={{ marginTop: 12 }}
             contentStyle={{ padding: 18 }}
           >

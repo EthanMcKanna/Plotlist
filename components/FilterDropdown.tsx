@@ -113,7 +113,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
             </Text>
             {selectedOption.count !== undefined && (
               <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-                <Text className="text-xs font-medium text-text-tertiary">
+                <Text className="text-xs font-semibold text-text-secondary">
                   {selectedOption.count}
                 </Text>
               </View>
@@ -237,7 +237,8 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
                               <Text
                                 style={{
                                   fontSize: 14,
-                                  color: "#5A6070",
+                                  fontWeight: "600",
+                                  color: "#9BA1B0",
                                 }}
                               >
                                 {option.count}

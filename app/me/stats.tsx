@@ -156,6 +156,8 @@ export default function WatchStatsScreen() {
     <Screen>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        bounces={false}
+        overScrollMode="never"
         contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}
       >
         <View className="px-6 pt-2">

@@ -65,24 +65,9 @@ const PEOPLE_QUERY_MIN_LENGTH = 2;
 
 const DISCOVER_FETCH_LIMIT = 18;
 const DISCOVER_SKELETONS = [
-  {
-    accent: "#F59E0B",
-    icon: "flame" as keyof typeof Ionicons.glyphMap,
-    kicker: "Discover",
-    title: "Trending Today",
-  },
-  {
-    accent: "#38BDF8",
-    icon: "sparkles" as keyof typeof Ionicons.glyphMap,
-    kicker: "Discover",
-    title: "Fresh Premieres",
-  },
-  {
-    accent: "#F472B6",
-    icon: "diamond" as keyof typeof Ionicons.glyphMap,
-    kicker: "Discover",
-    title: "Hidden Gems",
-  },
+  { accent: "#F59E0B", kicker: "Discover", title: "Trending Today" },
+  { accent: "#38BDF8", kicker: "Discover", title: "Fresh Premieres" },
+  { accent: "#F472B6", kicker: "Discover", title: "Hidden Gems" },
 ];
 const DISCOVER_ACCENTS: Record<string, string> = {
   airing_today: "#A3E635",
@@ -179,7 +164,6 @@ function SearchDiscoverSkeletons() {
           kicker={section.kicker}
           title={section.title}
           accent={section.accent}
-          icon={section.icon}
           variant="poster"
         />
       ))}

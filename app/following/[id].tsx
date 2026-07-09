@@ -6,6 +6,7 @@ import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 
 import { Screen } from "../../components/Screen";
 import { EmptyState } from "../../components/EmptyState";
+import { UserListSkeleton } from "../../components/UserListSkeleton";
 import { UserRow } from "../../components/UserRow";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
@@ -59,7 +60,9 @@ export default function FollowingScreen() {
         </Text>
 
         <View className="mt-6 flex-1">
-          {following.length > 0 ? (
+          {status === "LoadingFirstPage" ? (
+            <UserListSkeleton />
+          ) : following.length > 0 ? (
             <FlashList
               data={following}
               renderItem={renderItem}

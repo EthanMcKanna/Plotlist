@@ -17,42 +17,7 @@ import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
 
-const TV_GENRES = [
-  "Action & Adventure",
-  "Animation",
-  "Comedy",
-  "Crime",
-  "Documentary",
-  "Drama",
-  "Family",
-  "Kids",
-  "Mystery",
-  "Reality",
-  "Sci-Fi & Fantasy",
-  "Talk",
-  "War & Politics",
-  "Western",
-];
-
-const GENRE_COLORS: Record<string, { bg: string; activeBg: string; text: string; activeText: string }> = {
-  "Action & Adventure": { bg: "bg-red-500/10", activeBg: "bg-red-500/25", text: "text-red-400/50", activeText: "text-red-400" },
-  Animation: { bg: "bg-violet-500/10", activeBg: "bg-violet-500/25", text: "text-violet-400/50", activeText: "text-violet-400" },
-  Comedy: { bg: "bg-amber-500/10", activeBg: "bg-amber-500/25", text: "text-amber-400/50", activeText: "text-amber-400" },
-  Crime: { bg: "bg-slate-500/10", activeBg: "bg-slate-500/25", text: "text-slate-400/50", activeText: "text-slate-300" },
-  Documentary: { bg: "bg-teal-500/10", activeBg: "bg-teal-500/25", text: "text-teal-400/50", activeText: "text-teal-400" },
-  Drama: { bg: "bg-blue-500/10", activeBg: "bg-blue-500/25", text: "text-blue-400/50", activeText: "text-blue-400" },
-  Family: { bg: "bg-green-500/10", activeBg: "bg-green-500/25", text: "text-green-400/50", activeText: "text-green-400" },
-  Kids: { bg: "bg-pink-500/10", activeBg: "bg-pink-500/25", text: "text-pink-400/50", activeText: "text-pink-400" },
-  Mystery: { bg: "bg-purple-500/10", activeBg: "bg-purple-500/25", text: "text-purple-400/50", activeText: "text-purple-400" },
-  Reality: { bg: "bg-orange-500/10", activeBg: "bg-orange-500/25", text: "text-orange-400/50", activeText: "text-orange-400" },
-  "Sci-Fi & Fantasy": { bg: "bg-cyan-500/10", activeBg: "bg-cyan-500/25", text: "text-cyan-400/50", activeText: "text-cyan-400" },
-  Talk: { bg: "bg-lime-500/10", activeBg: "bg-lime-500/25", text: "text-lime-400/50", activeText: "text-lime-400" },
-  "War & Politics": { bg: "bg-stone-500/10", activeBg: "bg-stone-500/25", text: "text-stone-400/50", activeText: "text-stone-300" },
-  Western: { bg: "bg-yellow-500/10", activeBg: "bg-yellow-500/25", text: "text-yellow-400/50", activeText: "text-yellow-400" },
-};
-
 const MAX_SHOWS = 4;
-const MAX_GENRES = 5;
 const ITEM_WIDTH = 96;
 
 type ShowInfo = { _id: Id<"shows">; title: string; posterUrl: string | null };
@@ -142,7 +107,6 @@ export default function FavoritesScreen() {
   const updateProfile = useMutation(api.users.updateProfile);
 
   const [selectedShowIds, setSelectedShowIds] = useState<Id<"shows">[]>([]);
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [searchText, setSearchText] = useState("");
   const [saving, setSaving] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -150,7 +114,6 @@ export default function FavoritesScreen() {
   useEffect(() => {
     if (me && !initialized) {
       setSelectedShowIds(me.favoriteShowIds ?? []);
-      setSelectedGenres(me.favoriteGenres ?? []);
       setInitialized(true);
     }
   }, [me, initialized]);
@@ -238,20 +201,6 @@ export default function FavoritesScreen() {
     [],
   );
 
-  const toggleGenre = useCallback((genre: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedGenres((prev) => {
-      if (prev.includes(genre)) {
-        return prev.filter((g) => g !== genre);
-      }
-      if (prev.length >= MAX_GENRES) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        return prev;
-      }
-      return [...prev, genre];
-    });
-  }, []);
-
   const handleReorder = useCallback((fromIndex: number, toIndex: number) => {
     setSelectedShowIds((prev) => {
       const next = [...prev];
@@ -265,10 +214,8 @@ export default function FavoritesScreen() {
     if (!me) return false;
     const origShows = (me.favoriteShowIds ?? []).map(String).join(",");
     const currShows = selectedShowIds.map(String).join(",");
-    const origGenres = (me.favoriteGenres ?? []).join(",");
-    const currGenres = selectedGenres.join(",");
-    return origShows !== currShows || origGenres !== currGenres;
-  }, [me, selectedShowIds, selectedGenres]);
+    return origShows !== currShows;
+  }, [me, selectedShowIds]);
 
   const handleSave = async () => {
     if (!isDirty) return;
@@ -276,7 +223,6 @@ export default function FavoritesScreen() {
     try {
       await updateProfile({
         favoriteShowIds: selectedShowIds,
-        favoriteGenres: selectedGenres,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
@@ -407,43 +353,6 @@ export default function FavoritesScreen() {
               Mark shows as watching or completed to pick favorites
             </Text>
           ) : null}
-        </View>
-
-        {/* ── Genres ── */}
-        <View className="mt-10">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-sm font-semibold text-text-primary">
-              Favorite Genres
-            </Text>
-            <Text className="text-xs text-text-tertiary">
-              {selectedGenres.length}/{MAX_GENRES}
-            </Text>
-          </View>
-
-          <View className="mt-3 flex-row flex-wrap gap-2.5">
-            {TV_GENRES.map((genre) => {
-              const isSelected = selectedGenres.includes(genre);
-              const colors = GENRE_COLORS[genre] ?? {
-                bg: "bg-dark-elevated",
-                activeBg: "bg-dark-elevated",
-                text: "text-text-tertiary",
-                activeText: "text-text-secondary",
-              };
-              return (
-                <Pressable
-                  key={genre}
-                  onPress={() => toggleGenre(genre)}
-                  className={`rounded-full px-4 py-2 ${isSelected ? colors.activeBg : colors.bg}`}
-                >
-                  <Text
-                    className={`text-sm font-medium ${isSelected ? colors.activeText : colors.text}`}
-                  >
-                    {genre}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
         </View>
 
         {/* ── Save Button ── */}

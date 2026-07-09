@@ -54,6 +54,8 @@ export default function CommentsScreen() {
           <ScrollView
             contentInsetAdjustmentBehavior="automatic"
             keyboardShouldPersistTaps="handled"
+            bounces={false}
+            overScrollMode="never"
           >
             <View className="px-6 pb-10 pt-4">
               <Comments targetType={targetType} targetId={targetId} showHeader={false} />

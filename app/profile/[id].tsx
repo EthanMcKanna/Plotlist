@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StatusBar, Text, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -10,12 +18,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
-import { ReviewRow } from "../../components/ReviewRow";
 import { ListRow } from "../../components/ListRow";
 import { Poster } from "../../components/Poster";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { ReportModal } from "../../components/ReportModal";
 import { api } from "../../lib/plotlist/api";
+import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { getFollowButtonState } from "../../lib/profilePrivacy";
 import type { Id } from "../../lib/plotlist/types";
@@ -23,25 +31,8 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { SecondaryButton } from "../../components/SecondaryButton";
 import { Avatar } from "../../components/Avatar";
 import { GlassSurface } from "../../components/NativeGlass";
+import { ShimmerBlock } from "../../components/ShowDetailSkeleton";
 import { TasteMatchSummary } from "../../components/TasteMatchSummary";
-
-const GENRE_COLORS: Record<string, { bg: string; text: string }> = {
-  "Action & Adventure": { bg: "bg-red-500/15", text: "text-red-400" },
-  Animation: { bg: "bg-violet-500/15", text: "text-violet-400" },
-  Comedy: { bg: "bg-amber-500/15", text: "text-amber-400" },
-  Crime: { bg: "bg-slate-500/15", text: "text-slate-300" },
-  Documentary: { bg: "bg-teal-500/15", text: "text-teal-400" },
-  Drama: { bg: "bg-blue-500/15", text: "text-blue-400" },
-  Family: { bg: "bg-green-500/15", text: "text-green-400" },
-  Kids: { bg: "bg-pink-500/15", text: "text-pink-400" },
-  Mystery: { bg: "bg-purple-500/15", text: "text-purple-400" },
-  Reality: { bg: "bg-orange-500/15", text: "text-orange-400" },
-  "Sci-Fi & Fantasy": { bg: "bg-cyan-500/15", text: "text-cyan-400" },
-  Soap: { bg: "bg-rose-500/15", text: "text-rose-400" },
-  Talk: { bg: "bg-lime-500/15", text: "text-lime-400" },
-  "War & Politics": { bg: "bg-stone-500/15", text: "text-stone-300" },
-  Western: { bg: "bg-yellow-500/15", text: "text-yellow-400" },
-};
 
 type ProfileShowPreview = {
   _id: string;
@@ -57,15 +48,6 @@ type TopRatedPreview = {
   title: string;
   posterUrl?: string | null;
 };
-
-function GenreChip({ genre }: { genre: string }) {
-  const colors = GENRE_COLORS[genre] ?? { bg: "bg-dark-elevated", text: "text-text-secondary" };
-  return (
-    <View className={`rounded-full px-3.5 py-1.5 ${colors.bg}`}>
-      <Text className={`text-xs font-semibold ${colors.text}`}>{genre}</Text>
-    </View>
-  );
-}
 
 function MiniStat({
   label,
@@ -135,6 +117,129 @@ function ShowPosterCard({
   );
 }
 
+// Instant placeholder mirroring the real layout (gradient header, centered
+// avatar/name, stats bar, poster rail) so opening a profile never flashes an
+// empty screen while queries resolve.
+function ProfileSkeleton() {
+  const insets = useSafeAreaInsets();
+  return (
+    <View className="flex-1 bg-dark-bg">
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <LinearGradient
+        colors={["#0D2B3C", "#0D1821", "#0D0F14"]}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={{ paddingTop: insets.top + 16, paddingBottom: 16 }}
+      >
+        <View className="items-center px-6">
+          <ShimmerBlock width={88} height={88} radius={44} />
+          <ShimmerBlock width={170} height={24} radius={8} style={{ marginTop: 14 }} />
+          <ShimmerBlock width={110} height={14} radius={7} style={{ marginTop: 8 }} />
+        </View>
+      </LinearGradient>
+      <View className="px-6">
+        <ShimmerBlock width="100%" height={62} radius={8} />
+        <ShimmerBlock width="34%" height={13} radius={7} style={{ marginTop: 30 }} />
+        <View className="mt-3 flex-row" style={{ gap: 12 }}>
+          <ShimmerBlock width={100} height={150} radius={12} />
+          <ShimmerBlock width={100} height={150} radius={12} />
+          <ShimmerBlock width={100} height={150} radius={12} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ReviewStars({ rating }: { rating: number }) {
+  return (
+    <View className="flex-row items-center" style={styles.starRow}>
+      {Array.from({ length: 5 }, (_, index) => {
+        const name =
+          rating >= index + 1 ? "star" : rating >= index + 0.5 ? "star-half" : "star-outline";
+        return (
+          <Ionicons
+            key={index}
+            name={name}
+            size={13}
+            color={name === "star-outline" ? "#4B5563" : "#F59E0B"}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+// Diary-style review row borrowed from the Log page's visual language: flat,
+// hairline-divided, small poster, inline stars — no card chrome.
+function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
+  const router = useRouter();
+  const review = item.review;
+  const episodeLabel =
+    typeof review.seasonNumber === "number" && typeof review.episodeNumber === "number"
+      ? formatEpisodeCode(review.seasonNumber, review.episodeNumber)
+      : null;
+
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push(`/review/${review._id}`);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Review for ${item.show?.title ?? "Unknown"}`}
+      className="active:opacity-85"
+    >
+      <View
+        className="flex-row gap-3 py-3"
+        style={isLast ? undefined : styles.reviewRowDivider}
+      >
+        <Poster uri={item.show?.posterUrl} width={42} />
+        <View className="min-w-0 flex-1 justify-center">
+          <View className="flex-row items-center justify-between gap-3">
+            <Text
+              className="flex-1 text-[15px] font-semibold text-text-primary"
+              numberOfLines={1}
+            >
+              {item.show?.title ?? "Unknown"}
+            </Text>
+            {review.createdAt ? (
+              <Text className="text-[11px] font-medium text-text-tertiary">
+                {formatRelativeTime(review.createdAt)}
+              </Text>
+            ) : null}
+          </View>
+          <View className="mt-1 flex-row items-center gap-2">
+            <ReviewStars rating={review.rating} />
+            {episodeLabel ? (
+              <Text
+                className="flex-1 text-[12px] font-semibold text-brand-300"
+                numberOfLines={1}
+              >
+                {episodeLabel}
+              </Text>
+            ) : null}
+          </View>
+          {review.reviewText ? (
+            <Text
+              className="mt-1.5 text-[13px] leading-5 text-text-secondary"
+              numberOfLines={3}
+            >
+              {review.reviewText}
+            </Text>
+          ) : null}
+          {review.spoiler ? (
+            <View className="mt-1.5 flex-row items-center gap-1">
+              <Ionicons name="eye-off-outline" size={11} color="#5A6070" />
+              <Text className="text-[11px] font-medium text-text-tertiary">Spoilers</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function formatMemberSince(timestamp: number | null) {
   if (!timestamp) return null;
   const date = new Date(timestamp);
@@ -186,20 +291,10 @@ export default function ProfileScreen() {
   );
 
   const renderReview = useCallback(
-    ({ item }: { item: any }) => (
-      <ReviewRow
-        id={item.review._id}
-        showTitle={item.show?.title ?? "Unknown"}
-        posterUrl={item.show?.posterUrl}
-        rating={item.review.rating}
-        reviewText={item.review.reviewText}
-        createdAt={item.review.createdAt}
-        spoiler={item.review.spoiler}
-        seasonNumber={item.review.seasonNumber}
-        episodeNumber={item.review.episodeNumber}
-      />
+    ({ item, index }: { item: any; index: number }) => (
+      <ProfileReviewRow item={item} isLast={index === reviews.length - 1} />
     ),
-    [],
+    [reviews.length],
   );
 
   const renderList = useCallback(
@@ -380,6 +475,12 @@ export default function ProfileScreen() {
     };
   }, [getProfileTasteExperience, isAuthenticated, me?._id, userIdValue]);
 
+  // Still resolving: show the skeleton rather than an empty shell of
+  // placeholder text and zeroed stats.
+  if (profile === undefined) {
+    return <ProfileSkeleton />;
+  }
+
   // The server returns null when the account doesn't exist or has blocked
   // the viewer; both read as unavailable.
   if (profile === null) {
@@ -414,6 +515,8 @@ export default function ProfileScreen() {
         contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bounces={false}
+        overScrollMode="never"
       >
       <View className="pb-24">
         {/* ── Profile Header ── */}
@@ -622,18 +725,6 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
-          {/* ── Favorite Genres ── */}
-          {profile?.favoriteGenres && profile.favoriteGenres.length > 0 ? (
-            <View className="mt-7">
-              <SectionHeader title="Favorite Genres" />
-              <View className="mt-3 flex-row flex-wrap gap-2">
-                {profile.favoriteGenres.map((genre: string) => (
-                  <GenreChip key={genre} genre={genre} />
-                ))}
-              </View>
-            </View>
-          ) : null}
-
           {/* ── Currently Watching ── */}
           {profile?.currentlyWatching && profile.currentlyWatching.length > 0 ? (
             <View className="mt-7">
@@ -722,7 +813,8 @@ export default function ProfileScreen() {
                   <GlassSurface
                     key={card.key}
                     radius={8}
-                    variant="control"
+                    // Content-layer stat tiles render solid, not glass.
+                    variant="surface"
                     style={{ flex: 1 }}
                     contentStyle={{ padding: 14 }}
                   >
@@ -748,7 +840,12 @@ export default function ProfileScreen() {
           {/* ── Public Lists ── */}
           <View className="mt-7">
             <SectionHeader title="Public Lists" />
-            {publicLists.length > 0 ? (
+            {publicListsStatus === "LoadingFirstPage" ? (
+              <View className="mt-4" style={{ gap: 12 }}>
+                <ShimmerBlock width="100%" height={72} radius={12} />
+                <ShimmerBlock width="100%" height={72} radius={12} />
+              </View>
+            ) : publicLists.length > 0 ? (
               <View>
                 <FlashList
                   data={publicLists}
@@ -783,15 +880,19 @@ export default function ProfileScreen() {
           {/* ── Recent Reviews ── */}
           <View className="mt-7">
             <SectionHeader title="Recent Reviews" />
-            {reviews.length > 0 ? (
+            {reviewsStatus === "LoadingFirstPage" ? (
+              <View className="mt-4" style={{ gap: 12 }}>
+                <ShimmerBlock width="100%" height={88} radius={12} />
+                <ShimmerBlock width="100%" height={88} radius={12} />
+              </View>
+            ) : reviews.length > 0 ? (
               <View>
                 <FlashList
                   data={reviews}
                   renderItem={renderReview}
                   keyExtractor={(item: any) => item.review._id}
-                  ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-                  estimatedItemSize={120}
-                  contentContainerStyle={{ paddingVertical: 16 }}
+                  estimatedItemSize={96}
+                  contentContainerStyle={{ paddingVertical: 8 }}
                   scrollEnabled={false}
                 />
                 {reviewsStatus === "CanLoadMore" ? (
@@ -822,3 +923,14 @@ export default function ProfileScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  // Matches the Log page's hairline row divider.
+  reviewRowDivider: {
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  starRow: {
+    gap: 2,
+  },
+});
