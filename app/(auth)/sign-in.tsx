@@ -452,7 +452,12 @@ export default function SignInScreen() {
     try {
       const credential = await signInWithApple();
       if (!credential) {
-        // User dismissed the Apple sheet — nothing to report.
+        // Expo uses the same cancellation response for a real dismissal and
+        // Apple's native "Sign Up Not Completed" failure. Keep this inline and
+        // non-modal because we cannot tell which one occurred.
+        setErrorMessage(
+          "Apple sign-in didn’t complete. You can try again or use your phone number instead.",
+        );
         return;
       }
       await signIn("apple", credential);
@@ -634,6 +639,7 @@ export default function SignInScreen() {
                     <View style={{ opacity: loading ? 0.6 : 1 }}>
                       <AppleButton
                         {...appleButtonProps}
+                        accessibilityLabel="Sign in with Apple"
                         cornerRadius={16}
                         onPress={loading ? () => {} : handleAppleSignIn}
                         style={{ width: "100%", height: 54 }}
