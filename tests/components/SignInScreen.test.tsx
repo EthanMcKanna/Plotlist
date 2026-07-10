@@ -8,7 +8,7 @@ const mockSignInWithApple = jest.fn();
 
 jest.mock("../../lib/appleAuth", () => ({
   isAppleSignInAvailable: () => Promise.resolve(true),
-  signInWithApple: mockSignInWithApple,
+  signInWithApple: () => mockSignInWithApple(),
   getAppleButtonComponent: () => {
     const { Pressable } = require("react-native");
     return Pressable;
@@ -136,5 +136,20 @@ describe("SignInScreen", () => {
     expect(screen.getByLabelText("Phone number")).toBeTruthy();
     expect(screen.getByLabelText("Continue with phone number")).toBeTruthy();
     expect(screen.getByLabelText("Sign in with Apple instead")).toBeTruthy();
+  });
+
+  it("offers retry and phone fallback when Apple does not complete the request", async () => {
+    mockSignInWithApple.mockResolvedValueOnce(null as never);
+    render(<SignInScreen />);
+
+    fireEvent.press(await screen.findByLabelText("Sign in with Apple"));
+
+    expect(
+      await screen.findByText(
+        "Apple sign-in didn’t complete. You can try again or use your phone number instead.",
+      ),
+    ).toBeTruthy();
+    expect(mockSignIn).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Sign in with phone number instead")).toBeTruthy();
   });
 });
