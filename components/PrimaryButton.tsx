@@ -33,12 +33,14 @@ export function PrimaryButton({
   disabled = false,
   loading = false,
   className,
+  accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   loading?: boolean;
   className?: string;
+  accessibilityLabel?: string;
 }) {
   const handlePress = () => {
     if (!disabled && !loading) {
@@ -52,6 +54,7 @@ export function PrimaryButton({
       onPress={handlePress}
       disabled={disabled || loading}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       className={className}
       radius={999}

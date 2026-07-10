@@ -1,23 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
   Dimensions,
   Keyboard,
   Platform,
   Pressable,
+  StyleSheet,
   Text,
   TextInput,
   View,
+  type ViewStyle,
 } from "react-native";
 import { PlotlistApiError } from "../../lib/api/client";
-
-function notifyError(title: string, message: string) {
-  if (Platform.OS === "web") {
-    return;
-  }
-  Alert.alert(title, message);
-}
 
 function readErrorMessage(error: unknown): string {
   if (error instanceof PlotlistApiError && error.code === "internal_error") {
@@ -36,11 +37,10 @@ import Animated, {
   Extrapolation,
   FadeIn,
   FadeInDown,
-  FadeInUp,
-  FadeOutLeft,
-  SlideInRight,
   interpolate,
   runOnJS,
+  type EntryAnimationsValues,
+  type EntryExitAnimationFunction,
   type SharedValue,
   useAnimatedStyle,
   useSharedValue,
@@ -51,6 +51,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GlassSurface } from "../../components/NativeGlass";
+import { PrimaryButton } from "../../components/PrimaryButton";
 import { api } from "../../lib/plotlist/api";
 import {
   getAppleButtonComponent,
@@ -100,6 +102,20 @@ const R2 = [SHOWS[6], SHOWS[7], SHOWS[8], SHOWS[9], SHOWS[10], SHOWS[13], SHOWS[
 const R3 = [SHOWS[11], SHOWS[15], SHOWS[16], SHOWS[17], SHOWS[18], SHOWS[3], SHOWS[1]];
 const WALL_H = 8 + 3 * PH + 2 * GAP;
 const HAPTIC_TICK = 40;
+
+function brandGlow(opacity: number, radius: number): ViewStyle {
+  if (Platform.OS === "web") {
+    return {
+      boxShadow: `0 0 ${radius}px rgba(56,189,248,${opacity})`,
+    } as ViewStyle;
+  }
+  return {
+    shadowColor: "#38BDF8",
+    shadowOpacity: opacity,
+    shadowRadius: radius,
+    shadowOffset: { width: 0, height: 0 },
+  };
+}
 
 // ── PosterRow — seamless marquee with drag parallax ───────────────
 function PosterRow({
@@ -336,64 +352,183 @@ function PosterWall() {
   );
 }
 
+// ── Entrance animations ───────────────────────────────────────────
+// Panes hold Liquid Glass controls, so every pane transition is
+// translation-only — opacity must never animate on glass or its parents
+// (docs/ios-native-surface-audit.md).
+const formRise: EntryExitAnimationFunction = (values: EntryAnimationsValues) => {
+  "worklet";
+  return {
+    initialValues: {
+      originY: values.targetOriginY + 26,
+    },
+    animations: {
+      originY: withSpring(values.targetOriginY, {
+        damping: 22,
+        stiffness: 160,
+        mass: 0.9,
+      }),
+    },
+  };
+};
+
+const slideForward: EntryExitAnimationFunction = (values: EntryAnimationsValues) => {
+  "worklet";
+  return {
+    initialValues: {
+      originX: values.targetOriginX + values.windowWidth,
+    },
+    animations: {
+      originX: withSpring(values.targetOriginX, {
+        damping: 24,
+        stiffness: 220,
+        mass: 0.9,
+      }),
+    },
+  };
+};
+
+const slideBack: EntryExitAnimationFunction = (values: EntryAnimationsValues) => {
+  "worklet";
+  return {
+    initialValues: {
+      originX: values.targetOriginX - values.windowWidth,
+    },
+    animations: {
+      originX: withSpring(values.targetOriginX, {
+        damping: 24,
+        stiffness: 220,
+        mass: 0.9,
+      }),
+    },
+  };
+};
+
+const digitPop: EntryExitAnimationFunction = () => {
+  "worklet";
+  return {
+    initialValues: { opacity: 0, transform: [{ scale: 0.55 }] },
+    animations: {
+      opacity: withTiming(1, { duration: 90 }),
+      transform: [{ scale: withSpring(1, { damping: 15, stiffness: 320 }) }],
+    },
+  };
+};
+
+const DIGIT_ENTER = Platform.OS === "web" ? undefined : digitPop;
+
+function Kicker({ children }: { children: ReactNode }) {
+  return (
+    <Text className="mb-3 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
+      {children}
+    </Text>
+  );
+}
+
+// ── BlinkingCaret — insertion point inside the active code cell ──
+function BlinkingCaret() {
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 420, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.05, { duration: 420, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+  }, [opacity]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return <Animated.View style={[styles.caret, style]} />;
+}
+
 // ── CodeCells — split OTP digit input ─────────────────────────────
-function CodeCells({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (code: string) => void;
-}) {
-  const ref = useRef<TextInput>(null);
+export type CodeCellsHandle = {
+  focus: () => void;
+  shake: () => void;
+};
+
+const CodeCells = forwardRef<
+  CodeCellsHandle,
+  { value: string; onChange: (code: string) => void }
+>(function CodeCells({ value, onChange }, ref) {
+  const inputRef = useRef<TextInput>(null);
+  const [focused, setFocused] = useState(false);
+  const shakeX = useSharedValue(0);
+
+  // autoFocus can land before React's focus listener attaches (notably on
+  // web), so reconcile the focus state once after mount.
+  useEffect(() => {
+    if (inputRef.current?.isFocused()) setFocused(true);
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => inputRef.current?.focus(),
+    shake: () => {
+      shakeX.value = withSequence(
+        withTiming(-9, { duration: 45 }),
+        withTiming(9, { duration: 45 }),
+        withTiming(-6, { duration: 45 }),
+        withTiming(6, { duration: 45 }),
+        withTiming(0, { duration: 45 }),
+      );
+    },
+  }));
+
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeX.value }],
+  }));
+
   return (
     <Pressable
-      onPress={() => ref.current?.focus()}
+      onPress={() => inputRef.current?.focus()}
       style={{ width: "100%" }}
       accessible={false}
     >
-      <View className="flex-row gap-2.5" style={{ width: "100%" }}>
+      <Animated.View style={[styles.codeRow, shakeStyle]}>
         {Array.from({ length: CODE_LEN }).map((_, i) => {
           const ch = value[i];
-          const active = value.length === i;
+          const active = focused && value.length === i;
           return (
             <View
               key={i}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                height: 58,
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 12,
-                borderWidth: 2,
-                borderColor: active ? "#38bdf8" : ch ? "rgba(14, 165, 233, 0.3)" : "#252A35",
-                backgroundColor: active ? "rgba(14, 165, 233, 0.1)" : ch ? "#171B24" : "#11151D",
-              }}
+              style={[
+                styles.codeCell,
+                ch ? styles.codeCellFilled : null,
+                active ? styles.codeCellActive : null,
+              ]}
             >
-              <Text
-                className={`text-2xl font-bold ${ch ? "text-text-primary" : ""}`}
-              >
-                {ch ?? ""}
-              </Text>
+              {ch ? (
+                <Animated.View key={`${i}-${ch}`} entering={DIGIT_ENTER}>
+                  <Text style={styles.codeDigit}>{ch}</Text>
+                </Animated.View>
+              ) : active ? (
+                <BlinkingCaret />
+              ) : null}
             </View>
           );
         })}
-      </View>
+      </Animated.View>
       <TextInput
-        ref={ref}
+        ref={inputRef}
+        // Auto-focus on mount so the keyboard carries over seamlessly from
+        // the phone field instead of dismissing between steps.
+        autoFocus
         accessibilityLabel="Verification code"
         testID="verification-code-input"
         value={value}
         onChangeText={(t) => onChange(t.replace(/\D/g, "").slice(0, CODE_LEN))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         autoComplete="sms-otp"
         maxLength={CODE_LEN}
-        style={{ position: "absolute", opacity: 0, height: 1, width: 1, left: 0, top: 0 }}
+        style={styles.hiddenInput}
       />
     </Pressable>
   );
-}
+});
 
 // ── SignInScreen ───────────────────────────────────────────────────
 export default function SignInScreen() {
@@ -417,10 +552,18 @@ export default function SignInScreen() {
   const [loading, setLoading] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [phoneFocused, setPhoneFocused] = useState(false);
   const verifyingRef = useRef(false);
+  const phoneInputRef = useRef<TextInput>(null);
+  const codeCellsRef = useRef<CodeCellsHandle>(null);
+  // Focus the phone field only when the user navigated to it deliberately —
+  // never on cold launch, where a surprise keyboard would cover the wall.
+  const phoneWantsFocusRef = useRef(false);
+  const navDirRef = useRef<"fwd" | "back" | null>(null);
 
   const AppleButton = getAppleButtonComponent();
   const appleButtonProps = getAppleButtonProps();
+  const phoneValid = normalizePhoneNumber(phone) !== null;
 
   useEffect(() => {
     if (Platform.OS !== "ios") return;
@@ -460,35 +603,37 @@ export default function SignInScreen() {
       // loads, so we stay put instead of flashing an intermediate screen.
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const message = readErrorMessage(e);
-      setErrorMessage(message);
-      notifyError("Sign in failed", message);
+      setErrorMessage(readErrorMessage(e));
     } finally {
       setLoading(false);
     }
   };
 
   const handleSend = async () => {
+    if (loading) return;
     setErrorMessage(null);
     const n = normalizePhoneNumber(phone);
     if (!n) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setErrorMessage("Enter a valid phone number to continue.");
-      notifyError("Invalid number", "Enter a valid phone number to continue.");
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setLoading(true);
     try {
       await startVerification({ phone: n });
       setPhone(formatPhoneNumber(n));
-      setStep("code");
       setSecondsRemaining(30);
+      if (step === "code") {
+        // Resend from the code step: clear stale digits, keep typing.
+        setCode("");
+        codeCellsRef.current?.focus();
+      } else {
+        navDirRef.current = "fwd";
+        setStep("code");
+      }
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const message = readErrorMessage(e);
-      setErrorMessage(message);
-      notifyError("Could not send code", message);
+      setErrorMessage(readErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -501,7 +646,6 @@ export default function SignInScreen() {
     if (!n || c.length < CODE_LEN) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setErrorMessage("Enter the 6-digit code we sent you.");
-      notifyError("Missing code", "Enter the 6-digit code we sent you.");
       return;
     }
     if (verifyingRef.current) return;
@@ -512,18 +656,19 @@ export default function SignInScreen() {
       const result = await signIn("phone", { phone: n, code: c });
       if (!result.signingIn) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        const message =
-          "That code was invalid or expired. Request a new code and try again.";
-        setErrorMessage(message);
-        notifyError("Verification failed", message);
+        setErrorMessage(
+          "That code was invalid or expired. Request a new code and try again.",
+        );
+        setCode("");
+        codeCellsRef.current?.shake();
+        codeCellsRef.current?.focus();
       }
       // On success AuthGate routes to onboarding or home once the profile
       // loads, so we stay put instead of flashing an intermediate screen.
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const message = readErrorMessage(e);
-      setErrorMessage(message);
-      notifyError("Verification failed", message);
+      setErrorMessage(readErrorMessage(e));
+      codeCellsRef.current?.shake();
     } finally {
       verifyingRef.current = false;
       setLoading(false);
@@ -534,6 +679,24 @@ export default function SignInScreen() {
     setCode(v);
     if (errorMessage) setErrorMessage(null);
     if (v.length === CODE_LEN && step === "code") handleVerify(v);
+  };
+
+  const goToPhone = (from: "apple" | "code") => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    phoneWantsFocusRef.current = true;
+    navDirRef.current = from === "apple" ? "fwd" : "back";
+    if (from === "apple") setMethod("phone");
+    setStep("phone");
+    setCode("");
+    setErrorMessage(null);
+  };
+
+  const goToApple = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    navDirRef.current = "back";
+    setMethod("apple");
+    setCode("");
+    setErrorMessage(null);
   };
 
   const keyboardHeight = useSharedValue(0);
@@ -563,10 +726,34 @@ export default function SignInScreen() {
     () => ({ height: keyboardHeight.value }),
     [keyboardHeight],
   );
+  // Quiet the poster wall while typing so the form owns the screen.
+  const keyboardScrimStyle = useAnimatedStyle(
+    () => ({
+      opacity: interpolate(
+        keyboardHeight.value,
+        [0, 300],
+        [0, 0.5],
+        Extrapolation.CLAMP,
+      ),
+    }),
+    [keyboardHeight],
+  );
+
+  const paneEntering = !animateOnMount
+    ? undefined
+    : navDirRef.current === "fwd"
+      ? slideForward
+      : navDirRef.current === "back"
+        ? slideBack
+        : formRise;
 
   return (
     <View className="flex-1 bg-dark-bg">
       <PosterWall />
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFillObject, styles.keyboardScrim, keyboardScrimStyle]}
+      />
 
       <View className="flex-1" style={{ pointerEvents: "box-none" }}>
         <View
@@ -605,44 +792,37 @@ export default function SignInScreen() {
               </Animated.View>
 
               {errorMessage ? (
-                <View
+                <Animated.View
+                  entering={
+                    animateOnMount ? FadeInDown.duration(220) : undefined
+                  }
                   accessibilityRole="alert"
-                  className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3"
+                  className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3"
                 >
-                  <Text className="text-[13px] font-semibold text-red-300">
+                  <Text className="text-[13px] font-semibold leading-5 text-red-300">
                     {errorMessage}
                   </Text>
-                </View>
+                </Animated.View>
               ) : null}
 
               {/* ── Form ── */}
               {method === "apple" ? (
-                <Animated.View
-                  key="method-apple"
-                  entering={
-                    animateOnMount
-                      ? FadeInUp.delay(550).duration(500).springify()
-                      : undefined
-                  }
-                  exiting={animateOnMount ? FadeOutLeft.duration(200) : undefined}
-                >
-                  <Text className="mb-3 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
-                    Sign in or create account
-                  </Text>
+                <Animated.View key="method-apple" entering={paneEntering}>
+                  <Kicker>Sign in or create account</Kicker>
 
                   {AppleButton && appleButtonProps ? (
                     <View style={{ opacity: loading ? 0.6 : 1 }}>
                       <AppleButton
                         {...appleButtonProps}
-                        cornerRadius={16}
+                        cornerRadius={26}
                         onPress={loading ? () => {} : handleAppleSignIn}
-                        style={{ width: "100%", height: 54 }}
+                        style={{ width: "100%", height: 52 }}
                       />
                     </View>
                   ) : null}
 
                   <Animated.Text
-                    entering={animateOnMount ? FadeIn.delay(850).duration(400) : undefined}
+                    entering={animateOnMount ? FadeIn.delay(700).duration(400) : undefined}
                     className="mt-5 text-center text-[13px] leading-5 text-text-tertiary"
                   >
                     {loading
@@ -651,99 +831,82 @@ export default function SignInScreen() {
                   </Animated.Text>
 
                   <Pressable
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setMethod("phone");
-                      setStep("phone");
-                      setErrorMessage(null);
-                    }}
+                    onPress={() => goToPhone("apple")}
                     accessibilityRole="button"
                     accessibilityLabel="Sign in with phone number instead"
                     className="mt-3 self-center py-2 active:opacity-70"
                   >
                     <Text className="text-sm font-semibold text-text-secondary">
-                      Sign in with phone number
+                      Use phone number instead
                     </Text>
                   </Pressable>
                 </Animated.View>
               ) : step === "phone" ? (
-                <Animated.View
-                  key="step-phone"
-                  entering={
-                    animateOnMount
-                      ? FadeInUp.delay(550).duration(500).springify()
-                      : undefined
-                  }
-                  exiting={animateOnMount ? FadeOutLeft.duration(200) : undefined}
-                >
-                  <Text className="mb-3 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
-                    Sign in or create account
-                  </Text>
+                <Animated.View key="step-phone" entering={paneEntering}>
+                  <Kicker>Sign in or create account</Kicker>
 
-                  <View className="overflow-hidden rounded-2xl border border-dark-border bg-dark-card">
-                    <View className="flex-row items-center">
-                      <View className="items-center justify-center border-r border-dark-border px-4 py-4">
-                        <Text className="text-base font-semibold text-text-tertiary">
-                          +1
-                        </Text>
-                      </View>
-                      <TextInput
-                        value={phone}
-                        onChangeText={(t) => {
-                          setPhone(formatPhoneNumber(t));
-                          if (errorMessage) setErrorMessage(null);
-                        }}
-                        accessibilityLabel="Phone number"
-                        placeholder="(555) 123-4567"
-                        placeholderTextColor="#3A3F4D"
-                        keyboardType="phone-pad"
-                        textContentType="telephoneNumber"
-                        autoComplete="tel"
-                        className="flex-1 px-4 py-4 text-[17px] text-text-primary"
-                        onSubmitEditing={handleSend}
-                      />
+                  <GlassSurface
+                    radius={16}
+                    variant="surface"
+                    borderColor={
+                      phoneFocused
+                        ? "rgba(56,189,248,0.55)"
+                        : "rgba(255,255,255,0.12)"
+                    }
+                    fallbackColor="rgba(18,22,30,0.92)"
+                    style={[
+                      styles.phoneField,
+                      phoneFocused ? styles.phoneFieldFocused : null,
+                    ]}
+                    contentStyle={styles.phoneFieldContent}
+                  >
+                    <View style={styles.dialChip}>
+                      <Text className="text-[17px] font-semibold text-text-secondary">
+                        +1
+                      </Text>
                     </View>
+                    <TextInput
+                      ref={phoneInputRef}
+                      autoFocus={phoneWantsFocusRef.current}
+                      value={phone}
+                      onChangeText={(t) => {
+                        setPhone(formatPhoneNumber(t));
+                        if (errorMessage) setErrorMessage(null);
+                      }}
+                      onFocus={() => setPhoneFocused(true)}
+                      onBlur={() => setPhoneFocused(false)}
+                      accessibilityLabel="Phone number"
+                      placeholder="(555) 123-4567"
+                      placeholderTextColor="#414757"
+                      keyboardType="phone-pad"
+                      textContentType="telephoneNumber"
+                      autoComplete="tel"
+                      selectionColor="#38bdf8"
+                      style={styles.phoneInput}
+                      onSubmitEditing={handleSend}
+                    />
+                  </GlassSurface>
+
+                  <View className="mt-4">
+                    <PrimaryButton
+                      label={loading ? "Sending code…" : "Continue"}
+                      accessibilityLabel="Continue with phone number"
+                      onPress={handleSend}
+                      disabled={!phoneValid}
+                      loading={loading}
+                    />
                   </View>
 
-                  <Pressable
-                    onPress={loading ? undefined : handleSend}
-                    disabled={loading}
-                    accessibilityRole="button"
-                    accessibilityLabel="Continue with phone number"
-                    accessibilityState={{ disabled: loading, busy: loading }}
-                    className={`mt-5 flex-row items-center justify-center rounded-2xl bg-brand-500 py-4 active:bg-brand-600 ${
-                      loading ? "opacity-60" : ""
-                    }`}
-                    style={{
-                      boxShadow: "0 6px 20px rgba(14,165,233,0.35)",
-                    }}
-                  >
-                    {loading && (
-                      <ActivityIndicator
-                        color="#fff"
-                        style={{ marginRight: 8 }}
-                      />
-                    )}
-                    <Text className="text-base font-bold text-white">
-                      {loading ? "Sending code…" : "Continue"}
-                    </Text>
-                  </Pressable>
-
                   <Animated.Text
-                    entering={animateOnMount ? FadeIn.delay(850).duration(400) : undefined}
-                    className="mt-5 text-center text-[13px] leading-5 text-text-tertiary"
+                    entering={animateOnMount ? FadeIn.delay(250).duration(400) : undefined}
+                    className="mt-4 text-center text-[13px] leading-5 text-text-tertiary"
                   >
-                    We'll text you a one-time code.
+                    We&apos;ll text you a one-time code.
                   </Animated.Text>
 
                   {appleAvailable ? (
                     <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        setMethod("apple");
-                        setCode("");
-                        setErrorMessage(null);
-                      }}
+                      onPress={goToApple}
                       accessibilityRole="button"
                       accessibilityLabel="Sign in with Apple instead"
                       className="mt-3 self-center py-2 active:opacity-70"
@@ -755,77 +918,45 @@ export default function SignInScreen() {
                   ) : null}
                 </Animated.View>
               ) : (
-                <Animated.View
-                  key="step-code"
-                  entering={
-                    animateOnMount ? SlideInRight.duration(350).springify() : undefined
-                  }
-                >
-                  <Text className="mb-1 text-xs font-bold uppercase tracking-[3px] text-text-tertiary">
-                    Verification
-                  </Text>
-                  <Text className="mb-5 text-[15px] text-text-secondary">
-                    Code sent to{" "}
+                <Animated.View key="step-code" entering={paneEntering}>
+                  <Kicker>Enter your code</Kicker>
+                  <Text className="mb-5 text-[15px] leading-5 text-text-secondary">
+                    Sent to{" "}
                     <Text className="font-semibold text-text-primary">
                       +1 {phone}
                     </Text>
                   </Text>
 
-                  <CodeCells value={code} onChange={onCodeChange} />
+                  <CodeCells
+                    ref={codeCellsRef}
+                    value={code}
+                    onChange={onCodeChange}
+                  />
 
-                  <Pressable
-                    onPress={loading ? undefined : () => handleVerify()}
-                    disabled={loading || code.length < CODE_LEN}
-                    accessibilityRole="button"
-                    accessibilityLabel="Verify phone number"
-                    accessibilityState={{
-                      disabled: loading || code.length < CODE_LEN,
-                      busy: loading,
-                    }}
-                    className={`mt-5 flex-row items-center justify-center rounded-2xl bg-brand-500 py-4 active:bg-brand-600 ${
-                      loading || code.length < CODE_LEN ? "opacity-40" : ""
-                    }`}
-                    style={{
-                      boxShadow:
-                        code.length === CODE_LEN
-                          ? "0 6px 20px rgba(14,165,233,0.35)"
-                          : "0 6px 20px rgba(14,165,233,0)",
-                    }}
-                  >
-                    {loading && (
-                      <ActivityIndicator
-                        color="#fff"
-                        style={{ marginRight: 8 }}
-                      />
-                    )}
-                    <Text className="text-base font-bold text-white">
-                      {loading ? "Verifying…" : "Verify"}
-                    </Text>
-                  </Pressable>
+                  <View className="mt-5">
+                    <PrimaryButton
+                      label={loading ? "Verifying…" : "Verify"}
+                      accessibilityLabel="Verify phone number"
+                      onPress={() => handleVerify()}
+                      disabled={code.length < CODE_LEN}
+                      loading={loading}
+                    />
+                  </View>
 
                   <View className="mt-4 flex-row items-center justify-between">
                     <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(
-                          Haptics.ImpactFeedbackStyle.Light,
-                        );
-                        setStep("phone");
-                        setCode("");
-                        setErrorMessage(null);
-                      }}
+                      onPress={() => goToPhone("code")}
                       accessibilityRole="button"
                       accessibilityLabel="Use a different phone number"
                       className="py-2 pr-4 active:opacity-70"
                     >
                       <Text className="text-sm font-semibold text-text-secondary">
-                        ← Different number
+                        Different number
                       </Text>
                     </Pressable>
 
                     <Pressable
-                      onPress={
-                        secondsRemaining > 0 ? undefined : handleSend
-                      }
+                      onPress={secondsRemaining > 0 ? undefined : handleSend}
                       disabled={secondsRemaining > 0}
                       accessibilityRole="button"
                       accessibilityLabel={
@@ -862,3 +993,83 @@ export default function SignInScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  caret: {
+    backgroundColor: "#38bdf8",
+    borderRadius: 1,
+    height: 22,
+    width: 2,
+  },
+  codeCell: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.09)",
+    borderCurve: "continuous",
+    borderRadius: 14,
+    borderWidth: 1.5,
+    flex: 1,
+    height: 56,
+    justifyContent: "center",
+    minWidth: 0,
+  },
+  codeCellActive: {
+    backgroundColor: "rgba(14,165,233,0.09)",
+    borderColor: "#38bdf8",
+    ...brandGlow(0.3, 10),
+  },
+  codeCellFilled: {
+    backgroundColor: "rgba(22,26,34,0.92)",
+    borderColor: "rgba(125,211,252,0.3)",
+  },
+  codeDigit: {
+    color: "#F1F3F7",
+    fontSize: 24,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+  },
+  codeRow: {
+    flexDirection: "row",
+    gap: 9,
+    width: "100%",
+  },
+  dialChip: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRightColor: "rgba(255,255,255,0.12)",
+    borderRightWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  hiddenInput: {
+    height: 1,
+    left: 0,
+    opacity: 0,
+    position: "absolute",
+    top: 0,
+    width: 1,
+  },
+  keyboardScrim: {
+    backgroundColor: "#0D0F14",
+    opacity: 0,
+  },
+  phoneField: {
+    borderWidth: 1,
+  },
+  phoneFieldFocused: {
+    ...brandGlow(0.25, 12),
+  },
+  phoneFieldContent: {
+    alignItems: "center",
+    flexDirection: "row",
+  },
+  phoneInput: {
+    color: "#F1F3F7",
+    flex: 1,
+    fontSize: 17,
+    height: 56,
+    letterSpacing: 0.3,
+    paddingHorizontal: 16,
+  },
+});
