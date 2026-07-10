@@ -183,7 +183,13 @@ export const UserRow = memo(function UserRow({
                 isFollowing || isRequested ? "text-text-primary" : "text-white"
               }`}
             >
-              {isFollowing ? "Following" : isRequested ? "Requested" : "Follow"}
+              {isFollowing
+                ? "Following"
+                : isRequested
+                  ? "Requested"
+                  : followsYou
+                    ? "Follow back"
+                    : "Follow"}
             </Text>
           </Pressable>
         ) : null}

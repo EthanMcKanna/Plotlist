@@ -74,7 +74,7 @@ describe("home section plan", () => {
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
         },
       }).slice(2, 6),
-    ).toEqual(["fresh", "for-you", "heat", "critics"]);
+    ).toEqual(["fresh", "for-you", "taste-rails", "heat"]);
   });
 
   it("keeps discovery rails available for cold-start or signed-out viewers", () => {
@@ -271,11 +271,12 @@ describe("home section plan", () => {
         },
       });
 
-    expect(plan.slice(0, 6)).toEqual([
+    expect(plan.slice(0, 7)).toEqual([
       "continue-watching",
       "tonight",
       "fresh",
       "for-you",
+      "taste-rails",
       "heat",
       "critics",
     ]);
@@ -304,7 +305,7 @@ describe("home section plan", () => {
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
         },
       }).slice(2, 7),
-    ).toEqual(["fresh", "friends", "for-you", "heat", "critics"]);
+    ).toEqual(["fresh", "friends", "for-you", "taste-rails", "heat"]);
 
     expect(
       kinds({
@@ -448,6 +449,6 @@ describe("home section plan", () => {
           fresh: { itemCount: 5, currentCount: 5, explicitCurrentCount: 5 },
         },
       }).slice(2, 6),
-    ).toEqual(["fresh", "for-you", "heat", "critics"]);
+    ).toEqual(["fresh", "for-you", "taste-rails", "heat"]);
   });
 });

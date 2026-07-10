@@ -292,6 +292,7 @@ export function buildHomePreviewData(
     fresh,
     critics,
     quick,
+    tasteRails: [],
     streamingRooms,
     streamingProviderKeys: [],
     catalogDiagnostics: {
@@ -306,6 +307,7 @@ export function buildHomePreviewData(
       critics: false,
       quick: false,
       rooms: false,
+      tasteRails: false,
     },
     refresh: async () => {},
     contactMatches: [],

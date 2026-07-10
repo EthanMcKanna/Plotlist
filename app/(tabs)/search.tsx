@@ -8,8 +8,6 @@ import {
 } from "react";
 import {
   Alert,
-  Linking,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -18,15 +16,13 @@ import {
 } from "react-native";
 import { FlashList } from "../../components/FlashList";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction, useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
+import { useAction, useAuth, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInDown } from "react-native-reanimated";
 
-import { ContactInviteRow } from "../../components/ContactInviteRow";
-import { ContactsSyncCard } from "../../components/ContactsSyncCard";
 import { EmptyState } from "../../components/EmptyState";
+import { PeopleDiscovery } from "../../components/PeopleDiscovery";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { Screen } from "../../components/Screen";
 import {
@@ -35,12 +31,7 @@ import {
 } from "../../components/SearchCommandCenter";
 import { SearchDiscoveryRail } from "../../components/SearchDiscoveryRail";
 import { SearchResultRow } from "../../components/SearchResultRow";
-import { UserRow } from "../../components/UserRow";
 import { api } from "../../lib/plotlist/api";
-import { getContactSyncAlertCopy } from "../../lib/contactSync";
-import { loadDeviceContacts } from "../../lib/deviceContacts";
-import { buildInviteMessage, buildSmsInviteUrl } from "../../lib/invite";
-import { setContactsSyncDismissed } from "../../lib/preferences";
 import {
   SEARCH_DISCOVER_SECTIONS,
   buildSearchDiscoverSections,
@@ -59,9 +50,37 @@ import {
 } from "../../lib/searchExperience";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import { queryClient } from "../../lib/queryClient";
+import { FACET_DEFS } from "../../lib/plotlist/facets";
 
 const SHOW_QUERY_MIN_LENGTH = 3;
-const PEOPLE_QUERY_MIN_LENGTH = 2;
+const VIBE_QUERY_MIN_LENGTH = 8;
+
+// Canned prompts that teach what vibe search understands; tapping one runs it.
+const VIBE_EXAMPLE_PROMPTS = [
+  "cozy mystery in a small town",
+  "mind-bending sci-fi that rewards theories",
+  "funny but heartfelt, about grief",
+  "high-stakes kitchen chaos",
+  "slow-burn romance with great chemistry",
+  "dark crime saga with a magnetic antihero",
+];
+
+// Compact browse entry: a curated slice of the facet taxonomy. The full
+// catalog lives at /facet/[key].
+const VIBE_BROWSE_FACET_KEYS = [
+  "cozy-comfort",
+  "prestige-antihero",
+  "mind-bending",
+  "cozy-crime",
+  "feel-good",
+  "true-crime-doc",
+  "k-drama",
+  "high-fantasy",
+  "nordic-noir",
+  "dark-comedy",
+  "gentle-baking",
+  "space-opera",
+];
 
 const DISCOVER_FETCH_LIMIT = 18;
 const DISCOVER_SKELETONS = [
@@ -218,6 +237,11 @@ export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const trimmedQuery = getTrimmedSearchQuery(query);
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [vibeResults, setVibeResults] = useState<any[]>([]);
+  const [vibeResultsQuery, setVibeResultsQuery] = useState("");
+  const [isSearchingVibe, setIsSearchingVibe] = useState(false);
+  const [vibeError, setVibeError] = useState<string | null>(null);
+  const [vibeRetryKey, setVibeRetryKey] = useState(0);
   const [catalogResults, setCatalogResults] = useState<any[]>([]);
   const [catalogResultsQuery, setCatalogResultsQuery] = useState("");
   const [isSearchingCatalog, setIsSearchingCatalog] = useState(false);
@@ -226,13 +250,6 @@ export default function SearchScreen() {
     message: string;
   } | null>(null);
   const [catalogRetryKey, setCatalogRetryKey] = useState(0);
-  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
-  const [invitingContactId, setInvitingContactId] = useState<string | null>(
-    null,
-  );
-  const [devicePhoneLookup, setDevicePhoneLookup] = useState<
-    Record<string, string>
-  >({});
   const [isFocused, setIsFocused] = useState(false);
   const [sortKey, setSortKey] = useState<CatalogSortKey>("match");
   const deferredCatalogResults = useDeferredValue(catalogResults);
@@ -297,6 +314,7 @@ export default function SearchScreen() {
 
   useEffect(() => {
     if (modeParam === "people") setMode("people");
+    else if (modeParam === "vibe") setMode("vibe");
     else if (modeParam === "shows") setMode("shows");
   }, [modeParam]);
 
@@ -309,74 +327,12 @@ export default function SearchScreen() {
     return () => clearTimeout(handle);
   }, [focusParam]);
 
-  /* ── Queries ───────────────────────────────────────────────── */
-
-  const peopleResults =
-    useQuery(
-      api.users.search,
-      hasProfile &&
-        mode === "people" &&
-        trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH
-        ? { text: trimmedQuery, limit: 12 }
-        : "skip",
-    ) ?? [];
-
-  const contactStatus =
-    useQuery(
-      api.contacts.getStatus,
-      hasProfile && mode === "people" ? {} : "skip",
-    ) ?? null;
-
-  const contactMatches =
-    useQuery(
-      api.contacts.getMatches,
-      hasProfile &&
-        mode === "people" &&
-        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH &&
-        contactStatus?.hasSynced
-        ? { limit: 6 }
-        : "skip",
-    ) ?? [];
-
-  const inviteCandidates =
-    useQuery(
-      api.contacts.getInviteCandidates,
-      hasProfile &&
-        mode === "people" &&
-        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH &&
-        contactStatus?.hasSynced
-        ? { limit: 10 }
-        : "skip",
-    ) ?? [];
-
-  const searchContactCandidates =
-    useQuery(
-      api.contacts.searchInviteCandidates,
-      hasProfile &&
-        mode === "people" &&
-        trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH &&
-        contactStatus?.hasSynced
-        ? { text: trimmedQuery, limit: 10 }
-        : "skip",
-    ) ?? [];
-
-  const suggestedPeople =
-    useQuery(
-      api.users.suggested,
-      hasProfile &&
-        mode === "people" &&
-        trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH
-        ? { limit: 6 }
-        : "skip",
-    ) ?? [];
-
   /* ── Actions / Mutations ───────────────────────────────────── */
 
   const searchCatalog = useAction(api.shows.searchCatalog);
+  const searchByVibe = useAction(api.embeddings.searchByVibe);
   const getTmdbList = useAction(api.shows.getTmdbList);
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
-  const syncContacts = useAction(api.contacts.syncSnapshot);
-  const sendInvite = useMutation(api.contacts.sendInvite);
 
   const [discoverSections, setDiscoverSections] = useState<
     SearchDiscoverSection<any>[]
@@ -435,6 +391,59 @@ export default function SearchScreen() {
     const handle = setTimeout(() => setDebouncedQuery(trimmedQuery), 250);
     return () => clearTimeout(handle);
   }, [trimmedQuery]);
+
+  /* ── Vibe (semantic) search ─────────────────────────────────── */
+
+  useEffect(() => {
+    let active = true;
+
+    if (
+      mode !== "vibe" ||
+      !isAuthenticated ||
+      debouncedQuery.length < VIBE_QUERY_MIN_LENGTH
+    ) {
+      setIsSearchingVibe(false);
+      setVibeError(null);
+      return;
+    }
+
+    setIsSearchingVibe(true);
+    setVibeError(null);
+    const requestQuery = debouncedQuery;
+
+    searchByVibe({ query: requestQuery, limit: 20 })
+      .then((results) => {
+        if (active) {
+          setVibeResults(Array.isArray(results) ? results : []);
+          setVibeResultsQuery(requestQuery);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setVibeError(
+            error instanceof Error
+              ? error.message
+              : "Vibe search failed. Please try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIsSearchingVibe(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [mode, searchByVibe, debouncedQuery, isAuthenticated, vibeRetryKey]);
+
+  useEffect(() => {
+    if (mode !== "vibe" || trimmedQuery.length >= VIBE_QUERY_MIN_LENGTH) {
+      return;
+    }
+    setVibeResults([]);
+    setVibeResultsQuery("");
+    setVibeError(null);
+  }, [mode, trimmedQuery]);
 
   useEffect(() => {
     if (mode !== "shows" || trimmedQuery.length >= SHOW_QUERY_MIN_LENGTH) {
@@ -584,68 +593,26 @@ export default function SearchScreen() {
     [ingestFromCatalog, isAuthenticated, router],
   );
 
-  const handleSyncContacts = useCallback(async () => {
-    try {
-      setIsSyncingContacts(true);
-      const entries = await loadDeviceContacts();
-      setDevicePhoneLookup(
-        Object.fromEntries(entries.map((e) => [e.sourceRecordId, e.phone])),
-      );
-      const result = await syncContacts({ entries });
-      await setContactsSyncDismissed(false);
-      const copy = getContactSyncAlertCopy(result);
-      Alert.alert(copy.title, copy.message);
-    } catch (error) {
-      Alert.alert("Could not sync contacts", String(error));
-    } finally {
-      setIsSyncingContacts(false);
+  // Vibe results are always local shows (they came from our vector index),
+  // so navigation can seed the show query and push directly — no ingest.
+  const handlePressVibeResult = useCallback((item: any) => {
+    const show = item?.show;
+    const showId = show?._id ?? show?.id ?? item?._id;
+    if (!showId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const showQueryKey = ["plotlist-rpc", "query", "shows:get", { showId }];
+    if (show && !queryClient.getQueryData(showQueryKey)) {
+      queryClient.setQueryData(showQueryKey, { ...show, extendedDetails: null });
+      void queryClient.invalidateQueries({ queryKey: showQueryKey });
     }
-  }, [syncContacts]);
+    guardedPush(`/show/${showId}`);
+  }, []);
 
-  const handleInvite = useCallback(
-    async (candidate: {
-      entryId: string;
-      sourceRecordId: string | null;
-      displayName: string;
-    }) => {
-      try {
-        let phone = candidate.sourceRecordId
-          ? devicePhoneLookup[candidate.sourceRecordId]
-          : undefined;
-        if (!phone) {
-          const entries = await loadDeviceContacts();
-          const nextLookup = Object.fromEntries(
-            entries.map((e) => [e.sourceRecordId, e.phone]),
-          );
-          setDevicePhoneLookup(nextLookup);
-          phone = candidate.sourceRecordId
-            ? nextLookup[candidate.sourceRecordId]
-            : undefined;
-        }
-        if (!phone) {
-          throw new Error("Resync contacts before inviting this person");
-        }
-        setInvitingContactId(
-          candidate.sourceRecordId ?? candidate.displayName,
-        );
-        const smsUrl = buildSmsInviteUrl({
-          phone,
-          message: buildInviteMessage(),
-          platform: Platform.OS,
-        });
-        if (!(await Linking.canOpenURL(smsUrl))) {
-          throw new Error("SMS is not available on this device");
-        }
-        await Linking.openURL(smsUrl);
-        await sendInvite({ entryId: candidate.entryId as any });
-      } catch (error) {
-        Alert.alert("Invite failed", String(error));
-      } finally {
-        setInvitingContactId(null);
-      }
-    },
-    [devicePhoneLookup, sendInvite],
-  );
+  const handleVibePrompt = useCallback((prompt: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setQuery(prompt);
+    setDebouncedQuery(prompt);
+  }, []);
 
   const handleClear = useCallback(() => {
     setQuery("");
@@ -653,6 +620,9 @@ export default function SearchScreen() {
     setCatalogResults([]);
     setCatalogResultsQuery("");
     setCatalogError(null);
+    setVibeResults([]);
+    setVibeResultsQuery("");
+    setVibeError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     inputRef.current?.focus();
   }, []);
@@ -682,26 +652,6 @@ export default function SearchScreen() {
     [handleAddFromCatalog],
   );
 
-  const renderUserItem = useCallback(
-    ({ item }: { item: any }) => (
-      <View className="mb-2">
-        <UserRow
-          userId={item.user._id}
-          displayName={item.user.displayName ?? item.user.name}
-          username={item.user.username}
-          avatarUrl={item.avatarUrl}
-          isFollowing={item.isFollowing}
-          followsYou={item.followsYou}
-          isMutualFollow={item.isMutualFollow}
-          mutualCount={item.mutualCount}
-          inContacts={item.inContacts}
-          sharedShowCount={item.sharedShowCount}
-        />
-      </View>
-    ),
-    [],
-  );
-
   /* ── JSX ───────────────────────────────────────────────────── */
 
   return (
@@ -713,7 +663,7 @@ export default function SearchScreen() {
             query={query}
             inputRef={inputRef}
             isFocused={isFocused}
-            isBusy={catalogViewState.isBusy}
+            isBusy={catalogViewState.isBusy || isSearchingVibe}
             onModeChange={(nextMode) => {
               setMode(nextMode);
               setQuery("");
@@ -721,6 +671,9 @@ export default function SearchScreen() {
               setCatalogResults([]);
               setCatalogResultsQuery("");
               setCatalogError(null);
+              setVibeResults([]);
+              setVibeResultsQuery("");
+              setVibeError(null);
             }}
             onQueryChange={setQuery}
             onFocus={() => setIsFocused(true)}
@@ -870,160 +823,120 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* ── People: Searching ──────────────────────────────── */}
-        {mode === "people" &&
-          trimmedQuery.length >= PEOPLE_QUERY_MIN_LENGTH && (
-          <View className="mt-4 px-5 gap-6">
-            <View>
-              <SectionLine
-                label="People"
-                count={
-                  peopleResults.length > 0 ? peopleResults.length : undefined
-                }
+        {/* ── Vibe search ────────────────────────────────────── */}
+        {mode === "vibe" && (
+          <View className="mt-4 px-5">
+            {!isAuthenticated ? (
+              <EmptyState
+                title="Sign in to search by vibe"
+                description="Describe a mood or premise and we'll find shows that match."
               />
-
-              {peopleResults.length > 0 ? (
-                <Animated.View entering={FadeInDown.duration(300)}>
-                  <FlashList
-                    data={peopleResults}
-                    renderItem={renderUserItem}
-                    keyExtractor={(item: any) => item.user._id}
-                    estimatedItemSize={104}
-                    contentContainerStyle={listContentStyle}
-                    keyboardShouldPersistTaps="always"
-                    scrollEnabled={false}
-                  />
-                </Animated.View>
-              ) : searchContactCandidates.length === 0 ? (
-                <EmptyState
-                  title="No people found"
-                  description="Try searching a different name or username."
-                />
-              ) : null}
-            </View>
-
-            {searchContactCandidates.length > 0 && (
-              <Animated.View entering={FadeInDown.delay(100).duration(300)}>
-                <SectionLine
-                  label="Invite from Contacts"
-                  icon="paper-plane-outline"
-                  count={searchContactCandidates.length}
-                />
-                <View className="gap-3">
-                  {searchContactCandidates.map((candidate: any) => (
-                    <ContactInviteRow
-                      key={candidate.entryId}
-                      displayName={candidate.displayName}
-                      invitedAt={candidate.invitedAt}
-                      disabled={
-                        invitingContactId ===
-                        (candidate.sourceRecordId ?? candidate.displayName)
-                      }
-                      onInvite={() => handleInvite(candidate)}
-                    />
+            ) : trimmedQuery.length < VIBE_QUERY_MIN_LENGTH ? (
+              <View>
+                <SectionLine label="Try a vibe" icon="sparkles-outline" />
+                <View className="mb-5 flex-row flex-wrap gap-2">
+                  {VIBE_EXAMPLE_PROMPTS.map((prompt) => (
+                    <Pressable
+                      key={prompt}
+                      onPress={() => handleVibePrompt(prompt)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Search for ${prompt}`}
+                      className="rounded-full px-3 py-2"
+                      style={styles.vibeChip}
+                    >
+                      <Text className="text-[13px] font-semibold text-text-secondary">
+                        “{prompt}”
+                      </Text>
+                    </Pressable>
                   ))}
                 </View>
-              </Animated.View>
+                <SectionLine label="Browse categories" icon="albums-outline" />
+                <View className="flex-row flex-wrap gap-2">
+                  {VIBE_BROWSE_FACET_KEYS.map((facetKey) => {
+                    const facet = FACET_DEFS.find(
+                      (candidate) => candidate.key === facetKey,
+                    );
+                    if (!facet) return null;
+                    return (
+                      <Pressable
+                        key={facet.key}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          guardedPush(`/facet/${facet.key}`);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Browse ${facet.title}`}
+                        className="rounded-full px-3 py-2"
+                        style={styles.facetChip}
+                      >
+                        <Text className="text-[13px] font-semibold" style={{ color: "#38BDF8" }}>
+                          {facet.title}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : (
+              <View>
+                <SectionLine
+                  label="Vibe matches"
+                  count={
+                    vibeResults.length > 0 && vibeResultsQuery === debouncedQuery
+                      ? vibeResults.length
+                      : undefined
+                  }
+                />
+                {vibeError ? (
+                  <SearchErrorCard
+                    title="Vibe search stalled"
+                    description={vibeError}
+                    onRetry={() => {
+                      setVibeRetryKey((value) => value + 1);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                  />
+                ) : isSearchingVibe && vibeResults.length === 0 ? (
+                  <SearchLoadingRows />
+                ) : vibeResults.length > 0 ? (
+                  <View style={{ opacity: isSearchingVibe ? 0.6 : 1 }}>
+                    <FlashList
+                      data={vibeResults}
+                      renderItem={({ item }: { item: any }) => (
+                        <View>
+                          <SearchResultRow
+                            title={item.show?.title ?? "Untitled"}
+                            year={item.show?.year}
+                            overview={item.show?.overview}
+                            posterUrl={item.show?.posterUrl}
+                            actionLabel="View"
+                            onPress={() => handlePressVibeResult(item)}
+                          />
+                        </View>
+                      )}
+                      keyExtractor={(item: any) => String(item._id ?? item.show?._id)}
+                      estimatedItemSize={132}
+                      contentContainerStyle={listContentStyle}
+                      keyboardShouldPersistTaps="always"
+                      scrollEnabled={false}
+                    />
+                  </View>
+                ) : vibeResultsQuery === debouncedQuery && !isSearchingVibe ? (
+                  <EmptyState
+                    title="No matches for that vibe"
+                    description="Try describing it differently — mood, plot, or era all work."
+                  />
+                ) : (
+                  <SearchLoadingRows />
+                )}
+              </View>
             )}
           </View>
         )}
 
-        {/* ── People: Idle ───────────────────────────────────── */}
-        {mode === "people" && trimmedQuery.length < PEOPLE_QUERY_MIN_LENGTH && (
-          <View className="mt-4 px-5 gap-6">
-            <ContactsSyncCard
-              title={
-                contactStatus?.hasSynced
-                  ? "Contacts connected"
-                  : "Find your friends"
-              }
-              description="Use your address book to surface existing Plotlist users and invite people who aren't here yet."
-              buttonLabel={
-                contactStatus?.hasSynced ? "Resync contacts" : "Sync contacts"
-              }
-              onPress={handleSyncContacts}
-              loading={isSyncingContacts}
-              meta={
-                contactStatus?.hasSynced
-                  ? `${contactStatus.matchedCount} matches \u00b7 ${contactStatus.inviteCount} invite-ready`
-                  : null
-              }
-            />
-
-            {contactMatches.length > 0 && (
-              <View>
-                <SectionLine label="From Your Contacts" icon="people" />
-                <View className="gap-3">
-                  {contactMatches.map((item: any) => (
-                    <UserRow
-                      key={item.user._id}
-                      userId={item.user._id}
-                      displayName={item.user.displayName ?? item.user.name}
-                      username={item.user.username}
-                      avatarUrl={item.avatarUrl}
-                      isFollowing={item.isFollowing}
-                      followsYou={item.followsYou}
-                      isMutualFollow={item.isMutualFollow}
-                      mutualCount={item.mutualCount}
-                      inContacts={item.inContacts}
-                      sharedShowCount={item.sharedShowCount}
-                    />
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {inviteCandidates.length > 0 && (
-              <View>
-                <SectionLine
-                  label="Invite Contacts"
-                  icon="paper-plane-outline"
-                />
-                <View className="gap-3">
-                  {inviteCandidates.map((candidate: any) => (
-                    <ContactInviteRow
-                      key={candidate.entryId}
-                      displayName={candidate.displayName}
-                      invitedAt={candidate.invitedAt}
-                      disabled={
-                        invitingContactId ===
-                        (candidate.sourceRecordId ?? candidate.displayName)
-                      }
-                      onInvite={() => handleInvite(candidate)}
-                    />
-                  ))}
-                </View>
-              </View>
-            )}
-
-            <View>
-              <SectionLine label="People You May Know" icon="sparkles" />
-              {suggestedPeople.length > 0 ? (
-                <View className="gap-3">
-                  {suggestedPeople.map((item: any) => (
-                    <UserRow
-                      key={item.user._id}
-                      userId={item.user._id}
-                      displayName={item.user.displayName ?? item.user.name}
-                      username={item.user.username}
-                      avatarUrl={item.avatarUrl}
-                      isFollowing={item.isFollowing}
-                      followsYou={item.followsYou}
-                      isMutualFollow={item.isMutualFollow}
-                      mutualCount={item.mutualCount}
-                      inContacts={item.inContacts}
-                      sharedShowCount={item.sharedShowCount}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <EmptyState
-                  title="No suggestions yet"
-                  description="Sync contacts or search by name or username."
-                />
-              )}
-            </View>
-          </View>
+        {/* ── People ─────────────────────────────────────────── */}
+        {mode === "people" && (
+          <PeopleDiscovery query={trimmedQuery} hasProfile={hasProfile} />
         )}
       </View>
     </Screen>
@@ -1066,5 +979,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minHeight: 44,
     paddingHorizontal: 14,
+  },
+  facetChip: {
+    backgroundColor: "rgba(56,189,248,0.12)",
+    borderColor: "rgba(56,189,248,0.4)",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  vibeChip: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.1)",
+    borderWidth: StyleSheet.hairlineWidth,
   },
 });

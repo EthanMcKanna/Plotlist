@@ -160,6 +160,9 @@ export const api = {
     getSimilarShows: ref("action", "embeddings:getSimilarShows"),
     getShowTasteSocialProof: ref("action", "embeddings:getShowTasteSocialProof"),
     getProfileTasteExperience: ref("action", "embeddings:getProfileTasteExperience"),
+    searchByVibe: ref("action", "embeddings:searchByVibe"),
+    getFacetBrowse: ref("action", "embeddings:getFacetBrowse"),
+    getFacetShows: ref("action", "embeddings:getFacetShows"),
   },
   releaseCalendar: {
     refreshForMe: ref("action", "releaseCalendar:refreshForMe"),

@@ -87,7 +87,7 @@ export function getCatalogSearchViewState({
   resultsQuery,
   hasError,
 }: {
-  mode: "shows" | "people";
+  mode: "shows" | "vibe" | "people";
   query: string;
   debouncedQuery: string;
   minLength: number;

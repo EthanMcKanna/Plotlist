@@ -200,6 +200,7 @@ describe("home preview data", () => {
       critics: false,
       quick: false,
       rooms: false,
+      tasteRails: false,
     });
     expect(data.getCatalogForKey(data.heroSlides[0].key)?.title).toBe(
       data.heroSlides[0].title,

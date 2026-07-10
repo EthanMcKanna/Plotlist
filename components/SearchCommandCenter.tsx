@@ -11,10 +11,11 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { SegmentedControl } from "./SegmentedControl";
 
-export type SearchMode = "shows" | "people";
+export type SearchMode = "shows" | "vibe" | "people";
 
 const modeOptions = [
   { value: "shows", label: "Shows" },
+  { value: "vibe", label: "Vibe" },
   { value: "people", label: "People" },
 ];
 
@@ -23,6 +24,13 @@ export function getSearchCommandCenterCopy(mode: SearchMode) {
     return {
       accessibilityLabel: "Search people",
       placeholder: "People or @username",
+    };
+  }
+
+  if (mode === "vibe") {
+    return {
+      accessibilityLabel: "Search shows by vibe",
+      placeholder: "Describe a mood, plot, or feeling…",
     };
   }
 

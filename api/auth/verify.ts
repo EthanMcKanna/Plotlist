@@ -6,6 +6,7 @@ import { db } from "../_lib/db";
 import { ApiError } from "../_lib/errors";
 import { withJsonRoute, json } from "../_lib/http";
 import { ensurePhoneIdentity, createSession } from "../_lib/auth";
+import { linkJoinedUserToContacts } from "../_lib/contacts";
 import { hashPhoneNumber, matchesAppReviewBypass, normalizePhoneNumber } from "../_lib/phone";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "../_lib/rate-limit";
 import { setSessionCookies } from "../_lib/session-cookies";
@@ -59,6 +60,15 @@ export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
 
   const user = await upsertPhoneUser(normalizedPhone);
   await ensurePhoneIdentity(user.id, phoneHash);
+
+  // The join-time half of contact matching: link this number into every
+  // synced address book that contains it and alert those owners. Never
+  // blocks sign-in — matching is best-effort.
+  try {
+    await linkJoinedUserToContacts(user);
+  } catch (error) {
+    console.warn("[contacts] linking joined user to contact books failed", error);
+  }
 
   const session = await createSession(user.id);
   setSessionCookies(res, session);

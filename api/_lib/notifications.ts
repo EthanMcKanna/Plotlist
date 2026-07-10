@@ -14,6 +14,7 @@ import {
 } from "../../db/schema";
 import {
   buildCommentNotificationContent,
+  buildContactJoinedNotificationContent,
   buildEpisodeNotificationContent,
   buildFollowAcceptedNotificationContent,
   buildFollowNotificationContent,
@@ -406,6 +407,38 @@ export async function notifyFollow(actor: typeof users.$inferSelect, followeeId:
     ]);
   } catch (error) {
     console.warn("[notifications] follow notification failed", error);
+  }
+}
+
+// One notification per address-book owner when someone in their contacts
+// joins Plotlist. The dedupe key is per (owner, joiner) pair with no time
+// component, so an owner hears about a given joiner at most once ever —
+// re-verifying a phone or re-attaching a number can't re-fire it.
+export async function notifyContactsUserJoined(
+  joinedUser: typeof users.$inferSelect,
+  recipients: Array<{ ownerId: string; contactName: string }>,
+) {
+  try {
+    const inputs: NotificationInput[] = recipients.flatMap((recipient) => {
+      if (recipient.ownerId === joinedUser.id) {
+        return [];
+      }
+      const content = buildContactJoinedNotificationContent(recipient.contactName);
+      return [
+        {
+          userId: recipient.ownerId,
+          type: "contact_joined" as const,
+          actorId: joinedUser.id,
+          title: content.title,
+          body: content.body,
+          data: { url: `/profile/${joinedUser.id}`, actorId: joinedUser.id },
+          dedupeKey: `contact_joined:${joinedUser.id}`,
+        },
+      ];
+    });
+    await createNotificationsAndPush(inputs);
+  } catch (error) {
+    console.warn("[notifications] contact joined notification failed", error);
   }
 }
 

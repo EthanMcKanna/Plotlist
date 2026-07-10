@@ -6,11 +6,9 @@ import refreshRoute from "../api/auth/refresh";
 import startVerificationRoute from "../api/auth/start-verification";
 import verifyRoute from "../api/auth/verify";
 import cleanupTmdbCacheRoute from "../api/internal/cron/cleanup-tmdb-cache";
-import fullEmbeddingRefreshRoute from "../api/internal/cron/full-embedding-refresh";
 import fullEpisodeCacheRefreshRoute from "../api/internal/cron/full-episode-cache-refresh";
 import fullShowCatalogRefreshRoute from "../api/internal/cron/full-show-catalog-refresh";
 import homepageFeedRefreshRoute from "../api/internal/cron/homepage-feed-refresh";
-import hotEmbeddingRefreshRoute from "../api/internal/cron/hot-embedding-refresh";
 import hotEpisodeCacheRefreshRoute from "../api/internal/cron/hot-episode-cache-refresh";
 import hotShowCatalogRefreshRoute from "../api/internal/cron/hot-show-catalog-refresh";
 import trackedReleaseRefreshRoute from "../api/internal/cron/tracked-release-refresh";
@@ -23,6 +21,7 @@ import { initDb } from "../api/_lib/db";
 import { runNodeRoute, type NodeStyleHandler } from "./shim";
 import { runScheduledTasks } from "./scheduled";
 import { initUploadsBucket, getUploadsBucket, type UploadsBucket } from "./storage";
+import { initVectorizeIndex, type VectorizeIndexBinding } from "./vectorize";
 
 type AssetsBinding = {
   fetch(request: Request): Promise<Response>;
@@ -32,6 +31,7 @@ export type WorkerEnv = {
   DB: unknown;
   UPLOADS: UploadsBucket;
   ASSETS: AssetsBinding;
+  VECTORIZE?: VectorizeIndexBinding;
 } & Record<string, unknown>;
 
 const routes: Record<string, NodeStyleHandler> = {
@@ -48,10 +48,8 @@ const routes: Record<string, NodeStyleHandler> = {
   "/api/internal/cron/cleanup-tmdb-cache": cleanupTmdbCacheRoute as NodeStyleHandler,
   "/api/internal/cron/homepage-feed-refresh": homepageFeedRefreshRoute as NodeStyleHandler,
   "/api/internal/cron/hot-show-catalog-refresh": hotShowCatalogRefreshRoute as NodeStyleHandler,
-  "/api/internal/cron/hot-embedding-refresh": hotEmbeddingRefreshRoute as NodeStyleHandler,
   "/api/internal/cron/hot-episode-cache-refresh": hotEpisodeCacheRefreshRoute as NodeStyleHandler,
   "/api/internal/cron/full-show-catalog-refresh": fullShowCatalogRefreshRoute as NodeStyleHandler,
-  "/api/internal/cron/full-embedding-refresh": fullEmbeddingRefreshRoute as NodeStyleHandler,
   "/api/internal/cron/full-episode-cache-refresh": fullEpisodeCacheRefreshRoute as NodeStyleHandler,
   "/api/internal/cron/tracked-release-refresh": trackedReleaseRefreshRoute as NodeStyleHandler,
 };
@@ -69,6 +67,7 @@ function bootstrap(env: WorkerEnv) {
   }
   initDb(env.DB);
   initUploadsBucket(env.UPLOADS);
+  initVectorizeIndex(env.VECTORIZE);
 }
 
 function jsonResponse(status: number, body: unknown) {

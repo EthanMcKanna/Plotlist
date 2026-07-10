@@ -7,6 +7,16 @@ export function ilike(column: AnySQLiteColumn, value: string): SQL {
   return sql`${column} like ${value} collate nocase`;
 }
 
+// User-typed search text goes into LIKE patterns; without escaping, a "%"
+// or "_" in the query matches everything instead of the literal character.
+export function escapeLikePattern(value: string) {
+  return value.replace(/([\\%_])/g, "\\$1");
+}
+
+export function ilikeContains(column: AnySQLiteColumn, value: string): SQL {
+  return sql`${column} like ${`%${escapeLikePattern(value)}%`} escape '\\' collate nocase`;
+}
+
 // D1 caps bound parameters at 100 per statement, so large IN () lists and
 // multi-row inserts must be split.
 export function chunkForSqlParams<T>(rows: T[], paramsPerRow: number, maxParams = 90) {

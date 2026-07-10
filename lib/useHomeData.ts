@@ -1626,6 +1626,8 @@ export type HomeData = {
   critics: SignatureRailItem[];
   /** Shorter, lower-commitment picks. */
   quick: SignatureRailItem[];
+  /** Recs v2 facet rails ("Because you're into X"); empty until the user has a taste profile. */
+  tasteRails: Array<{ key: string; title: string; items: SignatureRailItem[] }>;
   /** Streaming room cards. */
   streamingRooms: ProviderRoom[];
   /** The user's chosen streaming services (normalized keys; empty = no preference). */
@@ -1641,6 +1643,7 @@ export type HomeData = {
     critics: boolean;
     quick: boolean;
     rooms: boolean;
+    tasteRails: boolean;
   };
   /** Trigger a manual refresh. */
   refresh: () => Promise<void>;
@@ -1690,6 +1693,7 @@ export function useHomeData(): HomeData {
   const getHomeCatalog = useAction(api.shows.getHomeCatalog);
   const getTmdbList = useAction(api.shows.getTmdbList);
   const getPersonalized = useAction(api.embeddings.getPersonalizedRecommendations);
+  const getRecommendationRails = useAction(api.embeddings.getHomeRecommendationRails);
   const getSimilarTasteUsers = useAction(api.embeddings.getSimilarTasteUsers);
 
   // Warm start: last session's catalog renders the discovery rails on the
@@ -1734,6 +1738,10 @@ export function useHomeData(): HomeData {
     () => getEmptyHomeCatalogDiagnostics(),
   );
   const [similarTaste, setSimilarTaste] = useState<any[]>([]);
+  const [tasteRailsRaw, setTasteRailsRaw] = useState<
+    Array<{ key: string; title: string; items: AnyShowItem[] }>
+  >([]);
+  const [tasteRailsLoading, setTasteRailsLoading] = useState(true);
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [editorialSeedNow, setEditorialSeedNow] = useState(() => Date.now());
@@ -1767,6 +1775,8 @@ export function useHomeData(): HomeData {
       setTmdbTrendingRaw([]);
       setProviderCatalogProviders(null);
       setCatalogDiagnostics(getEmptyHomeCatalogDiagnostics());
+      setTasteRailsRaw([]);
+      setTasteRailsLoading(false);
       setForYouLoading(false);
       setRisingLoading(false);
       setPremieresLoading(false);
@@ -1814,6 +1824,27 @@ export function useHomeData(): HomeData {
       () => setForYouLoading(false),
     );
 
+    setTasteRailsLoading(true);
+    void run(
+      () => getRecommendationRails({ limitPerRail: 10 }),
+      (value) => {
+        // The "for_you" rail duplicates the For You section above; only the
+        // facet rails ("Because you're into X") are new information here.
+        const rails = Array.isArray(value) ? value : [];
+        setTasteRailsRaw(
+          rails
+            .filter(
+              (rail: any) =>
+                typeof rail?.key === "string" &&
+                rail.key.startsWith("facet:") &&
+                Array.isArray(rail.items),
+            )
+            .slice(0, 2),
+        );
+      },
+      () => setTasteRailsLoading(false),
+    );
+
     void run(
       () => loadHomeCatalog(getHomeCatalog, getTmdbList),
       (payload) => {
@@ -1842,7 +1873,14 @@ export function useHomeData(): HomeData {
     return () => {
       cancelled = true;
     };
-  }, [getHomeCatalog, getPersonalized, getTmdbList, isAuthenticated, refreshKey]);
+  }, [
+    getHomeCatalog,
+    getPersonalized,
+    getRecommendationRails,
+    getTmdbList,
+    isAuthenticated,
+    refreshKey,
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -2133,6 +2171,7 @@ export function useHomeData(): HomeData {
     collect(airingRaw as AnyShowItem[]);
     collect(tmdbDailyTrendingRaw as AnyShowItem[]);
     collect(tmdbTrendingRaw as AnyShowItem[]);
+    tasteRailsRaw.forEach((rail) => collect(rail.items));
     providerSections.forEach((section) =>
       collect(section.items as AnyShowItem[]),
     );
@@ -2151,6 +2190,7 @@ export function useHomeData(): HomeData {
     airingRaw,
     tmdbDailyTrendingRaw,
     tmdbTrendingRaw,
+    tasteRailsRaw,
     providerSections,
   ]);
 
@@ -2158,6 +2198,29 @@ export function useHomeData(): HomeData {
     (key: string) => catalogIndex.get(key) ?? null,
     [catalogIndex],
   );
+
+  // Facet rails render below For You, so anything already shown there is
+  // dropped; rails that thin out below 4 items disappear entirely.
+  const tasteRails = useMemo(() => {
+    const seen = createRailSeenSet(forYou);
+    return tasteRailsRaw
+      .map((rail) => {
+        const items = rail.items
+          .map((item) => toRailItem(item, editorialSeedNow))
+          .filter((item): item is SignatureRailItem => item !== null)
+          .filter((item) => {
+            const titleKey = getHomeTitleDiversityKey(item.title);
+            return !seen.has(item.key) && (!titleKey || !seen.has(titleKey));
+          });
+        items.forEach((item) => {
+          seen.add(item.key);
+          const titleKey = getHomeTitleDiversityKey(item.title);
+          if (titleKey) seen.add(titleKey);
+        });
+        return { key: rail.key, title: rail.title, items };
+      })
+      .filter((rail) => rail.items.length >= 4);
+  }, [tasteRailsRaw, forYou, editorialSeedNow]);
 
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
@@ -2192,12 +2255,14 @@ export function useHomeData(): HomeData {
     fresh,
     critics,
     quick,
+    tasteRails,
     streamingRooms: providerSections,
     streamingProviderKeys,
     catalogDiagnostics,
     loading: {
       hero: heroLoading,
       forYou: forYouLoading,
+      tasteRails: tasteRailsLoading,
       heat:
         trendingRaw.length === 0 &&
         tmdbDailyTrendingRaw.length === 0 &&

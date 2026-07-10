@@ -20,11 +20,11 @@ describe("wrangler config", () => {
     );
   });
 
-  it("stays within the Workers free plan limit of five cron schedules", () => {
+  it("keeps the cron schedule list small and intentional (Workers Paid plan)", () => {
     const config = readWranglerConfig();
 
     expect(config.triggers.crons.length).toBeGreaterThan(0);
-    expect(config.triggers.crons.length).toBeLessThanOrEqual(5);
+    expect(config.triggers.crons.length).toBeLessThanOrEqual(10);
   });
 
   it("registers every schedule handled by the scheduled dispatcher", () => {

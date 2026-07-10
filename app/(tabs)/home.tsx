@@ -52,8 +52,7 @@ import {
   useHomeSchedulePreview,
 } from "../../components/TonightStrip";
 
-import { getContactSyncAlertCopy } from "../../lib/contactSync";
-import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { useContactSync } from "../../lib/useContactSync";
 import {
   buildFreshRailRoomTopUpItems,
   buildVisibleFreshRailItems,
@@ -210,7 +209,6 @@ export function HomeSurface({
   useScrollToTopOnTabPress(listRef as any);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [contactNudgeDismissed, setContactNudgeDismissed] = useState<boolean | null>(null);
   const queriedContinueWatchingItems = useContinueWatchingItems(
     data.hasProfile && providedContinueWatchingItems === undefined,
@@ -679,7 +677,13 @@ export function HomeSurface({
   }, []);
 
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
-  const syncContacts = useAction(api.contacts.syncSnapshot);
+  // Shared sync engine: permission recovery, query invalidation, and the
+  // silent daily background resync — home is frame one, so this is where
+  // the background refresh usually runs.
+  const { isSyncing: syncing, syncNow } = useContactSync({
+    enabled: data.hasProfile,
+    hasSyncedBefore: data.hasSyncedContacts,
+  });
 
   const handleRefresh = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -738,20 +742,11 @@ export function HomeSurface({
   );
 
   const handleSyncContacts = useCallback(async () => {
-    try {
-      setSyncing(true);
-      const entries = await loadDeviceContacts();
-      const result = await syncContacts({ entries });
-      await setContactsSyncDismissed(false);
+    const result = await syncNow();
+    if (result) {
       setContactNudgeDismissed(false);
-      const copy = getContactSyncAlertCopy(result);
-      Alert.alert(copy.title, copy.message);
-    } catch (error) {
-      Alert.alert("Could not sync contacts", String(error));
-    } finally {
-      setSyncing(false);
     }
-  }, [syncContacts]);
+  }, [syncNow]);
 
   const handleDismissNudge = useCallback(async () => {
     await setContactsSyncDismissed(true);
@@ -916,6 +911,28 @@ export function HomeSurface({
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
+        );
+      }
+      case "taste-rails": {
+        // Recs v2 facet rails; silent until the taste profile produces them,
+        // so there is no skeleton — the section simply appears when ready.
+        if (data.tasteRails.length === 0) return null;
+        return (
+          <View>
+            {data.tasteRails.map((rail) => (
+              <SignatureRail
+                key={rail.key}
+                kicker="Because you're into"
+                title={rail.title}
+                accent={FOR_YOU_ACCENT}
+                icon="color-wand"
+                layout="poster"
+                items={rail.items}
+                featureCardWidth={featureCardWidth}
+                onPressItem={handlePressRailItem}
+              />
+            ))}
+          </View>
         );
       }
       case "heat": {

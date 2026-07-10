@@ -1,12 +1,10 @@
-import { count, desc, eq, lte, or } from "drizzle-orm";
+import { desc, eq, lte, or } from "drizzle-orm";
 
 import {
   authSessions,
   imdbRatingsCache,
   phoneVerificationRequests,
   rateLimits,
-  showEmbeddingJobs,
-  shows,
   tmdbDetailsCache,
   tmdbEpisodeCacheJobs,
   tmdbImportJobs,
@@ -39,16 +37,6 @@ async function latestTmdbImportJob() {
     .select()
     .from(tmdbImportJobs)
     .orderBy(desc(tmdbImportJobs.createdAt))
-    .limit(1);
-
-  return rows[0] ?? null;
-}
-
-async function latestEmbeddingJob() {
-  const rows = await db
-    .select()
-    .from(showEmbeddingJobs)
-    .orderBy(desc(showEmbeddingJobs.createdAt))
     .limit(1);
 
   return rows[0] ?? null;
@@ -185,67 +173,6 @@ export async function maybeStartTopTvImport(args: {
   };
 }
 
-export async function maybeStartEmbeddingBackfill(): Promise<JobResult> {
-  const [latestJob, showCountResult] = await Promise.all([
-    latestEmbeddingJob(),
-    db.select({ count: count() }).from(shows),
-  ]);
-
-  if (latestJob && (latestJob.status === "queued" || latestJob.status === "running")) {
-    return {
-      started: false,
-      reason: "embedding backfill already active",
-      jobId: latestJob.id,
-      status: latestJob.status,
-    };
-  }
-
-  const showCount = showCountResult[0]?.count ?? 0;
-
-  if (
-    latestJob?.status === "completed" &&
-    latestJob.totalCount !== null &&
-    latestJob.embeddedCount >= showCount
-  ) {
-    return {
-      started: false,
-      reason: "embeddings already current",
-      jobId: latestJob.id,
-      status: latestJob.status,
-    };
-  }
-
-  const now = Date.now();
-  const jobId = createId("embedjob");
-  await db.insert(showEmbeddingJobs).values({
-    id: jobId,
-    kind: "show_catalog",
-    status: "queued",
-    embeddingVersion: process.env.GEMINI_EMBEDDING_VERSION ?? "shows-v1",
-    model: process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-2-preview",
-    dimensions: 1536,
-    batchSize: 20,
-    nextCursor: null,
-    processedCount: 0,
-    embeddedCount: 0,
-    skippedCount: 0,
-    totalCount: showCount,
-    startedAt: null,
-    completedAt: null,
-    failedAt: null,
-    error: null,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  return {
-    started: true,
-    reason: "started",
-    jobId,
-    status: "queued",
-  };
-}
-
 export async function maybeStartEpisodeCacheBackfill(args: {
   targetShowCount: number;
   batchSize?: number;
@@ -323,14 +250,6 @@ export async function scheduleFullShowCatalogRefresh() {
   });
 }
 
-export async function scheduleHotEmbeddingRefresh() {
-  return await maybeStartEmbeddingBackfill();
-}
-
-export async function scheduleFullEmbeddingRefresh() {
-  return await maybeStartEmbeddingBackfill();
-}
-
 export async function scheduleHotEpisodeCacheRefresh() {
   return await maybeStartEpisodeCacheBackfill({
     targetShowCount: HOT_EPISODE_TARGET_COUNT,
@@ -349,15 +268,11 @@ export async function scheduleFullEpisodeCacheRefresh() {
 
 export async function listRunnableJobs() {
   const now = Date.now();
-  const [imports, embeddings, episodes] = await Promise.all([
+  const [imports, episodes] = await Promise.all([
     db
       .select()
       .from(tmdbImportJobs)
       .where(or(eq(tmdbImportJobs.status, "queued"), eq(tmdbImportJobs.status, "running"))),
-    db
-      .select()
-      .from(showEmbeddingJobs)
-      .where(or(eq(showEmbeddingJobs.status, "queued"), eq(showEmbeddingJobs.status, "running"))),
     db
       .select()
       .from(tmdbEpisodeCacheJobs)
@@ -372,7 +287,6 @@ export async function listRunnableJobs() {
   return {
     now,
     imports,
-    embeddings,
     episodes,
   };
 }

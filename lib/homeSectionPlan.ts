@@ -8,6 +8,7 @@ export type HomeSection =
   | { kind: "continue-watching" }
   | { kind: "tonight" }
   | { kind: "for-you" }
+  | { kind: "taste-rails" }
   | { kind: "heat" }
   | { kind: "fresh" }
   | { kind: "critics" }
@@ -267,6 +268,9 @@ export function getHomeSectionPlan({
           ...openingDiscoverySections,
           ...(promoteFriends ? [{ kind: "friends" as const }] : []),
           { kind: "for-you" as const },
+          // Recs v2 facet rails ("Because you're into X"); the section
+          // renders nothing until the user has a taste profile.
+          { kind: "taste-rails" as const },
         ]
       : []),
     ...(hasProfile ? remainingDiscoverySections : openingDiscoverySections),

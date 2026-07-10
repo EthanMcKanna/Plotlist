@@ -12,7 +12,8 @@ export type NotificationType =
   | "like"
   | "comment"
   | "episode"
-  | "list_follow";
+  | "list_follow"
+  | "contact_joined";
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
@@ -32,6 +33,7 @@ const CATEGORY_BY_TYPE: Record<NotificationType, NotificationCategory> = {
   comment: "comments",
   episode: "episodes",
   list_follow: "follows",
+  contact_joined: "follows",
 };
 
 export function categoryForNotificationType(type: NotificationType): NotificationCategory {
@@ -194,6 +196,16 @@ export function buildFollowAcceptedNotificationContent(actorName: string) {
   return {
     title: "Request approved",
     body: `${actorName} approved your follow request.`,
+  };
+}
+
+// contactName is the name from the recipient's own address book, not the
+// joiner's profile — fresh signups haven't set a display name yet, and the
+// address-book name is the one the recipient actually recognizes.
+export function buildContactJoinedNotificationContent(contactName: string) {
+  return {
+    title: "Your friend joined Plotlist",
+    body: `${contactName} from your contacts is now on Plotlist. Follow them to see what they're watching.`,
   };
 }
 

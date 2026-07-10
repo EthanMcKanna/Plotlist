@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 
 const KEY_CONTACTS_SYNC_DISMISSED = "contactsSyncDismissed";
+const KEY_CONTACTS_AUTO_SYNCED_AT = "contactsAutoSyncedAt";
 const KEY_WELCOME_TOUR_SEEN = "welcomeTourSeen";
 const nativeFallbackStorage = new Map<string, string>();
 
@@ -71,6 +72,20 @@ export async function setContactsSyncDismissed(dismissed: boolean): Promise<void
   } else {
     await storage.removeItem(KEY_CONTACTS_SYNC_DISMISSED);
   }
+}
+
+// Timestamp of the last background contact sync attempt (successful or not),
+// used to throttle silent refreshes to roughly once a day.
+export async function getContactsAutoSyncedAt(): Promise<number | null> {
+  const storage = await getStorage();
+  const value = await storage.getItem(KEY_CONTACTS_AUTO_SYNCED_AT);
+  const parsed = value ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export async function setContactsAutoSyncedAt(timestamp: number): Promise<void> {
+  const storage = await getStorage();
+  await storage.setItem(KEY_CONTACTS_AUTO_SYNCED_AT, String(timestamp));
 }
 
 export async function getWelcomeTourSeen(): Promise<boolean> {

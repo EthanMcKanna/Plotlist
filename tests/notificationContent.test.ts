@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 
 import {
   buildCommentNotificationContent,
+  buildContactJoinedNotificationContent,
   buildEpisodeNotificationContent,
   buildFollowNotificationContent,
   buildLikeNotificationContent,
@@ -163,6 +164,15 @@ describe("social notification copy", () => {
     expect(content.title).toBe("New list follower");
     expect(content.body).toBe("Ana started following your list “Cozy Mysteries”.");
     expect(categoryForNotificationType("list_follow")).toBe("follows");
+  });
+
+  it("builds contact-joined copy from the recipient's address-book name", () => {
+    const content = buildContactJoinedNotificationContent("Ada Lovelace");
+    expect(content.title).toBe("Your friend joined Plotlist");
+    expect(content.body).toBe(
+      "Ada Lovelace from your contacts is now on Plotlist. Follow them to see what they're watching.",
+    );
+    expect(categoryForNotificationType("contact_joined")).toBe("follows");
   });
 });
 

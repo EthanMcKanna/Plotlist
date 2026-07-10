@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
+import { ContactsSyncCard } from "../components/ContactsSyncCard";
 import { EmptyState } from "../components/EmptyState";
 import { FlashList } from "../components/FlashList";
 import {
@@ -17,6 +18,7 @@ import { ShimmerBlock } from "../components/ShowDetailSkeleton";
 import { api } from "../lib/plotlist/api";
 import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsActivity";
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
+import { useContactSync } from "../lib/useContactSync";
 
 const PAGE_SIZE = 40;
 
@@ -49,6 +51,12 @@ export default function FriendsScreen() {
   // Same query keys as the home Friends section, so this screen opens warm.
   const contactStatus =
     useQuery(api.contacts.getStatus, hasProfile ? {} : "skip") ?? null;
+  // Silent daily resync keeps matches fresh; the card below is the explicit
+  // first-sync entry point for people who never connected contacts.
+  const { isSyncing, syncNow } = useContactSync({
+    enabled: hasProfile,
+    hasSyncedBefore: Boolean(contactStatus?.hasSynced),
+  });
   const contactMatches =
     useQuery(
       api.contacts.getMatches,
@@ -80,25 +88,43 @@ export default function FriendsScreen() {
     [entries.length],
   );
 
+  const showSyncPrompt = Boolean(contactStatus && !contactStatus.hasSynced);
+
   const listHeader = useMemo(() => {
-    if (people.length === 0) return null;
+    if (people.length === 0 && !showSyncPrompt) return null;
     return (
       <View className="pb-3">
-        <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
-          Add friends
-        </Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
-        >
-          {people.map((person, idx) => (
-            <PersonChip key={person.user._id} person={person} index={idx} />
-          ))}
-        </ScrollView>
+        {showSyncPrompt ? (
+          <View className="mb-4">
+            <ContactsSyncCard
+              variant="compact"
+              title="Find friends from your contacts"
+              description="See who's already on Plotlist and invite the rest. Numbers are hashed — they never leave your phone in the clear."
+              buttonLabel="Sync contacts"
+              onPress={() => void syncNow()}
+              loading={isSyncing}
+            />
+          </View>
+        ) : null}
+        {people.length > 0 ? (
+          <>
+            <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
+              Add friends
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
+            >
+              {people.map((person, idx) => (
+                <PersonChip key={person.user._id} person={person} index={idx} />
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
       </View>
     );
-  }, [people]);
+  }, [people, showSyncPrompt, isSyncing, syncNow]);
 
   return (
     <Screen>

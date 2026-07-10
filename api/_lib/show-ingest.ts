@@ -9,6 +9,7 @@ import {
 } from "../../db/schema";
 import { db } from "./db";
 import { createId } from "./ids";
+import { markStaleEmbeddingsFromIngest } from "./embedding-refresh";
 import { normalizeTmdbShowDetails } from "./rpc";
 import { normalizeSearchText } from "./social";
 import { chunkForSqlParams } from "./sql-dialect";
@@ -195,6 +196,7 @@ type IngestTickSummary = {
   failed: number;
   gone: number;
   changesSynced: number | null;
+  embeddingNominated?: number;
 };
 
 export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSummary> {
@@ -376,7 +378,19 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
   statements.push(...stateStatements);
   await runBatches(statements as Array<{ run?: unknown }>);
 
-  return { selected: batch.length, ingested, warmed, failed, gone, changesSynced };
+  // Nominate content-changed shows for re-embedding (recs v2). Failures here
+  // must never fail the ingest tick itself.
+  let embeddingNominated = 0;
+  try {
+    const marked = await markStaleEmbeddingsFromIngest(
+      showRows.map((row) => String(row.externalId)),
+    );
+    embeddingNominated = marked.nominated;
+  } catch (error) {
+    console.warn("[ingest] embedding stale-marking failed", error);
+  }
+
+  return { selected: batch.length, ingested, warmed, failed, gone, changesSynced, embeddingNominated };
 }
 
 // Pull the TMDB TV changes feed at most hourly and mark every changed id due

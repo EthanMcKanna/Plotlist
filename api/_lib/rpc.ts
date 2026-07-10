@@ -1,9 +1,9 @@
 import type { IncomingMessage } from "node:http";
 
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import { chunkForSqlParams, ilike } from "./sql-dialect";
+import { chunkForSqlParams, ilike, ilikeContains } from "./sql-dialect";
 import { z } from "zod";
 
 import {
@@ -43,8 +43,31 @@ import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
 import { getStaleReleaseShowIds, refreshTrackedReleaseCalendarForUser } from "./release-refresh";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "./rate-limit";
 import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social";
+import {
+  clearContactSync,
+  getContactMatchedUserIds,
+  getContactMatches,
+  getContactStatus,
+  getInviteCandidates,
+  linkJoinedUserToContacts,
+  markContactInvited,
+  searchInviteCandidates,
+  syncContactSnapshot,
+} from "./contacts";
+import { getUsersByIdsChunked } from "./user-lookup";
+import { rankPeopleSearchResults } from "../../lib/peopleSearch";
 import { sendPhoneVerificationCode, verifyPhoneVerificationCode } from "./twilio";
 import { createUploadToken, getRequestOrigin } from "./uploads";
+import {
+  getFacetBrowse,
+  getFacetShows,
+  getHomeRecommendationRailsV2,
+  getPersonalizedRecommendationsV2,
+  getProfileTasteExperienceV2,
+  getSimilarShowsV2,
+  getSmartListsV2,
+  vibeSearchShows,
+} from "./recs-handlers";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
@@ -172,36 +195,6 @@ const optionalLimitArgs = z.object({
 const getStorageUrlArgs = z.object({
   storageId: z.string().min(1),
 });
-
-const CONTACT_INVITE_RESEND_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
-
-function isContactInviteReady(
-  entry: { matchedUserId?: string | null; invitedAt?: number | null },
-  now = Date.now(),
-) {
-  return (
-    !entry.matchedUserId &&
-    (!entry.invitedAt || entry.invitedAt <= now - CONTACT_INVITE_RESEND_COOLDOWN_MS)
-  );
-}
-
-function sortInviteCandidates<T extends { invitedAt?: number | null; displayName: string; updatedAt: number }>(
-  rows: T[],
-  now = Date.now(),
-) {
-  return [...rows].sort((left, right) => {
-    const readyDelta =
-      Number(isContactInviteReady(right, now)) - Number(isContactInviteReady(left, now));
-    if (readyDelta !== 0) {
-      return readyDelta;
-    }
-    const inviteDelta = (left.invitedAt ?? 0) - (right.invitedAt ?? 0);
-    if (inviteDelta !== 0) {
-      return inviteDelta;
-    }
-    return left.displayName.localeCompare(right.displayName);
-  });
-}
 
 const syncContactsArgs = z.object({
   entries: z.array(
@@ -2140,73 +2133,6 @@ async function buildExportData(userId: string) {
   };
 }
 
-async function getContactStatus(userId: string) {
-  const entries = await db
-    .select()
-    .from(contactSyncEntries)
-    .where(eq(contactSyncEntries.ownerId, userId))
-    .orderBy(desc(contactSyncEntries.updatedAt));
-
-  return {
-    hasSynced: entries.length > 0,
-    totalCount: entries.length,
-    matchedCount: entries.filter((entry) => entry.matchedUserId).length,
-    inviteCount: entries.filter((entry) => isContactInviteReady(entry)).length,
-    invitedCount: entries.filter((entry) => entry.invitedAt).length,
-    lastSyncedAt:
-      entries.length > 0
-        ? entries.reduce((latest, entry) => Math.max(latest, entry.updatedAt), 0)
-        : null,
-  };
-}
-
-async function setContactSnapshot(
-  userId: string,
-  entries: Array<{
-    sourceRecordId?: string;
-    displayName: string;
-    contactHash: string;
-    matchedUserId?: string;
-  }>,
-) {
-  const previousEntries = await db
-    .select()
-    .from(contactSyncEntries)
-    .where(eq(contactSyncEntries.ownerId, userId));
-  const previousByHash = new Map(
-    previousEntries.map((entry) => [entry.contactHash, entry]),
-  );
-
-  await db.delete(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId));
-  if (entries.length === 0) {
-    return { inviteReadyCount: 0, invitedCount: 0 };
-  }
-
-  const now = Date.now();
-  const rows = entries.map((entry) => {
-    const previous = previousByHash.get(entry.contactHash);
-    return {
-      id: createId("contact"),
-      ownerId: userId,
-      sourceRecordId: entry.sourceRecordId ?? null,
-      displayName: entry.displayName,
-      contactHash: entry.contactHash,
-      matchedUserId: entry.matchedUserId ?? null,
-      invitedAt: previous?.invitedAt ?? null,
-      createdAt: previous?.createdAt ?? now,
-      updatedAt: now,
-    };
-  });
-  for (const chunk of chunkForSqlParams(rows, 9)) {
-    await db.insert(contactSyncEntries).values(chunk);
-  }
-
-  return {
-    inviteReadyCount: rows.filter((entry) => isContactInviteReady(entry, now)).length,
-    invitedCount: rows.filter((entry) => entry.invitedAt).length,
-  };
-}
-
 async function getSuggestedUsers(userId: string, limit: number) {
   const followRows = await db.select().from(follows).where(eq(follows.followerId, userId));
   const excludedIds = new Set(followRows.map((follow) => follow.followeeId));
@@ -2221,20 +2147,7 @@ async function getSuggestedUsers(userId: string, limit: number) {
     (candidate) => !excludedIds.has(candidate.id) && Boolean(candidate.username),
   );
 
-  const contactEntries = await db
-    .select({ matchedUserId: contactSyncEntries.matchedUserId })
-    .from(contactSyncEntries)
-    .where(
-      and(
-        eq(contactSyncEntries.ownerId, userId),
-        isNotNull(contactSyncEntries.matchedUserId),
-      ),
-    )
-    .orderBy(desc(contactSyncEntries.updatedAt))
-    .limit(60);
-  const contactUserIds = Array.from(
-    new Set(contactEntries.flatMap((entry) => (entry.matchedUserId ? [entry.matchedUserId] : []))),
-  );
+  const contactUserIds = await getContactMatchedUserIds(userId, 60);
   const contactUsers = contactUserIds.length > 0 ? await getUsersByIdsChunked(contactUserIds) : [];
 
   const previews = await buildPersonPreviews(userId, [
@@ -2403,29 +2316,6 @@ async function getSimilarTasteUserPreviews(userId: string, limit: number) {
         ((candidate.sharedShowCount ?? 0) > 0 || (candidate.sharedGenreCount ?? 0) >= 2),
     )
     .slice(0, limit);
-}
-
-async function getContactMatches(userId: string, limit: number) {
-  const entries = await db
-    .select({ matchedUserId: contactSyncEntries.matchedUserId })
-    .from(contactSyncEntries)
-    .where(
-      and(
-        eq(contactSyncEntries.ownerId, userId),
-        isNotNull(contactSyncEntries.matchedUserId),
-      ),
-    )
-    .orderBy(desc(contactSyncEntries.updatedAt))
-    .limit(limit * 2);
-  const userIds = Array.from(
-    new Set(entries.flatMap((entry) => (entry.matchedUserId ? [entry.matchedUserId] : []))),
-  ).slice(0, limit);
-  if (userIds.length === 0) {
-    return [];
-  }
-
-  const candidates = await getUsersByIdsChunked(userIds);
-  return await buildPersonPreviews(userId, candidates);
 }
 
 async function deleteAccount(userId: string) {
@@ -2654,15 +2544,6 @@ function parsePaginationWindow(args: any) {
   const offset = Math.max(0, Number(parsed.paginationOpts?.cursor ?? 0) || 0);
   const numItems = Math.min(Math.max(1, parsed.paginationOpts?.numItems ?? 20), 100);
   return { offset, numItems };
-}
-
-async function getUsersByIdsChunked(userIds: string[]) {
-  const uniqueIds = Array.from(new Set(userIds));
-  const rows: Array<typeof users.$inferSelect> = [];
-  for (const chunk of chunkForSqlParams(uniqueIds, 1, 80)) {
-    rows.push(...(await db.select().from(users).where(inArray(users.id, chunk))));
-  }
-  return rows;
 }
 
 // Shared gate for "list things belonging to user X" endpoints: resolves the
@@ -2919,16 +2800,27 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "users:search": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ text: z.string(), limit: z.number().optional() }).parse(args ?? {});
-    const text = `%${parsed.text.trim()}%`;
-    if (parsed.text.trim().length < 2) {
+    const text = parsed.text.trim();
+    if (text.length < 2) {
       return [];
     }
+    const limit = Math.min(parsed.limit ?? 20, 50);
+    // Over-fetch so ranking has real candidates to reorder — with exactly
+    // `limit` rows in arbitrary DB order, prefix matches buried past the
+    // limit would never surface.
     const rows = await db
       .select()
       .from(users)
-      .where(or(ilike(users.username, text), ilike(users.displayName, text), ilike(users.name, text)))
-      .limit(Math.min(parsed.limit ?? 20, 50));
-    return await buildPersonPreviews(user.id, rows);
+      .where(
+        or(
+          ilikeContains(users.username, text),
+          ilikeContains(users.displayName, text),
+          ilikeContains(users.name, text),
+        ),
+      )
+      .limit(Math.min(limit * 3, 90));
+    const previews = await buildPersonPreviews(user.id, rows);
+    return rankPeopleSearchResults(previews, text).slice(0, limit);
   },
   "users:getShowsById": async ({ args }) => {
     const parsed = z.object({ showIds: z.array(z.string()) }).parse(args ?? {});
@@ -2946,25 +2838,12 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "contacts:getInviteCandidates": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = optionalLimitArgs.parse(args ?? {});
-    const rows = await db
-      .select()
-      .from(contactSyncEntries)
-      .where(eq(contactSyncEntries.ownerId, user.id))
-      .orderBy(desc(contactSyncEntries.updatedAt));
-    return sortInviteCandidates(rows.filter((row) => !row.matchedUserId))
-      .slice(0, Math.min(parsed.limit ?? 20, 50))
-      .map(toDoc);
+    return await getInviteCandidates(user.id, Math.min(parsed.limit ?? 20, 50));
   },
   "contacts:searchInviteCandidates": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ text: z.string(), limit: z.number().optional() }).parse(args ?? {});
-    const rows = await db
-      .select()
-      .from(contactSyncEntries)
-      .where(and(eq(contactSyncEntries.ownerId, user.id), ilike(contactSyncEntries.displayName, `%${parsed.text}%`)))
-      .orderBy(desc(contactSyncEntries.updatedAt))
-      .limit(Math.min(parsed.limit ?? 20, 50));
-    return sortInviteCandidates(rows.filter((row) => !row.matchedUserId)).map(toDoc);
+    return await searchInviteCandidates(user.id, parsed.text, Math.min(parsed.limit ?? 20, 50));
   },
   "follows:isFollowing": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -4087,37 +3966,13 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "contacts:clearSync": async ({ req }) => {
     const user = await requireAuthUser(req);
-    await db.delete(contactSyncEntries).where(eq(contactSyncEntries.ownerId, user.id));
-    return { success: true };
+    return await clearContactSync(user.id);
   },
   "contacts:sendInvite": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const entryId = z.object({ entryId: z.string() }).parse(args ?? {}).entryId;
     await enforceRateLimit(rateLimitKey("contacts-invite", user.id), 30, 60 * 60 * 1000);
-
-    const rows = await db
-      .select()
-      .from(contactSyncEntries)
-      .where(and(eq(contactSyncEntries.id, entryId), eq(contactSyncEntries.ownerId, user.id)))
-      .limit(1);
-    const entry = rows[0];
-    if (!entry) {
-      throw new ApiError(404, "contact_not_found", "Contact invite was not found");
-    }
-    if (entry.matchedUserId) {
-      throw new ApiError(409, "contact_already_joined", "This contact is already on Plotlist");
-    }
-
-    const now = Date.now();
-    if (entry.invitedAt && entry.invitedAt > now - CONTACT_INVITE_RESEND_COOLDOWN_MS) {
-      return { success: true, invitedAt: entry.invitedAt, alreadyInvited: true };
-    }
-
-    await db
-      .update(contactSyncEntries)
-      .set({ invitedAt: now, updatedAt: now })
-      .where(eq(contactSyncEntries.id, entryId));
-    return { success: true, invitedAt: now, alreadyInvited: false };
+    return await markContactInvited(user.id, entryId);
   },
   "follows:follow": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -5019,68 +4874,21 @@ export const actionHandlers: Record<string, RpcHandler> = {
       .where(eq(users.id, user.id));
     await ensurePhoneIdentity(user.id, phoneHash);
 
+    // Friends who synced their contacts before this user attached a number
+    // learn about them now, not whenever they happen to resync.
+    try {
+      await linkJoinedUserToContacts({ ...user, phoneHash });
+    } catch (error) {
+      console.warn("[contacts] linking attached phone to contact books failed", error);
+    }
+
     return { ok: true };
   },
   "contacts:syncSnapshot": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = syncContactsArgs.parse(args ?? {});
-
     await enforceRateLimit(rateLimitKey("contacts-sync", user.id), 6, 10 * 60 * 1000);
-
-    const deduped = new Map<
-      string,
-      { sourceRecordId?: string; displayName: string; contactHash: string }
-    >();
-    for (const entry of parsed.entries.slice(0, 2000)) {
-      const normalizedPhone = normalizePhoneNumber(entry.phone);
-      if (!normalizedPhone) {
-        continue;
-      }
-
-      const contactHash = hashPhoneNumber(normalizedPhone);
-      if (!deduped.has(contactHash)) {
-        deduped.set(contactHash, {
-          sourceRecordId: entry.sourceRecordId,
-          displayName: entry.displayName?.trim() || "Unknown contact",
-          contactHash,
-        });
-      }
-    }
-
-    const uniqueEntries = Array.from(deduped.values());
-    const hashes = uniqueEntries.map((entry) => entry.contactHash);
-    const matchedUsers =
-      hashes.length > 0
-        ? (
-            await Promise.all(
-              chunkForSqlParams(hashes, 1).map((chunk) =>
-                db.select().from(users).where(inArray(users.phoneHash, chunk)),
-              ),
-            )
-          ).flat()
-        : [];
-    const matchByHash = new Map(
-      matchedUsers
-        .filter((candidate) => Boolean(candidate.phoneHash))
-        .map((candidate) => [candidate.phoneHash as string, candidate.id]),
-    );
-
-    const nextEntries = uniqueEntries.map((entry) => ({
-      ...entry,
-      matchedUserId:
-        matchByHash.get(entry.contactHash) === user.id
-          ? undefined
-          : matchByHash.get(entry.contactHash),
-    }));
-    const snapshot = await setContactSnapshot(user.id, nextEntries);
-
-    return {
-      totalCount: nextEntries.length,
-      matchedCount: nextEntries.filter((entry) => entry.matchedUserId).length,
-      inviteCount: snapshot.inviteReadyCount,
-      invitedCount: snapshot.invitedCount,
-      syncedAt: Date.now(),
-    };
+    return await syncContactSnapshot(user.id, parsed.entries);
   },
   "shows:searchCatalog": async ({ args }) => {
     const parsed = z.object({ text: z.string(), limit: z.number().optional() }).parse(args ?? {});
@@ -5157,6 +4965,16 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const parsed = optionalLimitArgs.parse(args ?? {});
     const limit = Math.min(parsed.limit ?? 10, 50);
     const user = await getOptionalAuthUser(req);
+    // Vector path first (recs v2); falls back to the trending heuristics for
+    // anonymous users, signal-less accounts, or missing vector infra.
+    try {
+      const vectorItems = await getPersonalizedRecommendationsV2(user?.id, limit);
+      if (vectorItems && vectorItems.length >= Math.min(limit, 6)) {
+        return vectorItems;
+      }
+    } catch (error) {
+      console.warn("[recs] personalized vector path failed; using fallback", error);
+    }
     const profile = await buildHomeTasteProfile(user?.id);
     const candidateLimit = Math.max(limit * 8, 80);
     const [popularRows, freshRows, risingNow, breakoutPremieres, criticsChoice] = await Promise.all([
@@ -5202,6 +5020,14 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ limitPerRail: z.number().optional() }).parse(args ?? {});
     const limit = Math.min(parsed.limitPerRail ?? 10, 20);
     const user = await getOptionalAuthUser(req);
+    try {
+      const vectorRails = await getHomeRecommendationRailsV2(user?.id, limit);
+      if (vectorRails && vectorRails.length > 0) {
+        return vectorRails;
+      }
+    } catch (error) {
+      console.warn("[recs] rails vector path failed; using fallback", error);
+    }
     const profile = await buildHomeTasteProfile(user?.id);
     const [rows, risingNow, breakoutPremieres, criticsChoice] = await Promise.all([
       db
@@ -5265,6 +5091,14 @@ export const actionHandlers: Record<string, RpcHandler> = {
   "embeddings:getSmartLists": async ({ args }) => {
     const parsed = z.object({ limitPerList: z.number().optional() }).parse(args ?? {});
     const limit = Math.min(parsed.limitPerList ?? 10, 20);
+    try {
+      const facetLists = await getSmartListsV2(limit);
+      if (facetLists && facetLists.length > 0) {
+        return facetLists;
+      }
+    } catch (error) {
+      console.warn("[recs] smart-lists vector path failed; using fallback", error);
+    }
     const rows = await db
       .select()
       .from(shows)
@@ -5287,6 +5121,17 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const source = sourceRows[0];
     if (!source || source.externalSource !== "tmdb") {
       return [];
+    }
+
+    // Vector path first (recs v2): ANN neighbors blended with TMDB co-watch.
+    // Falls through to the TMDB-recommendations path for un-embedded shows.
+    try {
+      const vectorSimilar = await getSimilarShowsV2(source, limit);
+      if (vectorSimilar && vectorSimilar.length >= Math.min(limit, 6)) {
+        return vectorSimilar;
+      }
+    } catch (error) {
+      console.warn("[recs] similar-shows vector path failed; using fallback", error);
     }
 
     const cachedRows = await db
@@ -5399,8 +5244,40 @@ export const actionHandlers: Record<string, RpcHandler> = {
   "embeddings:getShowTasteSocialProof": async () => {
     return { matchingFriends: [], favoriteMatches: [], themeMatches: [] };
   },
-  "embeddings:getProfileTasteExperience": async () => {
-    return { topGenres: [], favoriteShows: [], tasteSummary: null };
+  "embeddings:getProfileTasteExperience": async ({ args, req }) => {
+    const parsed = z.object({ userId: z.string().optional() }).parse(args ?? {});
+    const viewer = await getOptionalAuthUser(req);
+    const targetUserId = parsed.userId ?? viewer?.id;
+    if (!targetUserId) {
+      return { topGenres: [], favoriteShows: [], tasteSummary: null, tasteMatch: null };
+    }
+    try {
+      const experience = await getProfileTasteExperienceV2(viewer?.id, targetUserId);
+      if (experience) {
+        return experience;
+      }
+    } catch (error) {
+      console.warn("[recs] taste experience vector path failed; using stub", error);
+    }
+    return { topGenres: [], favoriteShows: [], tasteSummary: null, tasteMatch: null };
+  },
+  // Recs v2 surfaces: free-text semantic search and facet/category browsing.
+  "embeddings:searchByVibe": async ({ args }) => {
+    const parsed = z
+      .object({ query: z.string().min(2).max(300), limit: z.number().optional() })
+      .parse(args ?? {});
+    const limit = Math.min(parsed.limit ?? 20, 40);
+    const results = await vibeSearchShows(parsed.query, limit);
+    return results ?? [];
+  },
+  "embeddings:getFacetBrowse": async () => {
+    return await getFacetBrowse();
+  },
+  "embeddings:getFacetShows": async ({ args }) => {
+    const parsed = z
+      .object({ facetKey: z.string(), limit: z.number().optional() })
+      .parse(args ?? {});
+    return await getFacetShows(parsed.facetKey, Math.min(parsed.limit ?? 30, 60));
   },
   "releaseCalendar:refreshForMe": async ({ args, req }) => {
     const user = await requireAuthUser(req);

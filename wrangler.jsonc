@@ -30,13 +30,19 @@
       "bucket_name": "plotlist-uploads"
     }
   ],
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "plotlist-shows-v2"
+    }
+  ],
   "triggers": {
-    "crons": ["* * * * *", "*/20 * * * *", "40 * * * *", "10 * * * *", "5 */6 * * *"]
+    "crons": ["* * * * *", "*/20 * * * *", "40 * * * *", "10 * * * *", "5 */6 * * *", "2-57/5 * * * *"]
   },
   "vars": {
     "NODE_ENV": "production",
-    "GEMINI_EMBEDDING_MODEL": "gemini-embedding-2-preview",
-    "GEMINI_EMBEDDING_VERSION": "shows-v1",
+    "GEMINI_EMBEDDING_MODEL": "gemini-embedding-2",
+    "GEMINI_EMBEDDING_VERSION": "shows-v2-ge2-1536",
     "SENTRY_DSN": "https://60e85cc7b00be6a37f0d56afae9b2827@o4511680500334592.ingest.us.sentry.io/4511680705462272"
   },
   "observability": {

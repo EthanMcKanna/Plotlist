@@ -9,27 +9,32 @@ import {
   refreshStaleTrackedReleases,
 } from "../api/_lib/release-refresh";
 import { refreshStaleHomeCatalogCategories } from "../api/_lib/rpc";
+import { runEmbeddingRefreshTick } from "../api/_lib/embedding-refresh";
 import { runShowIngestTick } from "../api/_lib/show-ingest";
 
-// Consolidated cron dispatch (five schedules):
-//   * * * * *     — bulk catalog ingest: drain due show_ingest_state rows
-//                   (backfill by popularity, then tiered freshness refresh)
-//                   plus an hourly /tv/changes sync piggybacked on the tick
-//   */20 * * * *  — refresh every stale home catalog category (whole surface
-//                   converges to fresh each tick on the Workers Paid plan)
-//   40 * * * *    — refresh release calendars for tracked shows
-//   10 * * * *    — episode-tonight pushes for timezones hitting the digest
-//                   hour, then settle pending Expo push receipts
-//   5 */6 * * *   — TTL cleanup for caches, sessions, OTPs, rate limits
+// Consolidated cron dispatch (six schedules):
+//   * * * * *       — bulk catalog ingest: drain due show_ingest_state rows
+//                     (backfill by popularity, then tiered freshness refresh)
+//                     plus an hourly /tv/changes sync piggybacked on the tick
+//   */20 * * * *    — refresh every stale home catalog category (whole surface
+//                     converges to fresh each tick on the Workers Paid plan)
+//   40 * * * *      — refresh release calendars for tracked shows
+//   10 * * * *      — episode-tonight pushes for timezones hitting the digest
+//                     hour, then settle pending Expo push receipts
+//   5 */6 * * *     — TTL cleanup for caches, sessions, OTPs, rate limits
+//   2-57/5 * * * *  — recs v2: re-embed shows nominated stale by ingest
+//                     (Gemini + Vectorize; daily token budget guard inside)
 export const SHOW_INGEST_CRON = "* * * * *";
 export const CATALOG_ROTATE_CRON = "*/20 * * * *";
 export const RELEASE_REFRESH_CRON = "40 * * * *";
 export const NOTIFICATIONS_CRON = "10 * * * *";
 export const CLEANUP_CRON = "5 */6 * * *";
+export const EMBEDDING_REFRESH_CRON = "2-57/5 * * * *";
 
 const CATALOG_CATEGORIES_PER_TICK = 16;
 const RELEASE_SHOWS_PER_TICK = 12;
 const INGEST_SHOWS_PER_TICK = 200;
+const EMBEDDING_SHOWS_PER_TICK = 40;
 
 export async function runScheduledTasks(cron: string) {
   try {
@@ -57,6 +62,14 @@ export async function runScheduledTasks(cron: string) {
       const digest = await runEpisodeAirNotifications();
       const receipts = await checkExpoPushReceipts();
       console.info("[cron] notifications", { digest, receipts });
+      return;
+    }
+
+    if (cron === EMBEDDING_REFRESH_CRON) {
+      const summary = await runEmbeddingRefreshTick(EMBEDDING_SHOWS_PER_TICK);
+      if ((summary as any).processed || (summary as any).skipped) {
+        console.info("[cron] embedding refresh", summary);
+      }
       return;
     }
 

@@ -38,6 +38,7 @@ export const notificationTypeValues = [
   "comment",
   "episode",
   "list_follow",
+  "contact_joined",
 ] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log"] as const;
@@ -721,88 +722,81 @@ export const releaseEvents = sqliteTable(
   }),
 );
 
-export const showEmbeddings = sqliteTable(
-  "show_embeddings",
+export const embeddingStateStatusValues = ["stale", "embedded", "failed", "skipped"] as const;
+
+// One row per show that recommendations v2 has looked at. Vectors live in the
+// Vectorize index (`plotlist-shows-v2`), never in D1 — this table only tracks
+// what was embedded (doc hash + version) so ingest can mark rows stale and the
+// refresh cron knows what to drain. See docs/recommendations-v2.md.
+export const showEmbeddingState = sqliteTable(
+  "show_embedding_state",
   {
     id: text("id").primaryKey(),
     showId: text("show_id")
       .notNull()
       .references(() => shows.id, { onDelete: "cascade" }),
-    externalSource: text("external_source").notNull(),
-    externalId: text("external_id").notNull(),
+    tmdbId: integer("tmdb_id"),
     embeddingVersion: text("embedding_version").notNull(),
-    model: text("model").notNull(),
-    dimensions: integer("dimensions").notNull(),
-    inputText: text("input_text").notNull(),
+    // Hash of the fully enriched embedding doc that was actually embedded.
     inputHash: text("input_hash").notNull(),
-    similarityEmbedding: vector("similarity_embedding").notNull(),
-    retrievalEmbedding: vector("retrieval_embedding").notNull(),
+    // Hash of just the base shows-row fields; lets ingest detect content
+    // changes without a TMDB enrichment fetch (see api/_lib/embedding-refresh.ts).
+    baseInputHash: text("base_input_hash"),
+    status: text("status", { enum: embeddingStateStatusValues }).notNull(),
+    failCount: integer("fail_count").notNull(),
+    lastError: text("last_error"),
+    embeddedAt: timestampMs("embedded_at"),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
-    showIdx: uniqueIndex("show_embeddings_show_idx").on(table.showId),
-    externalIdx: uniqueIndex("show_embeddings_external_idx").on(
-      table.externalSource,
-      table.externalId,
-    ),
-    versionUpdatedIdx: index("show_embeddings_version_updated_idx").on(
-      table.embeddingVersion,
+    showIdx: uniqueIndex("show_embedding_state_show_idx").on(table.showId),
+    statusUpdatedIdx: index("show_embedding_state_status_updated_idx").on(
+      table.status,
       table.updatedAt,
     ),
   }),
 );
 
-export const showEmbeddingJobs = sqliteTable(
-  "show_embedding_jobs",
+// Curated facet taxonomy (lib/plotlist/facets.ts) with its query-side vectors.
+// Small (~140 rows), so the refresh cron can load every vector and assign
+// facets to freshly embedded shows with in-process cosine math.
+export const facetDefs = sqliteTable(
+  "facet_defs",
   {
     id: text("id").primaryKey(),
-    kind: text("kind").notNull(),
-    status: text("status", { enum: jobStatusValues }).notNull(),
+    key: text("key").notNull(),
+    groupKey: text("group_key").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
     embeddingVersion: text("embedding_version").notNull(),
-    model: text("model").notNull(),
-    dimensions: integer("dimensions").notNull(),
-    batchSize: integer("batch_size").notNull(),
-    nextCursor: text("next_cursor"),
-    processedCount: integer("processed_count").notNull(),
-    embeddedCount: integer("embedded_count").notNull(),
-    skippedCount: integer("skipped_count").notNull(),
-    totalCount: integer("total_count"),
-    startedAt: timestampMs("started_at"),
-    completedAt: timestampMs("completed_at"),
-    failedAt: timestampMs("failed_at"),
-    error: text("error"),
-    createdAt: timestampMs("created_at").notNull(),
+    queryVector: vector("query_vector").notNull(),
+    sortOrder: integer("sort_order").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
-    createdIdx: index("show_embedding_jobs_created_idx").on(table.createdAt),
-    statusCreatedIdx: index("show_embedding_jobs_status_created_idx").on(
-      table.status,
-      table.createdAt,
-    ),
+    keyIdx: uniqueIndex("facet_defs_key_idx").on(table.key),
+    groupIdx: index("facet_defs_group_idx").on(table.groupKey, table.sortOrder),
   }),
 );
 
-export const userTasteCaches = sqliteTable(
-  "user_taste_caches",
+// Top facet assignments per embedded show (score = calibrated cosine).
+// (facetKey, score) index powers category browse rails directly from D1.
+export const showFacets = sqliteTable(
+  "show_facets",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
+    showId: text("show_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    themeKey: text("theme_key").notNull(),
-    embeddingVersion: text("embedding_version").notNull(),
-    signalFingerprint: text("signal_fingerprint").notNull(),
-    recommendations: jsonb("recommendations").notNull(),
-    positiveShowIds: jsonb("positive_show_ids").$type<string[]>().notNull(),
-    negativeShowIds: jsonb("negative_show_ids").$type<string[]>().notNull(),
-    expiresAt: timestampMs("expires_at").notNull(),
-    createdAt: timestampMs("created_at").notNull(),
+      .references(() => shows.id, { onDelete: "cascade" }),
+    facetKey: text("facet_key").notNull(),
+    score: doublePrecision("score").notNull(),
+    rank: integer("rank").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({
-    userThemeIdx: uniqueIndex("user_taste_caches_user_theme_idx").on(table.userId, table.themeKey),
-    userUpdatedIdx: index("user_taste_caches_user_updated_idx").on(table.userId, table.updatedAt),
+    showFacetIdx: uniqueIndex("show_facets_show_facet_idx").on(table.showId, table.facetKey),
+    facetScoreIdx: index("show_facets_facet_score_idx").on(table.facetKey, table.score),
+    showIdx: index("show_facets_show_idx").on(table.showId),
   }),
 );
 
@@ -823,6 +817,10 @@ export const userTastePreferences = sqliteTable(
   }),
 );
 
+// Cached taste profile per user: the L2-normalized centroid of their positive
+// show vectors (minus a damped negative centroid), plus the seeds/facets that
+// produced it. signalFingerprint keys the cache — rebuild only when the
+// underlying watch/rating/favorite signals change. See api/_lib/recs.ts.
 export const userTasteProfiles = sqliteTable(
   "user_taste_profiles",
   {
@@ -832,11 +830,14 @@ export const userTasteProfiles = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     embeddingVersion: text("embedding_version").notNull(),
     signalFingerprint: text("signal_fingerprint").notNull(),
-    favoriteShowIds: jsonb("favorite_show_ids").$type<string[]>().notNull(),
-    favoriteThemes: jsonb("favorite_themes").$type<string[]>().notNull(),
-    positiveShowIds: jsonb("positive_show_ids").$type<string[]>().notNull(),
+    profileVector: vector("profile_vector").notNull(),
+    positiveSeeds: jsonb("positive_seeds")
+      .$type<Array<{ showId: string; weight: number }>>()
+      .notNull(),
     negativeShowIds: jsonb("negative_show_ids").$type<string[]>().notNull(),
-    similarityEmbedding: vector("similarity_embedding").notNull(),
+    topFacets: jsonb("top_facets")
+      .$type<Array<{ key: string; score: number }>>()
+      .notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },
