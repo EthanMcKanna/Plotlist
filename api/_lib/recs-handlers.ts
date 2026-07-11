@@ -376,6 +376,25 @@ export async function getFacetShows(facetKey: string, limit: number) {
   return { key: def.key, title: def.title, description: def.description, items };
 }
 
+// Poster artwork for category browse cards. One indexed top-N query per facet
+// (show_facets facet_score_idx), so callers batch the keys for a whole group.
+export async function getFacetPreviews(facetKeys: string[]) {
+  const validKeys = facetKeys.filter((facetKey) => facetByKey(facetKey));
+  return await Promise.all(
+    validKeys.map(async (facetKey) => {
+      const items = await facetRailItems(facetKey, 3, new Set());
+      return {
+        key: facetKey,
+        posters: items
+          .map((item) => item.show.posterUrl)
+          .filter(
+            (url): url is string => typeof url === "string" && url.length > 0,
+          ),
+      };
+    }),
+  );
+}
+
 // ── Vibe search ─────────────────────────────────────────────────────────────
 
 export async function vibeSearchShows(query: string, limit: number) {

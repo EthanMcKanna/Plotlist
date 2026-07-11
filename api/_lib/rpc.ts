@@ -60,6 +60,7 @@ import { sendPhoneVerificationCode, verifyPhoneVerificationCode } from "./twilio
 import { createUploadToken, getRequestOrigin } from "./uploads";
 import {
   getFacetBrowse,
+  getFacetPreviews,
   getFacetShows,
   getHomeRecommendationRailsV2,
   getPersonalizedRecommendationsV2,
@@ -5289,6 +5290,12 @@ export const actionHandlers: Record<string, RpcHandler> = {
   },
   "embeddings:getFacetBrowse": async () => {
     return await getFacetBrowse();
+  },
+  "embeddings:getFacetPreviews": async ({ args }) => {
+    const parsed = z
+      .object({ facetKeys: z.array(z.string()).min(1).max(40) })
+      .parse(args ?? {});
+    return await getFacetPreviews(parsed.facetKeys);
   },
   "embeddings:getFacetShows": async ({ args }) => {
     const parsed = z

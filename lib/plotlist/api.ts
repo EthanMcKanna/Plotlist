@@ -162,6 +162,7 @@ export const api = {
     getProfileTasteExperience: ref("action", "embeddings:getProfileTasteExperience"),
     searchByVibe: ref("action", "embeddings:searchByVibe"),
     getFacetBrowse: ref("action", "embeddings:getFacetBrowse"),
+    getFacetPreviews: ref("action", "embeddings:getFacetPreviews"),
     getFacetShows: ref("action", "embeddings:getFacetShows"),
   },
   releaseCalendar: {

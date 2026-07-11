@@ -22,6 +22,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 
 import { EmptyState } from "../../components/EmptyState";
+import { GenreExplorer } from "../../components/GenreExplorer";
 import { PeopleDiscovery } from "../../components/PeopleDiscovery";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { Screen } from "../../components/Screen";
@@ -686,6 +687,7 @@ export default function SearchScreen() {
         {/* ── Shows: Discover ──────────────────────────────────── */}
         {showDiscover && (
           <View>
+            <GenreExplorer />
             {isLoadingDiscover ? (
               <SearchDiscoverSkeletons />
             ) : discoverSections.length > 0 ? (
@@ -875,6 +877,21 @@ export default function SearchScreen() {
                       </Pressable>
                     );
                   })}
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      guardedPush("/explore");
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Browse all ${FACET_DEFS.length} categories`}
+                    className="flex-row items-center gap-1 rounded-full px-3 py-2"
+                    style={styles.vibeChip}
+                  >
+                    <Text className="text-[13px] font-semibold text-text-secondary">
+                      All {FACET_DEFS.length} categories
+                    </Text>
+                    <Ionicons name="arrow-forward" size={12} color="#9BA1B0" />
+                  </Pressable>
                 </View>
               </View>
             ) : (
