@@ -1,5 +1,12 @@
-import { useCallback, useMemo } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -18,6 +25,7 @@ import { ShimmerBlock } from "../components/ShowDetailSkeleton";
 import { api } from "../lib/plotlist/api";
 import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsActivity";
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
+import { queryClient } from "../lib/queryClient";
 import { useContactSync } from "../lib/useContactSync";
 
 const PAGE_SIZE = 40;
@@ -87,6 +95,17 @@ export default function FriendsScreen() {
     ),
     [entries.length],
   );
+
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const showSyncPrompt = Boolean(contactStatus && !contactStatus.hasSynced);
 
@@ -182,6 +201,13 @@ export default function FriendsScreen() {
               keyExtractor={(item: FriendActivityEntry) => item.key}
               estimatedItemSize={78}
               contentContainerStyle={{ paddingBottom: 40, paddingTop: 8 }}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="#38BDF8"
+                />
+              }
               ListHeaderComponent={listHeader}
               ListFooterComponent={
                 status === "LoadingMore" ? (

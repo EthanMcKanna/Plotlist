@@ -107,10 +107,40 @@ async function serveUploadedFile(pathname: string, request: Request) {
   });
 }
 
+// Universal-links manifest: lets iOS open https://plotlist.app/... URLs in
+// the app. API and file routes stay in Safari; everything else deep-links.
+const APPLE_APP_SITE_ASSOCIATION = {
+  applinks: {
+    details: [
+      {
+        appIDs: ["697K7CH7J6.com.emckanna.Plotlist"],
+        components: [
+          { "/": "/api/*", exclude: true },
+          { "/": "/files/*", exclude: true },
+          { "/": "/*" },
+        ],
+      },
+    ],
+  },
+};
+
 const workerHandler = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     bootstrap(env);
     const url = new URL(request.url);
+
+    if (
+      url.pathname === "/.well-known/apple-app-site-association" ||
+      url.pathname === "/apple-app-site-association"
+    ) {
+      return new Response(JSON.stringify(APPLE_APP_SITE_ASSOCIATION), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "public, max-age=3600",
+        },
+      });
+    }
 
     if (url.pathname.startsWith("/files/")) {
       return await serveUploadedFile(url.pathname, request);

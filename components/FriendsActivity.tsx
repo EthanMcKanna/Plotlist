@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -126,6 +126,12 @@ function ActivityStars({ rating }: { rating: number }) {
 
 export function getFriendActivityRowLabel(entry: FriendActivityEntry) {
   const name = getFriendActivityActorName(entry.actor);
+  if (entry.kind === "follow") {
+    return `${name} followed ${getFriendActivityActorName(entry.followedUser)}`;
+  }
+  if (entry.kind === "list") {
+    return `${name} created the list ${entry.listTitle}`;
+  }
   const title = entry.show.title ?? "a show";
   if (entry.kind === "review") {
     return `${name} rated ${title}`;
@@ -145,16 +151,22 @@ export function FriendActivityRow({
   isLast: boolean;
 }) {
   const name = getFriendActivityActorName(entry.actor);
-  const title = entry.show.title ?? "a show";
-  const isReview = entry.kind === "review";
-  const verbPhrase = isReview ? "rated" : getFriendWatchedPhrase(entry);
   const timeLabel = formatRelativeTime(entry.timestamp);
-  const metaLabel = entry.episodeLabel;
+  const isReview = entry.kind === "review";
+  const isWatched = entry.kind === "watched";
 
   const openTarget = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (isReview) {
+    if (entry.kind === "review") {
       router.push(`/review/${entry.reviewId}`);
+      return;
+    }
+    if (entry.kind === "follow") {
+      router.push(`/profile/${entry.followedUser._id}`);
+      return;
+    }
+    if (entry.kind === "list") {
+      guardedPush(`/list/${entry.listId}`);
       return;
     }
     guardedPush(`/show/${entry.show._id}`);
@@ -164,6 +176,54 @@ export function FriendActivityRow({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/profile/${entry.actor._id}`);
   };
+
+  const openLogComments = () => {
+    if (entry.kind !== "watched" || !entry.logId) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(
+      `/comments?targetType=log&targetId=${encodeURIComponent(entry.logId)}`,
+    );
+  };
+
+  let headline: ReactNode;
+  if (entry.kind === "follow") {
+    headline = (
+      <>
+        <Text className="font-bold text-text-primary">{name}</Text>
+        {" followed "}
+        <Text className="font-semibold text-text-primary">
+          {getFriendActivityActorName(entry.followedUser)}
+        </Text>
+      </>
+    );
+  } else if (entry.kind === "list") {
+    headline = (
+      <>
+        <Text className="font-bold text-text-primary">{name}</Text>
+        {" created "}
+        <Text className="font-semibold text-text-primary">{entry.listTitle}</Text>
+      </>
+    );
+  } else {
+    headline = (
+      <>
+        <Text className="font-bold text-text-primary">{name}</Text>
+        {` ${isReview ? "rated" : getFriendWatchedPhrase(entry)} `}
+        <Text className="font-semibold text-text-primary">
+          {entry.show.title ?? "a show"}
+        </Text>
+      </>
+    );
+  }
+
+  const metaLabel =
+    entry.kind === "review" || entry.kind === "watched" ? entry.episodeLabel : null;
+  const snippet =
+    entry.kind === "review" && entry.reviewText && !entry.spoiler
+      ? entry.reviewText
+      : entry.kind === "list"
+        ? entry.listDescription
+        : null;
 
   // Avatar and row content are sibling pressables (never nested) so the web
   // output stays valid HTML — a button may not contain another button.
@@ -190,9 +250,7 @@ export function FriendActivityRow({
       >
         <View className="min-w-0 flex-1">
           <Text className="text-[14px] leading-[19px] text-text-secondary" numberOfLines={2}>
-            <Text className="font-bold text-text-primary">{name}</Text>
-            {` ${verbPhrase} `}
-            <Text className="font-semibold text-text-primary">{title}</Text>
+            {headline}
           </Text>
 
           <View className="mt-1 flex-row items-center gap-2">
@@ -202,17 +260,22 @@ export function FriendActivityRow({
                 {metaLabel}
               </Text>
             ) : null}
+            {entry.kind === "list" ? (
+              <Text className="text-[12px] font-semibold text-brand-300" numberOfLines={1}>
+                New list
+              </Text>
+            ) : null}
             <Text className="text-[11px] font-medium text-text-tertiary" numberOfLines={1}>
               {timeLabel}
             </Text>
           </View>
 
-          {isReview && entry.reviewText && !entry.spoiler ? (
+          {snippet ? (
             <Text
               className="mt-1 text-[13px] leading-[18px] text-text-tertiary"
               numberOfLines={2}
             >
-              {entry.reviewText}
+              {snippet}
             </Text>
           ) : null}
           {isReview && entry.spoiler ? (
@@ -233,8 +296,40 @@ export function FriendActivityRow({
           ) : null}
         </View>
 
-        <Poster uri={entry.show.posterUrl} width={40} />
+        {entry.kind === "follow" ? (
+          <Avatar
+            uri={entry.followedAvatarUrl}
+            label={getFriendActivityActorName(entry.followedUser)}
+            size={40}
+          />
+        ) : entry.kind === "list" ? (
+          <View style={styles.listBadge}>
+            <Ionicons
+              name="albums-outline"
+              size={18}
+              color="#9BA1B0"
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
+          </View>
+        ) : (
+          <Poster uri={entry.show.posterUrl} width={40} />
+        )}
       </Pressable>
+
+      {isWatched && entry.logId ? (
+        <Pressable
+          onPress={openLogComments}
+          accessibilityRole="button"
+          accessibilityLabel="View comments on this watch"
+          hitSlop={8}
+          className="active:opacity-70"
+        >
+          <Ionicons name="chatbubble-outline" size={16} color="#5A6070" />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -551,6 +646,16 @@ const styles = StyleSheet.create({
   rowDivider: {
     borderBottomColor: "rgba(255,255,255,0.07)",
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  listBadge: {
+    alignItems: "center",
+    backgroundColor: "#161A22",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    borderWidth: 1,
+    height: 56,
+    justifyContent: "center",
+    width: 40,
   },
   starRow: {
     gap: 1,

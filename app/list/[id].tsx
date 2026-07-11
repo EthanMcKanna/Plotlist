@@ -31,11 +31,13 @@ import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { Comments } from "../../components/Comments";
+import { LikeButton } from "../../components/LikeButton";
 import { Poster } from "../../components/Poster";
 import { Avatar } from "../../components/Avatar";
 import { ListForm } from "../../components/ListForm";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
+import { sharePlotlistLink } from "../../lib/share";
 import type { Id } from "../../lib/plotlist/types";
 import { ReportModal } from "../../components/ReportModal";
 
@@ -667,6 +669,26 @@ export default function ListScreen() {
               style={{ width: "100%", height: 180, borderRadius: 16, marginTop: 16 }}
               contentFit="cover"
             />
+          ) : null}
+
+          {/* ── Like + share (public lists only; private links dead-end for others) ── */}
+          {list.isPublic ? (
+            <View className="mt-4 flex-row items-center gap-3">
+              <LikeButton targetType="list" targetId={listId} />
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void sharePlotlistLink(`/list/${listId}`, `${list.title} on Plotlist`);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Share list"
+                className="rounded-full border border-dark-border bg-dark-card px-4 py-2 active:bg-dark-hover"
+              >
+                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                  Share
+                </Text>
+              </Pressable>
+            </View>
           ) : null}
 
           {!isOwner && list.isPublic ? (

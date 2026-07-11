@@ -16,11 +16,14 @@ export type FriendActivityShow = {
   year?: number | null;
 };
 
-type FriendActivityBase = {
+type FriendActivityCore = {
   key: string;
   timestamp: number;
   actor: FriendActivityActor;
   avatarUrl: string | null;
+};
+
+type FriendActivityBase = FriendActivityCore & {
   show: FriendActivityShow;
 };
 
@@ -30,6 +33,8 @@ export type FriendWatchedEntry = FriendActivityBase & {
   episodeCount: number;
   /** "S2 E4" for a single episode, "3 episodes" for a run, null when unknown. */
   episodeLabel: string | null;
+  /** Newest log in the group; anchors the like/comment thread. Null for legacy rows. */
+  logId: string | null;
 };
 
 export type FriendReviewEntry = FriendActivityBase & {
@@ -41,7 +46,24 @@ export type FriendReviewEntry = FriendActivityBase & {
   episodeLabel: string | null;
 };
 
-export type FriendActivityEntry = FriendWatchedEntry | FriendReviewEntry;
+export type FriendFollowEntry = FriendActivityCore & {
+  kind: "follow";
+  followedUser: FriendActivityActor;
+  followedAvatarUrl: string | null;
+};
+
+export type FriendListEntry = FriendActivityCore & {
+  kind: "list";
+  listId: string;
+  listTitle: string;
+  listDescription: string | null;
+};
+
+export type FriendActivityEntry =
+  | FriendWatchedEntry
+  | FriendReviewEntry
+  | FriendFollowEntry
+  | FriendListEntry;
 
 export type RawFriendFeedItem = {
   type?: unknown;
@@ -60,8 +82,17 @@ export type RawFriendFeedItem = {
     episodeNumber?: number | null;
   } | null;
   log?: {
+    _id?: string;
+    id?: string;
     seasonNumber?: number | null;
     episodeNumber?: number | null;
+  } | null;
+  followedUser?: FriendActivityActor | null;
+  list?: {
+    _id?: string;
+    id?: string;
+    title?: string | null;
+    description?: string | null;
   } | null;
 };
 
@@ -100,6 +131,8 @@ export function buildFriendActivity(
   const watchedByGroup = new Map<string, FriendWatchedEntry>();
   const seenReviewIds = new Set<string>();
   const seenStatusKeys = new Set<string>();
+  const seenFollowKeys = new Set<string>();
+  const seenListIds = new Set<string>();
 
   for (const row of rows) {
     if (typeof row.timestamp !== "number") continue;
@@ -109,10 +142,52 @@ export function buildFriendActivity(
     if (!actor?._id) continue;
     if (viewerId && actor._id === viewerId) continue;
 
+    const avatarUrl = row.avatarUrl ?? actor.avatarUrl ?? actor.image ?? null;
+
+    // Follow and list moments have no show attached.
+    if (row.type === "follow") {
+      const followed = row.followedUser;
+      if (!followed?._id) continue;
+      // Never announce the viewer's own new followers here; that's what the
+      // follow notification is for.
+      if (viewerId && followed._id === viewerId) continue;
+      const key = `follow:${actor._id}:${followed._id}`;
+      if (seenFollowKeys.has(key)) continue;
+      seenFollowKeys.add(key);
+      entries.push({
+        kind: "follow",
+        key,
+        timestamp: row.timestamp,
+        actor,
+        avatarUrl,
+        followedUser: followed,
+        followedAvatarUrl: followed.avatarUrl ?? followed.image ?? null,
+      });
+      continue;
+    }
+
+    if (row.type === "list") {
+      const list = row.list;
+      const listId = list?._id ?? list?.id;
+      const listTitle = list?.title?.trim();
+      if (!list || !listId || !listTitle) continue;
+      if (seenListIds.has(listId)) continue;
+      seenListIds.add(listId);
+      entries.push({
+        kind: "list",
+        key: `list:${listId}`,
+        timestamp: row.timestamp,
+        actor,
+        avatarUrl,
+        listId,
+        listTitle,
+        listDescription: list.description?.trim() || null,
+      });
+      continue;
+    }
+
     const show = row.show ?? null;
     if (!show?._id) continue;
-
-    const avatarUrl = row.avatarUrl ?? actor.avatarUrl ?? actor.image ?? null;
 
     if (row.type === "review") {
       const review = row.review;
@@ -139,6 +214,7 @@ export function buildFriendActivity(
     if (row.type === "log") {
       const groupKey = `watched:${actor._id}:${show._id}`;
       const code = episodeCode(row.log?.seasonNumber, row.log?.episodeNumber);
+      const logId = row.log?._id ?? row.log?.id ?? null;
       const isPremiere =
         row.log?.seasonNumber === 1 && row.log?.episodeNumber === 1;
       const existing = watchedByGroup.get(groupKey);
@@ -148,6 +224,7 @@ export function buildFriendActivity(
         if (row.timestamp > existing.timestamp) {
           existing.timestamp = row.timestamp;
           existing.avatarUrl = existing.avatarUrl ?? avatarUrl;
+          existing.logId = logId ?? existing.logId;
         }
         if (isPremiere) {
           existing.verb = "started";
@@ -163,6 +240,7 @@ export function buildFriendActivity(
           verb: isPremiere ? "started" : "watched",
           episodeCount: 1,
           episodeLabel: code,
+          logId,
         };
         watchedByGroup.set(groupKey, entry);
         entries.push(entry);
@@ -187,6 +265,7 @@ export function buildFriendActivity(
         verb: row.type === "completed" ? "finished" : "started",
         episodeCount: 0,
         episodeLabel: null,
+        logId: null,
       });
     }
   }

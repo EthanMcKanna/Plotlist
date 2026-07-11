@@ -29,7 +29,7 @@ export const watchStatusValues = [
 ] as const;
 
 export const targetTypeValues = ["review", "log", "list"] as const;
-export const reportTargetTypeValues = ["review", "log", "list", "user"] as const;
+export const reportTargetTypeValues = ["review", "log", "list", "user", "comment"] as const;
 export const notificationTypeValues = [
   "follow",
   "follow_request",
@@ -41,7 +41,7 @@ export const notificationTypeValues = [
   "contact_joined",
 ] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
-export const feedItemTypeValues = ["review", "log"] as const;
+export const feedItemTypeValues = ["review", "log", "follow", "list"] as const;
 export const reportStatusValues = ["open", "resolved"] as const;
 export const reportActionValues = ["dismiss", "delete"] as const;
 export const jobStatusValues = ["queued", "running", "completed", "failed"] as const;
@@ -513,9 +513,8 @@ export const feedItems = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type", { enum: feedItemTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
-    showId: text("show_id")
-      .notNull()
-      .references(() => shows.id, { onDelete: "cascade" }),
+    // Nullable: follow/list feed items have no associated show.
+    showId: text("show_id").references(() => shows.id, { onDelete: "cascade" }),
     timestamp: timestampMs("timestamp").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },

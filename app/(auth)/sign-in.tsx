@@ -30,6 +30,7 @@ function readErrorMessage(error: unknown): string {
 }
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -916,6 +917,29 @@ export default function SignInScreen() {
                       </Text>
                     </Pressable>
                   ) : null}
+
+                  <Animated.Text
+                    entering={animateOnMount ? FadeIn.delay(300).duration(400) : undefined}
+                    className="mt-4 text-center text-[12px] leading-4 text-text-tertiary"
+                  >
+                    By continuing you agree to Plotlist&apos;s{" "}
+                    <Text
+                      className="text-[12px] font-semibold text-text-secondary"
+                      onPress={() => router.push("/legal/terms")}
+                      suppressHighlighting
+                    >
+                      Terms
+                    </Text>
+                    {" and "}
+                    <Text
+                      className="text-[12px] font-semibold text-text-secondary"
+                      onPress={() => router.push("/legal/privacy")}
+                      suppressHighlighting
+                    >
+                      Privacy Policy
+                    </Text>
+                    .
+                  </Animated.Text>
                 </Animated.View>
               ) : (
                 <Animated.View key="step-code" entering={paneEntering}>

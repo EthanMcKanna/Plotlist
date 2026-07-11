@@ -26,6 +26,7 @@ import { api } from "../../lib/plotlist/api";
 import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { getFollowButtonState } from "../../lib/profilePrivacy";
+import { sharePlotlistLink } from "../../lib/share";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { SecondaryButton } from "../../components/SecondaryButton";
@@ -399,28 +400,46 @@ export default function ProfileScreen() {
     [createReport, userIdValue],
   );
 
-  const menuOptions = useMemo<ActionSheetOption[]>(
-    () => [
+  const handleShareProfile = useCallback(() => {
+    const name =
+      profile?.user?.displayName ?? profile?.user?.name ?? profile?.user?.username;
+    void sharePlotlistLink(
+      `/profile/${userIdValue}`,
+      name ? `${name} on Plotlist` : "Check out this profile on Plotlist",
+    );
+  }, [profile?.user?.displayName, profile?.user?.name, profile?.user?.username, userIdValue]);
+
+  const menuOptions = useMemo<ActionSheetOption[]>(() => {
+    const options: ActionSheetOption[] = [
       {
-        label: "Report user",
-        icon: "flag-outline" as const,
-        onPress: () => setReportVisible(true),
+        label: "Share profile",
+        icon: "share-outline" as const,
+        onPress: handleShareProfile,
       },
-      isBlockedByViewer
-        ? {
-            label: "Unblock user",
-            icon: "person-add-outline" as const,
-            onPress: () => void handleUnblock(),
-          }
-        : {
-            label: "Block user",
-            icon: "remove-circle-outline" as const,
-            destructive: true,
-            onPress: handleBlock,
-          },
-    ],
-    [handleBlock, handleUnblock, isBlockedByViewer],
-  );
+    ];
+    if (!isOwnProfile) {
+      options.push(
+        {
+          label: "Report user",
+          icon: "flag-outline" as const,
+          onPress: () => setReportVisible(true),
+        },
+        isBlockedByViewer
+          ? {
+              label: "Unblock user",
+              icon: "person-add-outline" as const,
+              onPress: () => void handleUnblock(),
+            }
+          : {
+              label: "Block user",
+              icon: "remove-circle-outline" as const,
+              destructive: true,
+              onPress: handleBlock,
+            },
+      );
+    }
+    return options;
+  }, [handleBlock, handleShareProfile, handleUnblock, isBlockedByViewer, isOwnProfile]);
 
   const [tasteExperience, setTasteExperience] = useState<any | null>(null);
   const [tasteLoading, setTasteLoading] = useState(false);
@@ -511,7 +530,7 @@ export default function ProfileScreen() {
           end={{ x: 0.5, y: 1 }}
           style={{ paddingTop: insets.top + 16, paddingBottom: 16 }}
         >
-          {me && !isOwnProfile ? (
+          {me ? (
             <Pressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

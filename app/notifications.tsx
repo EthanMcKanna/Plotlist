@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { router, type Href } from "expo-router";
@@ -13,6 +13,7 @@ import { formatRelativeTime } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
+import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
 
 const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -130,6 +131,17 @@ export default function NotificationsScreen() {
     [openNotification],
   );
 
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
   return (
     <Screen>
       <View className="flex-1 px-4 pt-2">
@@ -174,6 +186,13 @@ export default function NotificationsScreen() {
               keyExtractor={(item: any) => item._id}
               estimatedItemSize={88}
               contentContainerStyle={listContentStyle}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="#38BDF8"
+                />
+              }
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               onEndReached={() => {
                 if (status === "CanLoadMore") {

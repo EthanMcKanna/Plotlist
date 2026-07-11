@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
+      "associatedDomains": ["applinks:plotlist.app", "applinks:www.plotlist.app"],
       "entitlements": {
         "aps-environment": "production"
       },

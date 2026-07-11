@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Avatar } from "./Avatar";
+import { ReportModal } from "./ReportModal";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { guardedPush } from "../lib/navigation";
@@ -31,15 +32,18 @@ function CommentRow({
   entry,
   viewer,
   onDelete,
+  onReport,
 }: {
   entry: CommentEntry;
   viewer: { _id: string; isAdmin?: boolean | null } | null;
   onDelete: (commentId: string) => void;
+  onReport: (commentId: string) => void;
 }) {
   const { comment, author } = entry;
   const label = commentAuthorLabel(author);
   const pending = isOptimisticCommentId(comment._id);
   const deletable = !pending && canDeleteComment(comment, viewer);
+  const reportable = !pending && Boolean(viewer) && author?._id !== viewer?._id;
 
   const openProfile = useCallback(() => {
     if (author?._id) {
@@ -48,22 +52,31 @@ function CommentRow({
     }
   }, [author?._id]);
 
-  const confirmDelete = useCallback(() => {
-    if (!deletable) {
+  const showOptions = useCallback(() => {
+    if (!deletable && !reportable) {
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert("Delete comment?", "This can't be undone.", [
+    if (deletable) {
+      Alert.alert("Delete comment?", "This can't be undone.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => onDelete(comment._id) },
+      ]);
+      return;
+    }
+    Alert.alert("Comment options", undefined, [
       { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => onDelete(comment._id) },
+      { text: "Report comment", style: "destructive", onPress: () => onReport(comment._id) },
     ]);
-  }, [comment._id, deletable, onDelete]);
+  }, [comment._id, deletable, onDelete, onReport, reportable]);
 
   return (
     <Pressable
-      onLongPress={confirmDelete}
+      onLongPress={showOptions}
       delayLongPress={350}
-      accessibilityHint={deletable ? "Long press to delete" : undefined}
+      accessibilityHint={
+        deletable ? "Long press to delete" : reportable ? "Long press to report" : undefined
+      }
       className={`flex-row gap-3 py-3 ${pending ? "opacity-60" : ""}`}
     >
       <Pressable onPress={openProfile} disabled={!author?._id} className="active:opacity-80">
@@ -228,6 +241,21 @@ export function Comments({
     [remove],
   );
 
+  const report = useMutation(api.reports.create);
+  const [reportCommentId, setReportCommentId] = useState<string | null>(null);
+  const handleReport = useCallback(
+    async (reason?: string) => {
+      if (!reportCommentId) return;
+      try {
+        await report({ targetType: "comment", targetId: reportCommentId, reason });
+        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+      } catch {
+        Alert.alert("Couldn't submit report", "Check your connection and try again.");
+      }
+    },
+    [report, reportCommentId],
+  );
+
   const loading = status === "LoadingFirstPage";
 
   return (
@@ -253,6 +281,7 @@ export function Comments({
               entry={entry}
               viewer={me}
               onDelete={handleDelete}
+              onReport={setReportCommentId}
             />
           ))
         ) : (
@@ -280,6 +309,12 @@ export function Comments({
           onSubmit={handleSubmit}
         />
       </View>
+
+      <ReportModal
+        visible={reportCommentId !== null}
+        onClose={() => setReportCommentId(null)}
+        onSubmit={handleReport}
+      />
     </View>
   );
 }

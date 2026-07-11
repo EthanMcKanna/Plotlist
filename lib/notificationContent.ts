@@ -237,6 +237,22 @@ export function buildCommentNotificationContent(
   };
 }
 
+// For other participants in the thread (they commented earlier but don't own
+// the target), so conversations continue past the owner's first reply.
+export function buildThreadCommentNotificationContent(
+  actorName: string,
+  targetType: string,
+  commentText: string,
+) {
+  const noun = TARGET_NOUNS[targetType] ?? "post";
+  const trimmed = commentText.trim().replace(/\s+/g, " ");
+  const preview = trimmed.length > 80 ? `${trimmed.slice(0, 79)}…` : trimmed;
+  return {
+    title: "New comment",
+    body: `${actorName} also commented on a ${noun} you commented on: “${preview}”`,
+  };
+}
+
 export type PushableNotification = {
   title: string;
   body: string;

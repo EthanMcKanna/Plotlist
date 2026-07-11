@@ -52,6 +52,7 @@ import { VideoPlayer } from "../../components/VideoPlayer";
 import { SimilarShowCard } from "../../components/SimilarShowCard";
 import { Avatar } from "../../components/Avatar";
 import { formatDate } from "../../lib/format";
+import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
 import { ImdbLogo } from "../../components/ImdbBadge";
@@ -1834,7 +1835,30 @@ export default function ShowScreen() {
             <Ionicons name="chevron-back" size={22} color="#F1F3F7" />
           </GlassPressable>
 
-          <View style={{ width: 40 }} />
+          <GlassPressable
+            accessibilityLabel="Share this show"
+            accessibilityRole="button"
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              void sharePlotlistLink(
+                `/show/${showId}`,
+                show?.title ? `${show.title} on Plotlist` : "Check this out on Plotlist",
+              );
+            }}
+            radius={20}
+            surfaceStyle={{
+              height: 40,
+              width: 40,
+            }}
+            contentStyle={{
+              alignItems: "center",
+              height: 40,
+              justifyContent: "center",
+              width: 40,
+            }}
+          >
+            <Ionicons name="share-outline" size={19} color="#F1F3F7" />
+          </GlassPressable>
         </View>
 
         {/* ─── Title & Metadata ─── */}

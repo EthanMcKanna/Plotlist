@@ -625,6 +625,30 @@ export default function SettingsScreen() {
           </GlassSurface>
         </View>
 
+        {/* ── Legal ── */}
+        <View className="mt-10">
+          <SectionHeader title="Legal" />
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <SettingsRow
+              icon="document-text-outline"
+              label="Terms of Service"
+              onPress={() => router.push("/legal/terms")}
+            />
+            <View className="mx-4 h-px bg-dark-border" />
+            <SettingsRow
+              icon="lock-closed-outline"
+              label="Privacy Policy"
+              onPress={() => router.push("/legal/privacy")}
+            />
+            <View className="mx-4 h-px bg-dark-border" />
+            <SettingsRow
+              icon="people-outline"
+              label="Community Guidelines"
+              onPress={() => router.push("/legal/guidelines")}
+            />
+          </GlassSurface>
+        </View>
+
         {/* ── Account ── */}
         <View className="mt-10">
           <SectionHeader title="Account" />

@@ -14,7 +14,7 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/files/*"]
+    "run_worker_first": ["/api/*", "/files/*", "/.well-known/*", "/apple-app-site-association"]
   },
   "d1_databases": [
     {

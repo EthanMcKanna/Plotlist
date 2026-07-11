@@ -23,6 +23,7 @@ import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
 import { formatDate, formatEpisodeCode } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
+import { sharePlotlistLink } from "../../lib/share";
 import { ReportModal } from "../../components/ReportModal";
 
 function ReviewHeader() {
@@ -198,6 +199,22 @@ export default function ReviewScreen() {
 
             <View className="mt-4 flex-row items-center gap-3">
               <LikeButton targetType="review" targetId={review._id} />
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void sharePlotlistLink(
+                    `/review/${review._id}`,
+                    show?.title
+                      ? `${authorName}'s review of ${show.title} on Plotlist`
+                      : `${authorName}'s review on Plotlist`,
+                  );
+                }}
+                className="rounded-full border border-dark-border px-4 py-2 active:bg-dark-hover"
+              >
+                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                  Share
+                </Text>
+              </Pressable>
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

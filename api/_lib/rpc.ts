@@ -2508,29 +2508,49 @@ async function buildFeed(userId: string, args: any) {
     .where(eq(feedItems.ownerId, userId))
     .orderBy(desc(feedItems.timestamp));
   // Rows fanned out before a block was created stay in the table but never
-  // render for either side.
-  const feedRows = await filterRowsByBlockedAuthors(userId, allFeedRows, (row) => row.actorId);
+  // render for either side. Follow items name a second user (the person who
+  // got followed), so those also hide when that user is blocked either way.
+  const actorVisibleRows = await filterRowsByBlockedAuthors(userId, allFeedRows, (row) => row.actorId);
+  const feedRows = await filterRowsByBlockedAuthors(
+    userId,
+    actorVisibleRows,
+    (row) => (row.type === "follow" ? row.targetId : row.actorId),
+  );
   const actorIds = Array.from(new Set(feedRows.map((row) => row.actorId)));
-  const showIds = Array.from(new Set(feedRows.map((row) => row.showId)));
+  const showIds = Array.from(
+    new Set(feedRows.map((row) => row.showId).filter((id): id is string => Boolean(id))),
+  );
   const reviewIds = feedRows.filter((row) => row.type === "review").map((row) => row.targetId);
   const logIds = feedRows.filter((row) => row.type === "log").map((row) => row.targetId);
-  const [actorRows, showRows, reviewRows, logRows] = await Promise.all([
+  const followedUserIds = feedRows.filter((row) => row.type === "follow").map((row) => row.targetId);
+  const listIds = feedRows.filter((row) => row.type === "list").map((row) => row.targetId);
+  const [actorRows, showRows, reviewRows, logRows, followedUserRows, listRows] = await Promise.all([
     actorIds.length ? db.select().from(users).where(inArray(users.id, actorIds)) : [],
     showIds.length ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
     reviewIds.length ? db.select().from(reviews).where(inArray(reviews.id, reviewIds)) : [],
     logIds.length ? db.select().from(watchLogs).where(inArray(watchLogs.id, logIds)) : [],
+    followedUserIds.length ? db.select().from(users).where(inArray(users.id, followedUserIds)) : [],
+    listIds.length ? db.select().from(lists).where(inArray(lists.id, listIds)) : [],
   ]);
   const actors = new Map(actorRows.map((user) => [user.id, toClientUser(user)] as const));
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
   const reviewMap = new Map(reviewRows.map((review) => [review.id, toDoc(review)] as const));
   const logMap = new Map(logRows.map((log) => [log.id, toDoc(log)] as const));
+  const followedUserMap = new Map(followedUserRows.map((user) => [user.id, toClientUser(user)] as const));
+  // Lists made private after fan-out stop rendering; the client drops rows
+  // whose list resolved to null.
+  const listMap = new Map(
+    listRows.filter((list) => list.isPublic).map((list) => [list.id, toDoc(list)] as const),
+  );
   return pageRows(
     feedRows.map((item) => ({
       ...toDoc(item),
       actor: actors.get(item.actorId) ?? null,
-      show: showMap.get(item.showId) ?? null,
+      show: item.showId ? showMap.get(item.showId) ?? null : null,
       review: item.type === "review" ? reviewMap.get(item.targetId) ?? null : null,
       log: item.type === "log" ? logMap.get(item.targetId) ?? null : null,
+      followedUser: item.type === "follow" ? followedUserMap.get(item.targetId) ?? null : null,
+      list: item.type === "list" ? listMap.get(item.targetId) ?? null : null,
     })),
     args,
   );
@@ -2769,7 +2789,13 @@ const FEED_FANOUT_MAX_FOLLOWERS = 5000;
 // D1 statements grouped per batch() call — one network round-trip per group.
 const FEED_FANOUT_STATEMENTS_PER_BATCH = 40;
 
-async function addFeedForFollowers(actorId: string, type: "review" | "log", targetId: string, showId: string, timestamp: number) {
+async function addFeedForFollowers(
+  actorId: string,
+  type: "review" | "log" | "follow" | "list",
+  targetId: string,
+  showId: string | null,
+  timestamp: number,
+) {
   const followerRows = await db
     .select({ followerId: follows.followerId })
     .from(follows)
@@ -2797,6 +2823,40 @@ async function addFeedForFollowers(actorId: string, type: "review" | "log", targ
     const group = statements.slice(i, i + FEED_FANOUT_STATEMENTS_PER_BATCH);
     await db.batch(group as [(typeof statements)[number], ...(typeof statements)[number][]]);
   }
+}
+
+// Admin "delete" resolution removes the reported content itself (the admin UI
+// promises exactly that), mirroring the owner-initiated delete paths plus the
+// dangling comments/likes those paths leave behind.
+async function deleteReportedContent(targetType: string, targetId: string) {
+  if (targetType === "review") {
+    await db.delete(reviews).where(eq(reviews.id, targetId));
+    await db.delete(comments).where(and(eq(comments.targetType, "review"), eq(comments.targetId, targetId)));
+    await db.delete(likes).where(and(eq(likes.targetType, "review"), eq(likes.targetId, targetId)));
+    await db.delete(feedItems).where(and(eq(feedItems.type, "review"), eq(feedItems.targetId, targetId)));
+    return;
+  }
+  if (targetType === "log") {
+    await db.delete(watchLogs).where(eq(watchLogs.id, targetId));
+    await db.delete(comments).where(and(eq(comments.targetType, "log"), eq(comments.targetId, targetId)));
+    await db.delete(likes).where(and(eq(likes.targetType, "log"), eq(likes.targetId, targetId)));
+    await db.delete(feedItems).where(and(eq(feedItems.type, "log"), eq(feedItems.targetId, targetId)));
+    return;
+  }
+  if (targetType === "list") {
+    await db.delete(listItems).where(eq(listItems.listId, targetId));
+    await db.delete(listFollows).where(eq(listFollows.listId, targetId));
+    await db.delete(comments).where(and(eq(comments.targetType, "list"), eq(comments.targetId, targetId)));
+    await db.delete(likes).where(and(eq(likes.targetType, "list"), eq(likes.targetId, targetId)));
+    await db.delete(feedItems).where(and(eq(feedItems.type, "list"), eq(feedItems.targetId, targetId)));
+    await db.delete(lists).where(eq(lists.id, targetId));
+    return;
+  }
+  if (targetType === "comment") {
+    await db.delete(comments).where(eq(comments.id, targetId));
+  }
+  // "user" reports resolve without deletion; account removal stays a
+  // deliberate, separate action.
 }
 
 export const queryHandlers: Record<string, RpcHandler> = {
@@ -4161,6 +4221,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     ]);
 
     await notifyFollow(user, parsed.userIdToFollow);
+    // Followers hear about new connections in their feed. Private-account
+    // follows go through the request path and deliberately never fan out.
+    await addFeedForFollowers(user.id, "follow", parsed.userIdToFollow, null, Date.now());
 
     return { status: "following", followId: inserted[0].id };
   },
@@ -4203,6 +4266,15 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         .update(users)
         .set({ countsFollowers: sql`max(0, ${users.countsFollowers} - 1)` })
         .where(eq(users.id, parsed.userIdToUnfollow)),
+      db
+        .delete(feedItems)
+        .where(
+          and(
+            eq(feedItems.type, "follow"),
+            eq(feedItems.actorId, user.id),
+            eq(feedItems.targetId, parsed.userIdToUnfollow),
+          ),
+        ),
     ]);
 
     return { success: true };
@@ -4469,6 +4541,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     const id = createId("review");
     await db.insert(reviews).values({ id, authorId: user.id, showId: parsed.showId, rating: parsed.rating, reviewText: normalizedText ?? null, spoiler: false, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null, createdAt: now, updatedAt: now });
+    // First rating of an episode reaches followers like any other review;
+    // later rating tweaks on the same episode don't re-fan.
+    await addFeedForFollowers(user.id, "review", id, parsed.showId, now);
     return id;
   },
   "reviews:removeEpisodeRating": async ({ args, req }) => {
@@ -4524,6 +4599,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         });
       }
     }
+    if (parsed.isPublic ?? true) {
+      await addFeedForFollowers(user.id, "list", id, null, now);
+    }
     return id;
   },
   "lists:update": async ({ args, req }) => {
@@ -4575,6 +4653,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     await db.delete(listFollows).where(eq(listFollows.listId, listId));
     await db.delete(comments).where(and(eq(comments.targetType, "list"), eq(comments.targetId, listId)));
     await db.delete(likes).where(and(eq(likes.targetType, "list"), eq(likes.targetId, listId)));
+    await db.delete(feedItems).where(and(eq(feedItems.type, "list"), eq(feedItems.targetId, listId)));
     await db.delete(lists).where(and(eq(lists.id, listId), eq(lists.ownerId, user.id)));
     return { success: true };
   },
@@ -4784,7 +4863,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     const parsed = z
       .object({
-        targetType: z.enum(["review", "log", "list", "user"]),
+        targetType: z.enum(["review", "log", "list", "user", "comment"]),
         targetId: z.string().min(1),
         reason: z.string().optional(),
       })
@@ -4797,6 +4876,13 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     if (!user.isAdmin) throw new ApiError(403, "forbidden", "Admin access required");
     const parsed = z.object({ reportId: z.string(), action: z.enum(["dismiss", "delete"]) }).parse(args ?? {});
+    const reportRows = await db.select().from(reports).where(eq(reports.id, parsed.reportId)).limit(1);
+    if (!reportRows[0]) {
+      throw new ApiError(404, "report_not_found", "Report not found");
+    }
+    if (parsed.action === "delete") {
+      await deleteReportedContent(reportRows[0].targetType, reportRows[0].targetId);
+    }
     await db.update(reports).set({ status: "resolved", resolvedAt: Date.now(), resolvedBy: user.id, action: parsed.action }).where(eq(reports.id, parsed.reportId));
     return { success: true };
   },

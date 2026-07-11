@@ -97,7 +97,9 @@ describe("buildFriendActivity", () => {
       { sinceMs: 100, now },
     );
 
-    expect(entries.map((entry) => entry.show._id)).toEqual(["newest", "newer"]);
+    expect(
+      entries.map((entry) => (entry.kind === "watched" ? entry.show._id : null)),
+    ).toEqual(["newest", "newer"]);
   });
 
   it("dedupes legacy status rows against grouped logs for the same show", () => {
@@ -138,6 +140,7 @@ describe("friend activity copy helpers", () => {
       show: show("silo"),
       episodeCount: 1,
       episodeLabel: null,
+      logId: null,
     };
     expect(getFriendWatchedPhrase({ ...base, verb: "started" })).toBe("started");
     expect(getFriendWatchedPhrase({ ...base, verb: "watched" })).toBe("watched");

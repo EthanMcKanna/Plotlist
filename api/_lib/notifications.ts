@@ -1,6 +1,7 @@
 import { and, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import {
+  comments,
   lists,
   notifications,
   pushTickets,
@@ -11,9 +12,11 @@ import {
   users,
   watchLogs,
   watchStates,
+  type targetTypeValues,
 } from "../../db/schema";
 import {
   buildCommentNotificationContent,
+  buildThreadCommentNotificationContent,
   buildContactJoinedNotificationContent,
   buildEpisodeNotificationContent,
   buildFollowAcceptedNotificationContent,
@@ -31,6 +34,7 @@ import {
 } from "../../lib/notificationContent";
 import { db } from "./db";
 import { createId } from "./ids";
+import { getBlockedEitherWayIdSet } from "./privacy";
 import { chunkForSqlParams } from "./sql-dialect";
 
 const EXPO_PUSH_SEND_URL = "https://exp.host/--/api/v2/push/send";
@@ -551,6 +555,10 @@ export async function notifyLike(
   }
 }
 
+// Cap on how many thread participants hear about one comment; a runaway
+// thread must not turn a single comment into an unbounded push fan-out.
+const THREAD_NOTIFY_MAX_PARTICIPANTS = 20;
+
 export async function notifyComment(
   actor: typeof users.$inferSelect,
   targetType: string,
@@ -560,28 +568,71 @@ export async function notifyComment(
 ) {
   try {
     const target = await resolveTargetOwner(targetType, targetId);
-    if (!target || target.ownerId === actor.id) {
+    if (!target) {
       return;
     }
-    const content = buildCommentNotificationContent(
-      actorDisplayName(actor),
+    const shared = {
+      actorId: actor.id,
+      showId: target.showId ?? null,
       targetType,
-      commentText,
-    );
-    await createNotificationsAndPush([
-      {
+      targetId,
+      data: { url: commentTargetUrl(targetType, targetId), targetType, targetId, actorId: actor.id },
+      // Per-comment key; the unique index is (userId, dedupeKey), so the same
+      // key fans out to every recipient exactly once.
+      dedupeKey: `comment:${commentId}`,
+    };
+    const inputs: NotificationInput[] = [];
+    if (target.ownerId !== actor.id) {
+      const content = buildCommentNotificationContent(
+        actorDisplayName(actor),
+        targetType,
+        commentText,
+      );
+      inputs.push({
         userId: target.ownerId,
         type: "comment",
-        actorId: actor.id,
-        showId: target.showId ?? null,
-        targetType,
-        targetId,
         title: content.title,
         body: content.body,
-        data: { url: commentTargetUrl(targetType, targetId), targetType, targetId, actorId: actor.id },
-        dedupeKey: `comment:${commentId}`,
-      },
-    ]);
+        ...shared,
+      });
+    }
+    // Everyone else already in the thread hears about the new comment too —
+    // without this, conversations die after the owner's first reply. Runs
+    // after the new comment is inserted, so the actor filters themselves out.
+    const priorCommenterRows = await db
+      .selectDistinct({ authorId: comments.authorId })
+      .from(comments)
+      .where(
+        and(
+          eq(comments.targetType, targetType as (typeof targetTypeValues)[number]),
+          eq(comments.targetId, targetId),
+        ),
+      );
+    const participantIds = priorCommenterRows
+      .map((row) => row.authorId)
+      .filter((id) => id !== actor.id && id !== target.ownerId)
+      .slice(0, THREAD_NOTIFY_MAX_PARTICIPANTS);
+    if (participantIds.length > 0) {
+      const blockedIds = await getBlockedEitherWayIdSet(actor.id, participantIds);
+      const threadContent = buildThreadCommentNotificationContent(
+        actorDisplayName(actor),
+        targetType,
+        commentText,
+      );
+      for (const userId of participantIds) {
+        if (blockedIds.has(userId)) {
+          continue;
+        }
+        inputs.push({
+          userId,
+          type: "comment",
+          title: threadContent.title,
+          body: threadContent.body,
+          ...shared,
+        });
+      }
+    }
+    await createNotificationsAndPush(inputs);
   } catch (error) {
     console.warn("[notifications] comment notification failed", error);
   }
