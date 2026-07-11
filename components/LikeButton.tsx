@@ -1,7 +1,19 @@
-import { Alert, Pressable, Text } from "react-native";
+import { Alert, Pressable, StyleSheet, Text } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
+
+const LIKED_COLOR = "#F43F5E";
+const IDLE_COLOR = "#9BA1B0";
 
 export function LikeButton({
   targetType,
@@ -72,29 +84,83 @@ export function LikeButton({
   const likes =
     useQuery(api.likes.listForTarget, { targetType, targetId, limit: 100 }) ?? [];
   const isLiked = !!liked;
+  const count = likes.length;
+
+  // Instagram-style pop: liking squeezes then overshoots; unliking gives a
+  // small dip. Driven from the press (the optimistic update flips instantly).
+  const scale = useSharedValue(1);
+  const heartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePress = () => {
+    if (!isAuthenticated) {
+      Alert.alert("Sign in required", "Sign in to like this.");
+      return;
+    }
+    const willLike = !isLiked;
+    if (willLike) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      scale.value = withSequence(
+        withTiming(0.72, { duration: 90 }),
+        withSpring(1.28, { damping: 11, stiffness: 320 }),
+        withSpring(1, { damping: 15, stiffness: 260 }),
+      );
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      scale.value = withSequence(
+        withTiming(0.85, { duration: 80 }),
+        withSpring(1, { damping: 15, stiffness: 260 }),
+      );
+    }
+    toggle({ targetType, targetId });
+  };
 
   return (
     <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (!isAuthenticated) {
-          Alert.alert("Sign in required", "Sign in to like this.");
-          return;
-        }
-        toggle({ targetType, targetId });
-      }}
-      disabled={!isAuthenticated}
-      className={`rounded-full border px-4 py-2 ${
-        isLiked ? "border-rose-500 bg-rose-500/10" : "border-dark-border bg-dark-card"
-      } ${!isAuthenticated ? "opacity-60" : ""}`}
+      onPress={handlePress}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityState={{ selected: isLiked }}
+      accessibilityLabel={
+        isLiked
+          ? `Unlike. ${count} ${count === 1 ? "like" : "likes"}`
+          : `Like. ${count} ${count === 1 ? "like" : "likes"}`
+      }
+      style={styles.container}
+      className="active:opacity-80"
     >
-      <Text
-        className={`text-xs font-semibold uppercase tracking-wide ${
-          isLiked ? "text-rose-400" : "text-text-secondary"
-        }`}
-      >
-        {isLiked ? "Liked" : "Like"} · {likes.length}
-      </Text>
+      <Animated.View style={heartStyle}>
+        <Ionicons
+          name={isLiked ? "heart" : "heart-outline"}
+          size={24}
+          color={isLiked ? LIKED_COLOR : IDLE_COLOR}
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+      </Animated.View>
+      {count > 0 ? (
+        <Text
+          className="text-[13px] font-semibold"
+          style={{ color: isLiked ? LIKED_COLOR : IDLE_COLOR }}
+        >
+          {count}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 36,
+    // Keeps the heart from hugging neighboring pill buttons while staying
+    // visually borderless.
+    paddingRight: 4,
+  },
+});

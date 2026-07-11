@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Dimensions,
   Pressable,
   ScrollView,
   StatusBar,
@@ -18,7 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
-import { ListRow } from "../../components/ListRow";
+import { FanPreviewCard } from "../../components/FanPreviewCard";
 import { Poster } from "../../components/Poster";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { ReportModal } from "../../components/ReportModal";
@@ -34,6 +35,11 @@ import { Avatar } from "../../components/Avatar";
 import { GlassSurface } from "../../components/NativeGlass";
 import { ShimmerBlock } from "../../components/ShowDetailSkeleton";
 import { TasteMatchSummary, TasteMatchSummarySkeleton } from "../../components/TasteMatchSummary";
+
+// Two public-list cards per row inside the px-6 content column, clamped to
+// the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx).
+const PUBLIC_LIST_CARD_WIDTH =
+  (Math.min(Dimensions.get("window").width, 430) - 48 - 12) / 2;
 
 type ProfileShowPreview = {
   _id: string;
@@ -290,9 +296,26 @@ export default function ProfileScreen() {
     [reviews.length],
   );
 
-  const renderList = useCallback(
-    ({ item }: { item: any }) => (
-      <ListRow id={item._id} title={item.title} description={item.description} />
+  const renderPublicList = useCallback(
+    (item: any) => (
+      <FanPreviewCard
+        key={item._id}
+        title={item.title}
+        accent="#38BDF8"
+        posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
+        meta={
+          typeof item.itemCount === "number"
+            ? `${item.itemCount} ${item.itemCount === 1 ? "show" : "shows"}`
+            : null
+        }
+        width={PUBLIC_LIST_CARD_WIDTH}
+        height={200}
+        accessibilityLabel={`Open list ${item.title}`}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          guardedPush(`/list/${item._id}`);
+        }}
+      />
     ),
     [],
   );
@@ -842,21 +865,18 @@ export default function ProfileScreen() {
           <View className="mt-7">
             <SectionHeader title="Public Lists" />
             {publicListsStatus === "LoadingFirstPage" ? (
-              <View className="mt-4" style={{ gap: 12 }}>
-                <ShimmerBlock width="100%" height={72} radius={12} />
-                <ShimmerBlock width="100%" height={72} radius={12} />
+              <View className="mt-4" style={{ flexDirection: "row", gap: 12 }}>
+                <ShimmerBlock width={PUBLIC_LIST_CARD_WIDTH} height={200} radius={20} />
+                <ShimmerBlock width={PUBLIC_LIST_CARD_WIDTH} height={200} radius={20} />
               </View>
             ) : publicLists.length > 0 ? (
               <View>
-                <FlashList
-                  data={publicLists}
-                  renderItem={renderList}
-                  keyExtractor={(item: any) => item._id}
-                  ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-                  estimatedItemSize={110}
-                  contentContainerStyle={{ paddingVertical: 16 }}
-                  scrollEnabled={false}
-                />
+                <View
+                  className="mt-4 mb-4"
+                  style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}
+                >
+                  {publicLists.map(renderPublicList)}
+                </View>
                 {publicListsStatus === "CanLoadMore" ? (
                   <Pressable
                     onPress={() => {

@@ -7,11 +7,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
+import { FanPreviewCard } from "./FanPreviewCard";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
@@ -31,8 +30,6 @@ import { FACET_DEFS, type FacetDef, type FacetGroupKey } from "../lib/plotlist/f
 
 const CARD_WIDTH = 148;
 const CARD_HEIGHT = 198;
-const FAN_POSTER_WIDTH = 58;
-const FAN_POSTER_HEIGHT = 87;
 
 // Horizontal row of facet-group pills (icon + title, tinted by the group
 // accent when active). Shared between the search page explorer and /explore
@@ -103,29 +100,6 @@ export function FacetGroupPills({
   );
 }
 
-function FanPoster({
-  uri,
-  style,
-}: {
-  uri: string | null;
-  style: object;
-}) {
-  return (
-    <View style={[styles.fanPoster, style]}>
-      {uri ? (
-        <Image
-          source={{ uri }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          priority="low"
-          transition={220}
-        />
-      ) : null}
-    </View>
-  );
-}
-
 function FacetCard({
   facet,
   accent,
@@ -137,52 +111,16 @@ function FacetCard({
   posters: string[];
   onPress: (facet: FacetDef) => void;
 }) {
-  const [front, left, right] = [posters[0] ?? null, posters[1] ?? null, posters[2] ?? null];
   return (
-    <Pressable
-      onPress={() => onPress(facet)}
-      accessibilityRole="button"
+    <FanPreviewCard
+      title={facet.title}
+      accent={accent}
+      posters={posters}
+      action="Browse"
       accessibilityLabel={`Browse ${facet.title}`}
-      style={styles.card}
-      className="active:opacity-85"
-    >
-      <LinearGradient
-        colors={[withAlpha(accent, 0.2), withAlpha(accent, 0.04), "transparent"]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={styles.fanArea}>
-        <FanPoster uri={left} style={styles.fanLeft} />
-        <FanPoster uri={right} style={styles.fanRight} />
-        <FanPoster uri={front} style={styles.fanFront} />
-      </View>
-      <View style={styles.cardFooter}>
-        <Text
-          className="text-[14px] font-extrabold leading-[18px] text-text-primary"
-          numberOfLines={2}
-        >
-          {facet.title}
-        </Text>
-        <View className="mt-1.5 flex-row items-center gap-1">
-          <Text
-            className="text-[11px] font-bold uppercase"
-            style={{ color: accent, letterSpacing: 0.4 }}
-          >
-            Browse
-          </Text>
-          <Ionicons
-            name="arrow-forward"
-            size={11}
-            color={accent}
-            accessible={false}
-            accessibilityElementsHidden
-            aria-hidden={true}
-            importantForAccessibility="no"
-          />
-        </View>
-      </View>
-    </Pressable>
+      style={styles.cardSpacing}
+      onPress={() => onPress(facet)}
+    />
   );
 }
 
@@ -337,44 +275,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     width: CARD_WIDTH,
   },
-  cardFooter: {
-    flex: 1,
-    justifyContent: "flex-end",
-    paddingBottom: 12,
-    paddingHorizontal: 12,
-  },
   cardRow: {
     paddingHorizontal: 24,
     paddingTop: 12,
   },
-  fanArea: {
-    alignItems: "center",
-    height: 112,
-    justifyContent: "flex-start",
-    marginTop: 14,
-  },
-  fanFront: {
-    top: 6,
-  },
-  fanLeft: {
-    left: CARD_WIDTH / 2 - FAN_POSTER_WIDTH / 2 - 34,
-    top: 14,
-    transform: [{ rotate: "-9deg" }],
-  },
-  fanPoster: {
-    backgroundColor: "#1C2028",
-    borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: 9,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: FAN_POSTER_HEIGHT,
-    overflow: "hidden",
-    position: "absolute",
-    width: FAN_POSTER_WIDTH,
-  },
-  fanRight: {
-    right: CARD_WIDTH / 2 - FAN_POSTER_WIDTH / 2 - 34,
-    top: 14,
-    transform: [{ rotate: "9deg" }],
+  cardSpacing: {
+    marginRight: 12,
   },
   pill: {
     alignItems: "center",

@@ -553,12 +553,12 @@ export default function ListScreen() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
+        // Keeps the comment composer visible above the iOS keyboard; the old
+        // KeyboardAvoidingView shrank the scroll area without scrolling the
+        // focused input into view.
+        automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!draggingId}
         bounces={false}
@@ -774,7 +774,6 @@ export default function ListScreen() {
           )}
         </View>
       </ScrollView>
-      </KeyboardAvoidingView>
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}

@@ -31,6 +31,9 @@ export function ListForm({
   const canSubmit = Boolean(title.trim()) && !saving;
   return (
     <View>
+      {/* text-[16px] instead of text-base: Tailwind's text-base carries a
+          24px lineHeight, which vertically misaligns single-line TextInputs
+          on iOS. */}
       <TextInput
         value={title}
         onChangeText={onChangeTitle}
@@ -38,7 +41,7 @@ export function ListForm({
         placeholderTextColor="#5A6070"
         autoFocus={autoFocus}
         maxLength={100}
-        className="rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-base text-text-primary"
+        className="rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-[16px] text-text-primary"
       />
       <TextInput
         value={description}
@@ -47,7 +50,7 @@ export function ListForm({
         placeholderTextColor="#5A6070"
         multiline
         maxLength={500}
-        className="mt-3 min-h-[72px] rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-base text-text-primary"
+        className="mt-3 min-h-[72px] rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-[16px] leading-[22px] text-text-primary"
         style={{ textAlignVertical: "top" }}
       />
       <View className="mt-4 flex-row items-center justify-between">

@@ -2,8 +2,6 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -134,13 +132,14 @@ export default function ReviewScreen() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <View className="flex-1">
         <ReviewHeader />
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
+          // Keeps the comment composer visible above the iOS keyboard; the
+          // old KeyboardAvoidingView shrank the scroll area without scrolling
+          // the focused input into view.
+          automaticallyAdjustKeyboardInsets
           keyboardShouldPersistTaps="handled"
           bounces={false}
           overScrollMode="never"
@@ -233,7 +232,7 @@ export default function ReviewScreen() {
             </View>
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}

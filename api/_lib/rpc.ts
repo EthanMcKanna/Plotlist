@@ -1150,7 +1150,7 @@ async function enrichListDocs(
   const listIds = listRows.map((list) => list.id);
   const ownerIds = Array.from(new Set(listRows.map((list) => list.ownerId)));
 
-  const [itemCounts, followerCounts, viewerFollowRows, ownerRows] = await Promise.all([
+  const [itemCounts, followerCounts, viewerFollowRows, ownerRows, previewRows] = await Promise.all([
     db
       .select({ listId: listItems.listId, total: count() })
       .from(listItems)
@@ -1168,6 +1168,18 @@ async function enrichListDocs(
           .where(and(eq(listFollows.userId, viewerId), inArray(listFollows.listId, listIds)))
       : Promise.resolve([] as Array<{ listId: string }>),
     db.select().from(users).where(inArray(users.id, ownerIds)),
+    // Poster art for list preview cards: first few items per list in list
+    // order (trimmed to 3 per list below).
+    db
+      .select({
+        listId: listItems.listId,
+        position: listItems.position,
+        posterUrl: shows.posterUrl,
+      })
+      .from(listItems)
+      .innerJoin(shows, eq(shows.id, listItems.showId))
+      .where(inArray(listItems.listId, listIds))
+      .orderBy(listItems.listId, listItems.position),
   ]);
 
   const itemCountByList = new Map(itemCounts.map((row) => [row.listId, Number(row.total)]));
@@ -1176,6 +1188,14 @@ async function enrichListDocs(
   );
   const viewerFollowSet = new Set(viewerFollowRows.map((row) => row.listId));
   const ownersById = new Map(ownerRows.map((owner) => [owner.id, toClientUser(owner)]));
+  const previewPostersByList = new Map<string, string[]>();
+  for (const row of previewRows) {
+    if (!row.posterUrl) continue;
+    const posters = previewPostersByList.get(row.listId) ?? [];
+    if (posters.length >= 3) continue;
+    posters.push(row.posterUrl);
+    previewPostersByList.set(row.listId, posters);
+  }
 
   return listRows.map((list) => {
     const owner = ownersById.get(list.ownerId) ?? null;
@@ -1187,6 +1207,7 @@ async function enrichListDocs(
       followerCount: followerCountByList.get(list.id) ?? 0,
       viewerIsFollowing: viewerFollowSet.has(list.id),
       isOwner: viewerId != null && list.ownerId === viewerId,
+      previewPosters: previewPostersByList.get(list.id) ?? [],
     };
   });
 }

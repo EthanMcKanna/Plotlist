@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -16,8 +17,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Avatar } from "../../components/Avatar";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
+import { FanPreviewCard } from "../../components/FanPreviewCard";
 import { ListForm } from "../../components/ListForm";
 import { EmptyState } from "../../components/EmptyState";
 import { Screen } from "../../components/Screen";
@@ -29,6 +30,20 @@ import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+// Match the genre explorer's card grid: two columns inside px-6, clamped to
+// the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx).
+const LIST_CARD_WIDTH =
+  (Math.min(Dimensions.get("window").width, 430) - 48 - 12) / 2;
+const LIST_CARD_HEIGHT = 200;
+
+// Own lists lean brand-sky, private ones go quiet slate, followed lists get
+// the people-green from the search scope actions.
+const LIST_ACCENTS = {
+  public: "#38BDF8",
+  private: "#94A3B8",
+  followed: "#34D399",
+};
 
 function formatListMeta(list: any) {
   const parts: string[] = [];
@@ -87,6 +102,7 @@ export default function ListsScreen() {
         followerCount: 0,
         viewerIsFollowing: false,
         isOwner: true,
+        previewPosters: [],
       };
       localStore.setPaginatedQuery(api.lists.listForUser, { userId: meId }, (current) => {
         if (!current) return current;
@@ -317,8 +333,16 @@ export default function ListsScreen() {
 
   const renderOwnList = useCallback(
     (item: any) => (
-      <Pressable
+      <FanPreviewCard
         key={item._id}
+        title={item.title}
+        accent={item.isPublic ? LIST_ACCENTS.public : LIST_ACCENTS.private}
+        posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
+        meta={formatListMeta(item)}
+        cornerIcon={item.isPublic ? undefined : "lock-closed"}
+        width={LIST_CARD_WIDTH}
+        height={LIST_CARD_HEIGHT}
+        accessibilityLabel={`Open list ${item.title}`}
         onPress={() => openList(item)}
         onLongPress={() => {
           if (typeof item._id !== "string" || item._id.startsWith("optimistic:")) return;
@@ -326,65 +350,33 @@ export default function ListsScreen() {
           setSelectedList(item);
           setActionsVisible(true);
         }}
-        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
-      >
-        <View
-          className={`h-10 w-10 items-center justify-center rounded-xl ${
-            item.isPublic ? "bg-brand-500/15" : "bg-dark-elevated"
-          }`}
-        >
-          <Ionicons
-            name={item.isPublic ? "globe-outline" : "lock-closed-outline"}
-            size={18}
-            color={item.isPublic ? "#0ea5e9" : "#9BA1B0"}
-          />
-        </View>
-        <View className="flex-1">
-          <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={1}>
-            {formatListMeta(item)}
-          </Text>
-          {item.description ? (
-            <Text className="mt-0.5 text-sm text-text-tertiary" numberOfLines={1}>
-              {item.description}
-            </Text>
-          ) : null}
-        </View>
-        <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-      </Pressable>
+      />
     ),
     [openList],
   );
 
   const renderFollowedList = useCallback(
     (item: any) => (
-      <Pressable
+      <FanPreviewCard
         key={item._id}
+        title={item.title}
+        accent={LIST_ACCENTS.followed}
+        posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
+        meta={[
+          item.ownerName ? `by ${item.ownerName}` : null,
+          formatListMeta(item) || null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        width={LIST_CARD_WIDTH}
+        height={LIST_CARD_HEIGHT}
+        accessibilityLabel={`Open list ${item.title}${item.ownerName ? ` by ${item.ownerName}` : ""}`}
         onPress={() => openList(item)}
         onLongPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           setFollowedActionsList(item);
         }}
-        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card p-4 active:bg-dark-hover"
-      >
-        <Avatar
-          uri={item.owner?.avatarUrl}
-          label={item.ownerName ?? item.owner?.username}
-          size={40}
-        />
-        <View className="flex-1">
-          <Text className="text-base font-semibold text-text-primary" numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text className="mt-0.5 text-xs text-text-tertiary" numberOfLines={1}>
-            {item.ownerName ? `by ${item.ownerName}` : "Shared list"}
-            {formatListMeta(item) ? ` · ${formatListMeta(item)}` : ""}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color="#5A6070" />
-      </Pressable>
+      />
     ),
     [openList],
   );
@@ -465,7 +457,9 @@ export default function ListsScreen() {
           </Text>
           {lists.length > 0 ? (
             <>
-              <View style={{ gap: 10 }}>{lists.map(renderOwnList)}</View>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                {lists.map(renderOwnList)}
+              </View>
               {status === "CanLoadMore" ? (
                 <Pressable
                   onPress={() => {
@@ -481,11 +475,12 @@ export default function ListsScreen() {
               ) : null}
             </>
           ) : status === "LoadingFirstPage" && isAuthenticated ? (
-            <View style={{ gap: 10 }}>
-              {[0, 1, 2].map((index) => (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {[0, 1, 2, 3].map((index) => (
                 <View
                   key={index}
-                  className="h-[72px] rounded-2xl border border-dark-border bg-dark-card opacity-50"
+                  className="rounded-[20px] border border-dark-border bg-dark-card opacity-50"
+                  style={{ height: LIST_CARD_HEIGHT, width: LIST_CARD_WIDTH }}
                 />
               ))}
             </View>
@@ -503,7 +498,9 @@ export default function ListsScreen() {
             <Text className="mb-3 text-xs font-bold uppercase tracking-widest text-text-tertiary">
               Following
             </Text>
-            <View style={{ gap: 10 }}>{followedLists.map(renderFollowedList)}</View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {followedLists.map(renderFollowedList)}
+            </View>
             {followedStatus === "CanLoadMore" ? (
               <Pressable
                 onPress={() => {

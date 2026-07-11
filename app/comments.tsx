@@ -1,8 +1,6 @@
 import { useCallback, useState } from "react";
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -53,10 +51,7 @@ export default function CommentsScreen() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <View className="flex-1">
         <View className="flex-row items-center px-4 pt-2">
           <GlassPressable
             onPress={() => {
@@ -81,6 +76,10 @@ export default function CommentsScreen() {
         {targetType && targetId ? (
           <ScrollView
             contentInsetAdjustmentBehavior="automatic"
+            // Keeps the composer visible above the iOS keyboard; the old
+            // KeyboardAvoidingView shrank the scroll area without scrolling
+            // the focused input into view.
+            automaticallyAdjustKeyboardInsets
             keyboardShouldPersistTaps="handled"
             bounces={false}
             overScrollMode="never"
@@ -116,7 +115,7 @@ export default function CommentsScreen() {
             </Text>
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       <ReportModal
         visible={showReport}

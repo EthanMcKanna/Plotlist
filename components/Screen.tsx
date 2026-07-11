@@ -30,6 +30,9 @@ export function Screen({
         <SafeAreaView edges={safeAreaEdges} className="flex-1">
           <ScrollView
             contentInsetAdjustmentBehavior="automatic"
+            // iOS: grow the bottom inset and auto-scroll the focused input
+            // above the keyboard (Android resizes the window natively).
+            automaticallyAdjustKeyboardInsets
             keyboardShouldPersistTaps={keyboardShouldPersistTaps}
             // No top rubber-band: overscroll exposes the hard cutoff above
             // page headers.
