@@ -22,8 +22,9 @@ jest.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium" },
 }));
 
+const mockGuardedPush = jest.fn();
 jest.mock("../../lib/navigation", () => ({
-  guardedPush: jest.fn(),
+  guardedPush: (...args: unknown[]) => mockGuardedPush(...args),
 }));
 
 jest.mock("../../lib/plotlist/react", () => ({
@@ -34,7 +35,27 @@ jest.mock("../../lib/plotlist/react", () => ({
   usePaginatedQuery: () => mockPaginated,
 }));
 
-import { Comments } from "../../components/Comments";
+import {
+  CommentComposer,
+  CommentThreadList,
+  CommentsPreview,
+  useCommentThread,
+} from "../../components/Comments";
+
+// Mirrors how app/comments.tsx composes the thread (list + composer).
+function ThreadHarness() {
+  const thread = useCommentThread("review", "review_1");
+  return (
+    <>
+      <CommentThreadList thread={thread} onReport={jest.fn()} />
+      <CommentComposer
+        viewer={thread.me as any}
+        isAuthenticated={thread.isAuthenticated}
+        onSubmit={thread.submit}
+      />
+    </>
+  );
+}
 
 const entry = (id: string, text: string, authorName: string, authorId = `user_${id}`) => ({
   comment: {
@@ -53,7 +74,7 @@ const entry = (id: string, text: string, authorName: string, authorId = `user_${
   },
 });
 
-describe("Comments", () => {
+describe("comment thread", () => {
   beforeEach(() => {
     mockMe = { _id: "user_me", displayName: "Me" };
     mockPaginated = {
@@ -62,10 +83,11 @@ describe("Comments", () => {
       loadMore: jest.fn(),
     };
     mockAdd.mockClear();
+    mockGuardedPush.mockClear();
   });
 
   it("renders comment text with author names from { comment, author } entries", () => {
-    render(<Comments targetType="review" targetId="review_1" />);
+    render(<ThreadHarness />);
 
     expect(screen.getByText("Loved this finale")).toBeTruthy();
     expect(screen.getByText("Same!")).toBeTruthy();
@@ -73,14 +95,9 @@ describe("Comments", () => {
     expect(screen.getByText("Sam")).toBeTruthy();
   });
 
-  it("shows the comment count in the header", () => {
-    render(<Comments targetType="review" targetId="review_1" />);
-    expect(screen.getByText("2")).toBeTruthy();
-  });
-
   it("shows a friendly empty state instead of blank rows", () => {
     mockPaginated = { results: [], status: "Exhausted", loadMore: jest.fn() };
-    render(<Comments targetType="review" targetId="review_1" />);
+    render(<ThreadHarness />);
     expect(screen.getByText("No comments yet. Start the conversation.")).toBeTruthy();
   });
 
@@ -90,14 +107,14 @@ describe("Comments", () => {
       status: "CanLoadMore",
       loadMore: jest.fn(),
     };
-    render(<Comments targetType="review" targetId="review_1" />);
+    render(<ThreadHarness />);
 
     fireEvent.press(screen.getByText("View more comments"));
     expect(mockPaginated.loadMore).toHaveBeenCalledWith(20);
   });
 
   it("posts trimmed comment text through the add mutation", async () => {
-    render(<Comments targetType="review" targetId="review_1" />);
+    render(<ThreadHarness />);
 
     fireEvent.changeText(screen.getByPlaceholderText("Add a comment…"), "  So good  ");
     await act(async () => {
@@ -111,9 +128,71 @@ describe("Comments", () => {
     });
   });
 
+  it("submits from the keyboard send key", async () => {
+    render(<ThreadHarness />);
+
+    const input = screen.getByPlaceholderText("Add a comment…");
+    expect(input.props.returnKeyType).toBe("send");
+    expect(input.props.submitBehavior).toBe("submit");
+
+    fireEvent.changeText(input, "Sent from the keyboard");
+    await act(async () => {
+      fireEvent(input, "submitEditing");
+    });
+
+    expect(mockAdd).toHaveBeenCalledWith({
+      targetType: "review",
+      targetId: "review_1",
+      text: "Sent from the keyboard",
+    });
+  });
+
   it("does not post when the composer is empty", () => {
-    render(<Comments targetType="review" targetId="review_1" />);
+    render(<ThreadHarness />);
     fireEvent.press(screen.getByLabelText("Post comment"));
     expect(mockAdd).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommentsPreview", () => {
+  beforeEach(() => {
+    mockMe = { _id: "user_me", displayName: "Me" };
+    mockPaginated = {
+      results: [
+        entry("c1", "Oldest comment", "Avery"),
+        entry("c2", "Middle comment", "Sam"),
+        entry("c3", "Newest comment", "Kai"),
+      ],
+      status: "Exhausted",
+      loadMore: jest.fn(),
+    };
+    mockGuardedPush.mockClear();
+  });
+
+  it("shows the most recent comments and a view-all affordance", () => {
+    render(<CommentsPreview targetType="review" targetId="review_1" />);
+
+    expect(screen.queryByText(/Oldest comment/)).toBeNull();
+    expect(screen.getByText(/Middle comment/)).toBeTruthy();
+    expect(screen.getByText(/Newest comment/)).toBeTruthy();
+    expect(screen.getByText("View all comments")).toBeTruthy();
+  });
+
+  it("opens the thread with composer focus from the add-a-comment row", () => {
+    render(<CommentsPreview targetType="review" targetId="review_1" />);
+
+    fireEvent.press(screen.getByLabelText("Add a comment"));
+    expect(mockGuardedPush).toHaveBeenCalledWith(
+      "/comments?targetType=review&targetId=review_1&focus=1",
+    );
+  });
+
+  it("opens the thread without focus when tapping a comment", () => {
+    render(<CommentsPreview targetType="review" targetId="review_1" />);
+
+    fireEvent.press(screen.getByLabelText("View comment by Kai"));
+    expect(mockGuardedPush).toHaveBeenCalledWith(
+      "/comments?targetType=review&targetId=review_1",
+    );
   });
 });

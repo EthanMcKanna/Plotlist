@@ -30,7 +30,7 @@ import Animated, {
 import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
-import { Comments } from "../../components/Comments";
+import { CommentsPreview } from "../../components/Comments";
 import { LikeButton } from "../../components/LikeButton";
 import { Poster } from "../../components/Poster";
 import { Avatar } from "../../components/Avatar";
@@ -555,10 +555,6 @@ export default function ListScreen() {
     <Screen>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        // Keeps the comment composer visible above the iOS keyboard; the old
-        // KeyboardAvoidingView shrank the scroll area without scrolling the
-        // focused input into view.
-        automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!draggingId}
         bounces={false}
@@ -595,16 +591,31 @@ export default function ListScreen() {
             <Text className="flex-1 text-2xl font-semibold text-text-primary">
               {list.title}
             </Text>
-            {isOwner ? (
-              <Pressable
-                onPress={openEdit}
-                accessibilityRole="button"
-                accessibilityLabel="Edit list"
-                className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
-              >
-                <Ionicons name="pencil" size={16} color="#9BA1B0" />
-              </Pressable>
-            ) : null}
+            <View className="flex-row items-center gap-2">
+              {list.isPublic ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    void sharePlotlistLink(`/list/${listId}`, `${list.title} on Plotlist`);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share list"
+                  className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+                >
+                  <Ionicons name="share-outline" size={16} color="#9BA1B0" />
+                </Pressable>
+              ) : null}
+              {isOwner ? (
+                <Pressable
+                  onPress={openEdit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit list"
+                  className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+                >
+                  <Ionicons name="pencil" size={16} color="#9BA1B0" />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           {list.description ? (
@@ -672,23 +683,10 @@ export default function ListScreen() {
             />
           ) : null}
 
-          {/* ── Like + share (public lists only; private links dead-end for others) ── */}
+          {/* ── Like (public lists only; private links dead-end for others) ── */}
           {list.isPublic ? (
-            <View className="mt-4 flex-row items-center gap-3">
+            <View className="mt-4 flex-row items-center">
               <LikeButton targetType="list" targetId={listId} />
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  void sharePlotlistLink(`/list/${listId}`, `${list.title} on Plotlist`);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Share list"
-                className="rounded-full border border-dark-border bg-dark-card px-4 py-2 active:bg-dark-hover"
-              >
-                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Share
-                </Text>
-              </Pressable>
             </View>
           ) : null}
 
@@ -768,7 +766,7 @@ export default function ListScreen() {
           </View>
 
           <View className="mt-8">
-            <Comments targetType="list" targetId={listId} />
+            <CommentsPreview targetType="list" targetId={listId} />
           </View>
             </>
           )}

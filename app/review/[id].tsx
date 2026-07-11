@@ -15,7 +15,8 @@ import { useMutation, useQueryState } from "../../lib/plotlist/react";
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { LikeButton } from "../../components/LikeButton";
-import { Comments } from "../../components/Comments";
+import { ActionSheet } from "../../components/ActionSheet";
+import { CommentsPreview } from "../../components/Comments";
 import { GlassPressable } from "../../components/NativeGlass";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
@@ -94,6 +95,7 @@ export default function ReviewScreen() {
   );
   const report = useMutation(api.reports.create);
   const [showReport, setShowReport] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   if (isLoading) {
     return (
@@ -136,10 +138,6 @@ export default function ReviewScreen() {
         <ReviewHeader />
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
-          // Keeps the comment composer visible above the iOS keyboard; the
-          // old KeyboardAvoidingView shrank the scroll area without scrolling
-          // the focused input into view.
-          automaticallyAdjustKeyboardInsets
           keyboardShouldPersistTaps="handled"
           bounces={false}
           overScrollMode="never"
@@ -196,43 +194,52 @@ export default function ReviewScreen() {
               </View>
             ) : null}
 
-            <View className="mt-4 flex-row items-center gap-3">
+            <View className="mt-4 flex-row items-center justify-between">
               <LikeButton targetType="review" targetId={review._id} />
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  void sharePlotlistLink(
-                    `/review/${review._id}`,
-                    show?.title
-                      ? `${authorName}'s review of ${show.title} on Plotlist`
-                      : `${authorName}'s review on Plotlist`,
-                  );
+                  setShowMenu(true);
                 }}
-                className="rounded-full border border-dark-border px-4 py-2 active:bg-dark-hover"
+                accessibilityRole="button"
+                accessibilityLabel="Review options"
+                className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
               >
-                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Share
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowReport(true);
-                }}
-                className="rounded-full border border-dark-border px-4 py-2 active:bg-dark-hover"
-              >
-                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Report
-                </Text>
+                <Ionicons name="ellipsis-horizontal" size={16} color="#9BA1B0" />
               </Pressable>
             </View>
 
             <View className="mt-6">
-              <Comments targetType="review" targetId={review._id} />
+              <CommentsPreview targetType="review" targetId={review._id} />
             </View>
           </View>
         </ScrollView>
       </View>
+      <ActionSheet
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        title="Review"
+        options={[
+          {
+            label: "Share review",
+            icon: "share-outline",
+            onPress: () => {
+              void sharePlotlistLink(
+                `/review/${review._id}`,
+                show?.title
+                  ? `${authorName}'s review of ${show.title} on Plotlist`
+                  : `${authorName}'s review on Plotlist`,
+              );
+            },
+          },
+          {
+            label: "Report review",
+            icon: "flag-outline",
+            destructive: true,
+            onPress: () => setShowReport(true),
+          },
+        ]}
+      />
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}

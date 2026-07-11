@@ -1,6 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -10,7 +12,12 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 
-import { Comments } from "../components/Comments";
+import { ActionSheet, type ActionSheetOption } from "../components/ActionSheet";
+import {
+  CommentComposer,
+  CommentThreadList,
+  useCommentThread,
+} from "../components/Comments";
 import { LikeButton } from "../components/LikeButton";
 import { GlassPressable } from "../components/NativeGlass";
 import { ReportModal } from "../components/ReportModal";
@@ -21,16 +28,75 @@ import type { CommentTargetType } from "../lib/comments";
 
 const TARGET_TYPES: CommentTargetType[] = ["review", "log", "list"];
 
-// Standalone comments thread for targets without their own detail screen
-// (watch logs) and for notification deep links.
+function CommentsThread({
+  targetType,
+  targetId,
+  autoFocusComposer,
+}: {
+  targetType: CommentTargetType;
+  targetId: string;
+  autoFocusComposer: boolean;
+}) {
+  const thread = useCommentThread(targetType, targetId);
+
+  const report = useMutation(api.reports.create);
+  const [reportCommentId, setReportCommentId] = useState<string | null>(null);
+  const handleReportComment = useCallback(
+    async (reason?: string) => {
+      if (!reportCommentId) return;
+      try {
+        await report({ targetType: "comment", targetId: reportCommentId, reason });
+        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+      } catch {
+        Alert.alert("Couldn't submit report", "Check your connection and try again.");
+      }
+    },
+    [report, reportCommentId],
+  );
+
+  return (
+    <>
+      <ScrollView
+        className="flex-1"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12 }}
+      >
+        <CommentThreadList thread={thread} onReport={setReportCommentId} />
+      </ScrollView>
+
+      {/* Pinned composer: the KeyboardAvoidingView above lifts it with the
+          keyboard, chat-style; its own padding keeps a breathing gap. */}
+      <View className="border-t border-dark-border bg-dark-bg px-5 pb-3 pt-3">
+        <CommentComposer
+          viewer={thread.me}
+          isAuthenticated={thread.isAuthenticated}
+          onSubmit={thread.submit}
+          autoFocus={autoFocusComposer}
+        />
+      </View>
+
+      <ReportModal
+        visible={reportCommentId !== null}
+        onClose={() => setReportCommentId(null)}
+        onSubmit={handleReportComment}
+      />
+    </>
+  );
+}
+
+// Standalone comments thread: the composer's home for every commentable
+// target, plus the like/report surface for watch logs (which have no detail
+// screen of their own).
 export default function CommentsScreen() {
   const params = useLocalSearchParams();
   const targetType = TARGET_TYPES.find((type) => type === params.targetType) ?? null;
   const targetId = typeof params.targetId === "string" ? params.targetId : "";
+  const autoFocusComposer = params.focus === "1";
   const { isAuthenticated } = useAuth();
 
   const report = useMutation(api.reports.create);
   const [showReport, setShowReport] = useState(false);
+  const [showLogMenu, setShowLogMenu] = useState(false);
   const handleReport = useCallback(
     async (reason?: string) => {
       if (!targetType || !targetId) return;
@@ -48,11 +114,25 @@ export default function CommentsScreen() {
   // like or report one; reviews and lists keep those actions on their own
   // screens.
   const showLogActions = targetType === "log" && Boolean(targetId);
+  const logMenuOptions: ActionSheetOption[] = useMemo(
+    () => [
+      {
+        label: "Report watch log",
+        icon: "flag-outline",
+        destructive: true,
+        onPress: () => setShowReport(true),
+      },
+    ],
+    [],
+  );
 
   return (
     <Screen>
-      <View className="flex-1">
-        <View className="flex-row items-center px-4 pt-2">
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View className="flex-row items-center px-4 pt-2 pb-1">
           <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -71,43 +151,33 @@ export default function CommentsScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
-          <Text className="ml-3 text-lg font-bold text-text-primary">Comments</Text>
-        </View>
-        {targetType && targetId ? (
-          <ScrollView
-            contentInsetAdjustmentBehavior="automatic"
-            // Keeps the composer visible above the iOS keyboard; the old
-            // KeyboardAvoidingView shrank the scroll area without scrolling
-            // the focused input into view.
-            automaticallyAdjustKeyboardInsets
-            keyboardShouldPersistTaps="handled"
-            bounces={false}
-            overScrollMode="never"
-          >
-            <View className="px-6 pb-10 pt-4">
-              {showLogActions ? (
-                <View className="mb-4 flex-row items-center gap-3">
-                  <LikeButton targetType="log" targetId={targetId} />
-                  {isAuthenticated ? (
-                    <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        setShowReport(true);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Report this watch log"
-                      className="rounded-full border border-dark-border bg-dark-card px-4 py-2 active:opacity-70"
-                    >
-                      <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                        Report
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
+          <Text className="ml-3 flex-1 text-lg font-bold text-text-primary">Comments</Text>
+          {showLogActions ? (
+            <View className="flex-row items-center gap-2">
+              <LikeButton targetType="log" targetId={targetId} />
+              {isAuthenticated ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setShowLogMenu(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Watch log options"
+                  className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={16} color="#9BA1B0" />
+                </Pressable>
               ) : null}
-              <Comments targetType={targetType} targetId={targetId} showHeader={false} />
             </View>
-          </ScrollView>
+          ) : null}
+        </View>
+
+        {targetType && targetId ? (
+          <CommentsThread
+            targetType={targetType}
+            targetId={targetId}
+            autoFocusComposer={autoFocusComposer}
+          />
         ) : (
           <View className="flex-1 items-center justify-center px-8">
             <Text className="text-center text-base text-text-tertiary">
@@ -115,8 +185,14 @@ export default function CommentsScreen() {
             </Text>
           </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
 
+      <ActionSheet
+        visible={showLogMenu}
+        onClose={() => setShowLogMenu(false)}
+        title="Watch log"
+        options={logMenuOptions}
+      />
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}

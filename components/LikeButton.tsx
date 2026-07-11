@@ -2,10 +2,10 @@ import { Alert, Pressable, StyleSheet, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 
@@ -86,8 +86,10 @@ export function LikeButton({
   const isLiked = !!liked;
   const count = likes.length;
 
-  // Instagram-style pop: liking squeezes then overshoots; unliking gives a
-  // small dip. Driven from the press (the optimistic update flips instantly).
+  // Instagram-style pop: a quick squeeze, overshoot, and settle in ~300ms.
+  // Timings only — a spring in the middle of a withSequence blocks until it
+  // physically settles, which dragged this out for seconds and could leave
+  // the heart oversized.
   const scale = useSharedValue(1);
   const heartStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -102,15 +104,15 @@ export function LikeButton({
     if (willLike) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       scale.value = withSequence(
-        withTiming(0.72, { duration: 90 }),
-        withSpring(1.28, { damping: 11, stiffness: 320 }),
-        withSpring(1, { damping: 15, stiffness: 260 }),
+        withTiming(0.82, { duration: 70, easing: Easing.out(Easing.quad) }),
+        withTiming(1.16, { duration: 130, easing: Easing.out(Easing.quad) }),
+        withTiming(1, { duration: 110, easing: Easing.inOut(Easing.quad) }),
       );
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       scale.value = withSequence(
-        withTiming(0.85, { duration: 80 }),
-        withSpring(1, { damping: 15, stiffness: 260 }),
+        withTiming(0.88, { duration: 70, easing: Easing.out(Easing.quad) }),
+        withTiming(1, { duration: 110, easing: Easing.inOut(Easing.quad) }),
       );
     }
     toggle({ targetType, targetId });

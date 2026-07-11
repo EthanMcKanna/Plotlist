@@ -11,7 +11,6 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Avatar } from "./Avatar";
-import { ReportModal } from "./ReportModal";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { guardedPush } from "../lib/navigation";
@@ -28,6 +27,73 @@ import {
   type CommentEntry,
   type CommentTargetType,
 } from "../lib/comments";
+
+// Data + mutations for one comment thread. The full experience (list +
+// pinned composer) lives on /comments; detail screens embed CommentsPreview.
+export function useCommentThread(targetType: CommentTargetType, targetId: string) {
+  const { isAuthenticated } = useAuth();
+  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip") ?? null;
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.comments.listForTarget,
+    { targetType, targetId },
+    { initialNumItems: 20 },
+  );
+
+  const entries = useMemo(() => normalizeCommentEntries(results), [results]);
+
+  const add = useMutation(api.comments.add).withOptimisticUpdate((localStore, args) => {
+    const entry = buildOptimisticCommentEntry({
+      targetType: args.targetType,
+      targetId: args.targetId,
+      text: args.text,
+      viewer: me,
+    });
+    localStore.setPaginatedQuery(
+      api.comments.listForTarget,
+      { targetType: args.targetType, targetId: args.targetId },
+      (current) =>
+        current && {
+          ...current,
+          page: [...(current.page ?? []), entry],
+          results: [...(current.results ?? current.page ?? []), entry],
+        },
+    );
+  });
+
+  const remove = useMutation(api.comments.deleteComment).withOptimisticUpdate(
+    (localStore, args) => {
+      const keep = (row: any) => (row?.comment?._id ?? row?._id) !== args.commentId;
+      localStore.setPaginatedQuery(
+        api.comments.listForTarget,
+        { targetType, targetId },
+        (current) =>
+          current && {
+            ...current,
+            page: (current.page ?? []).filter(keep),
+            results: (current.results ?? []).filter(keep),
+          },
+      );
+    },
+  );
+
+  const submit = useCallback(
+    async (text: string) => {
+      await add({ targetType, targetId, text });
+    },
+    [add, targetId, targetType],
+  );
+
+  const removeComment = useCallback(
+    (commentId: string) => {
+      remove({ commentId }).catch(() => {
+        Alert.alert("Couldn't delete comment", "Check your connection and try again.");
+      });
+    },
+    [remove],
+  );
+
+  return { isAuthenticated, me, entries, status, loadMore, submit, removeComment };
+}
 
 function CommentRow({
   entry,
@@ -100,14 +166,63 @@ function CommentRow({
   );
 }
 
-function CommentComposer({
+// The scrolling half of the /comments screen: rows + pagination, no composer.
+export function CommentThreadList({
+  thread,
+  onReport,
+}: {
+  thread: ReturnType<typeof useCommentThread>;
+  onReport: (commentId: string) => void;
+}) {
+  const { me, entries, status, loadMore, removeComment } = thread;
+  const loading = status === "LoadingFirstPage";
+
+  return (
+    <View>
+      {loading ? (
+        <View className="items-center py-6">
+          <ActivityIndicator color="#5A6070" />
+        </View>
+      ) : entries.length > 0 ? (
+        entries.map((entry) => (
+          <CommentRow
+            key={entry.comment._id}
+            entry={entry}
+            viewer={me}
+            onDelete={removeComment}
+            onReport={onReport}
+          />
+        ))
+      ) : (
+        <Text className="py-4 text-sm text-text-tertiary">
+          No comments yet. Start the conversation.
+        </Text>
+      )}
+
+      {status === "CanLoadMore" ? (
+        <Pressable onPress={() => loadMore(20)} className="py-2 active:opacity-70">
+          <Text className="text-sm font-medium text-brand-400">View more comments</Text>
+        </Pressable>
+      ) : null}
+      {status === "LoadingMore" ? (
+        <View className="items-center py-2">
+          <ActivityIndicator size="small" color="#5A6070" />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function CommentComposer({
   viewer,
   isAuthenticated,
   onSubmit,
+  autoFocus,
 }: {
   viewer: { avatarUrl?: string | null; displayName?: string | null; username?: string | null } | null;
   isAuthenticated: boolean;
   onSubmit: (text: string) => Promise<void>;
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -151,8 +266,14 @@ function CommentComposer({
           placeholder={isAuthenticated ? "Add a comment…" : "Sign in to comment"}
           editable={isAuthenticated && !sending}
           multiline
+          autoFocus={autoFocus}
           maxLength={COMMENT_MAX_LENGTH}
           placeholderTextColor="#5A6070"
+          // Comments are chat-like: return sends (submitBehavior keeps the
+          // multiline field from inserting a newline and keeps focus).
+          returnKeyType="send"
+          submitBehavior="submit"
+          onSubmitEditing={handleSend}
           className="max-h-24 flex-1 py-1.5 text-[15px] leading-5 text-text-primary"
         />
         <Pressable
@@ -175,150 +296,112 @@ function CommentComposer({
   );
 }
 
-export function Comments({
+const PREVIEW_COUNT = 2;
+
+// Instagram-style embed for detail screens: a couple of recent comments and
+// an "Add a comment…" affordance; every tap opens the dedicated /comments
+// screen, which owns the composer and keyboard.
+export function CommentsPreview({
   targetType,
   targetId,
-  showHeader = true,
 }: {
   targetType: CommentTargetType;
   targetId: string;
-  showHeader?: boolean;
 }) {
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip") ?? null;
-  const { results, status, loadMore } = usePaginatedQuery(
+  const { results, status } = usePaginatedQuery(
     api.comments.listForTarget,
     { targetType, targetId },
     { initialNumItems: 20 },
   );
-
   const entries = useMemo(() => normalizeCommentEntries(results), [results]);
+  const loading = status === "LoadingFirstPage";
+  const hasMore =
+    status === "CanLoadMore" || entries.length > PREVIEW_COUNT;
+  const previewEntries = entries.slice(-PREVIEW_COUNT);
 
-  const add = useMutation(api.comments.add).withOptimisticUpdate((localStore, args) => {
-    const entry = buildOptimisticCommentEntry({
-      targetType: args.targetType,
-      targetId: args.targetId,
-      text: args.text,
-      viewer: me,
-    });
-    localStore.setPaginatedQuery(
-      api.comments.listForTarget,
-      { targetType: args.targetType, targetId: args.targetId },
-      (current) =>
-        current && {
-          ...current,
-          page: [...(current.page ?? []), entry],
-          results: [...(current.results ?? current.page ?? []), entry],
-        },
-    );
-  });
-
-  const remove = useMutation(api.comments.deleteComment).withOptimisticUpdate(
-    (localStore, args) => {
-      const keep = (row: any) => (row?.comment?._id ?? row?._id) !== args.commentId;
-      localStore.setPaginatedQuery(
-        api.comments.listForTarget,
-        { targetType, targetId },
-        (current) =>
-          current && {
-            ...current,
-            page: (current.page ?? []).filter(keep),
-            results: (current.results ?? []).filter(keep),
-          },
+  const openThread = useCallback(
+    (focusComposer: boolean) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      guardedPush(
+        `/comments?targetType=${targetType}&targetId=${targetId}${
+          focusComposer ? "&focus=1" : ""
+        }`,
       );
     },
+    [targetId, targetType],
   );
-
-  const handleSubmit = useCallback(
-    async (text: string) => {
-      await add({ targetType, targetId, text });
-    },
-    [add, targetId, targetType],
-  );
-
-  const handleDelete = useCallback(
-    (commentId: string) => {
-      remove({ commentId }).catch(() => {
-        Alert.alert("Couldn't delete comment", "Check your connection and try again.");
-      });
-    },
-    [remove],
-  );
-
-  const report = useMutation(api.reports.create);
-  const [reportCommentId, setReportCommentId] = useState<string | null>(null);
-  const handleReport = useCallback(
-    async (reason?: string) => {
-      if (!reportCommentId) return;
-      try {
-        await report({ targetType: "comment", targetId: reportCommentId, reason });
-        Alert.alert("Report submitted", "Thanks — we'll take a look.");
-      } catch {
-        Alert.alert("Couldn't submit report", "Check your connection and try again.");
-      }
-    },
-    [report, reportCommentId],
-  );
-
-  const loading = status === "LoadingFirstPage";
 
   return (
     <View>
-      {showHeader ? (
-        <View className="flex-row items-baseline gap-2">
-          <Text className="text-base font-semibold text-text-primary">Comments</Text>
-          {!loading && entries.length > 0 ? (
-            <Text className="text-sm text-text-tertiary">{entries.length}</Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      <View className={showHeader ? "mt-1" : ""}>
-        {loading ? (
-          <View className="items-center py-6">
-            <ActivityIndicator color="#5A6070" />
-          </View>
-        ) : entries.length > 0 ? (
-          entries.map((entry) => (
-            <CommentRow
-              key={entry.comment._id}
-              entry={entry}
-              viewer={me}
-              onDelete={handleDelete}
-              onReport={setReportCommentId}
-            />
-          ))
-        ) : (
-          <Text className="py-4 text-sm text-text-tertiary">
-            No comments yet. Start the conversation.
+      <View className="flex-row items-baseline gap-2">
+        <Text className="text-base font-semibold text-text-primary">Comments</Text>
+        {!loading && entries.length > 0 ? (
+          <Text className="text-sm text-text-tertiary">
+            {status === "CanLoadMore" ? `${entries.length}+` : entries.length}
           </Text>
-        )}
+        ) : null}
+      </View>
 
-        {status === "CanLoadMore" ? (
-          <Pressable onPress={() => loadMore(20)} className="py-2 active:opacity-70">
-            <Text className="text-sm font-medium text-brand-400">View more comments</Text>
+      {loading ? (
+        <View className="items-center py-5">
+          <ActivityIndicator size="small" color="#5A6070" />
+        </View>
+      ) : (
+        <View className="mt-1">
+          {previewEntries.map((entry) => {
+            const label = commentAuthorLabel(entry.author);
+            return (
+              <Pressable
+                key={entry.comment._id}
+                onPress={() => openThread(false)}
+                accessibilityRole="button"
+                accessibilityLabel={`View comment by ${label}`}
+                className="flex-row items-start gap-2.5 py-2 active:opacity-70"
+              >
+                <Avatar uri={entry.author?.avatarUrl} label={label} size={26} />
+                <Text
+                  className="min-w-0 flex-1 text-[14px] leading-5 text-text-secondary"
+                  numberOfLines={2}
+                >
+                  <Text className="font-semibold text-text-primary">{label}</Text>{" "}
+                  {entry.comment.text}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          {hasMore ? (
+            <Pressable
+              onPress={() => openThread(false)}
+              accessibilityRole="button"
+              accessibilityLabel="View all comments"
+              className="py-2 active:opacity-70"
+            >
+              <Text className="text-sm font-medium text-text-tertiary">
+                View all comments
+              </Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable
+            onPress={() => openThread(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Add a comment"
+            className="mt-1 flex-row items-center gap-2.5 active:opacity-70"
+          >
+            <Avatar
+              uri={me?.avatarUrl}
+              label={me?.displayName ?? me?.username}
+              size={26}
+            />
+            <View className="min-h-[36px] flex-1 justify-center rounded-3xl border border-dark-border bg-dark-card px-4">
+              <Text className="text-[14px] text-text-tertiary">Add a comment…</Text>
+            </View>
           </Pressable>
-        ) : null}
-        {status === "LoadingMore" ? (
-          <View className="items-center py-2">
-            <ActivityIndicator size="small" color="#5A6070" />
-          </View>
-        ) : null}
-      </View>
-
-      <View className="mt-2">
-        <CommentComposer
-          viewer={me}
-          isAuthenticated={isAuthenticated}
-          onSubmit={handleSubmit}
-        />
-      </View>
-
-      <ReportModal
-        visible={reportCommentId !== null}
-        onClose={() => setReportCommentId(null)}
-        onSubmit={handleReport}
-      />
+        </View>
+      )}
     </View>
   );
 }
