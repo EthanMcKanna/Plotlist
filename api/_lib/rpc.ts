@@ -788,7 +788,14 @@ async function buildUserProfile(
   // Relationship facts come from point lookups and one aggregated join —
   // never from loading either side's full follow graph.
   const viewerFollowsAlias = alias(follows, "viewer_follows");
-  const [isFollowingRows, followsViewerRows, pendingRequestRows, mutualRows, contactRows] =
+  const [
+    isFollowingRows,
+    followsViewerRows,
+    pendingRequestRows,
+    mutualRows,
+    contactRows,
+    mutualPreviewEdges,
+  ] =
     viewerId && !isOwnProfile
       ? await Promise.all([
           db
@@ -832,14 +839,44 @@ async function buildUserProfile(
               ),
             )
             .limit(1),
+          db
+            .select({ userId: follows.followerId })
+            .from(follows)
+            .innerJoin(
+              viewerFollowsAlias,
+              and(
+                eq(viewerFollowsAlias.followeeId, follows.followerId),
+                eq(viewerFollowsAlias.followerId, viewerId),
+              ),
+            )
+            .where(eq(follows.followeeId, profileUser.id))
+            .orderBy(desc(follows.createdAt))
+            .limit(3),
         ])
-      : [[], [], [], [], []];
+      : [[], [], [], [], [], []];
 
   const isFollowing = isFollowingRows.length > 0;
   const profileFollowsViewer = followsViewerRows.length > 0;
   const hasPendingRequest = pendingRequestRows.length > 0;
   const mutualCount = Number(mutualRows[0]?.value ?? 0);
   const inContacts = contactRows.length > 0;
+
+  // Mutuals are people the viewer follows, and blocking removes the follow
+  // edge in both directions, so the preview needs no extra block filtering.
+  const mutualPreviewUsers =
+    mutualPreviewEdges.length > 0
+      ? await getUsersByIdsChunked(mutualPreviewEdges.map((row) => row.userId))
+      : [];
+  const mutualUserById = new Map(mutualPreviewUsers.map((row) => [row.id, row] as const));
+  const mutualPreview = mutualPreviewEdges
+    .map((edge) => mutualUserById.get(edge.userId))
+    .filter((row): row is typeof users.$inferSelect => Boolean(row))
+    .map((row) => ({
+      _id: row.id,
+      displayName: row.displayName ?? row.name ?? null,
+      username: row.username ?? null,
+      avatarUrl: row.avatarUrl ?? row.image ?? null,
+    }));
 
   const relationship = viewerId
     ? {
@@ -848,6 +885,7 @@ async function buildUserProfile(
         followsYou: profileFollowsViewer,
         isMutualFollow: isFollowing && profileFollowsViewer,
         mutualCount,
+        mutualPreview,
         hasPendingRequest,
         blockedByViewer: block.blockedByViewer,
       }
@@ -2983,6 +3021,57 @@ export const queryHandlers: Record<string, RpcHandler> = {
       userId: parsed.userId,
       viewerId: viewer?.id ?? parsed.userId,
     });
+  },
+  "follows:listMutualFollowers": async ({ args, req }) => {
+    const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
+    const viewer = await getOptionalAuthUser(req);
+    // Mutuals only exist relative to a signed-in viewer looking at someone
+    // else's profile.
+    if (!viewer || viewer.id === parsed.userId) {
+      return EMPTY_PAGE;
+    }
+    // Unlike followers/following, this list only reveals the viewer's own
+    // follow graph, so it stays visible on private profiles — matching the
+    // mutualPreview the profile header already shows. Someone who blocked
+    // the viewer doesn't exist for them.
+    const targetRows = await db.select({ id: users.id }).from(users).where(eq(users.id, parsed.userId)).limit(1);
+    if (!targetRows[0]) {
+      return EMPTY_PAGE;
+    }
+    const block = await getBlockStatus(viewer.id, parsed.userId);
+    if (block.hasBlockedViewer) {
+      return EMPTY_PAGE;
+    }
+    const { offset, numItems } = parsePaginationWindow(args);
+    const viewerFollows = alias(follows, "viewer_follows");
+    const rows = await db
+      .select({ otherId: follows.followerId, createdAt: follows.createdAt })
+      .from(follows)
+      .innerJoin(
+        viewerFollows,
+        and(
+          eq(viewerFollows.followeeId, follows.followerId),
+          eq(viewerFollows.followerId, viewer.id),
+        ),
+      )
+      .where(eq(follows.followeeId, parsed.userId))
+      .orderBy(desc(follows.createdAt))
+      .limit(numItems + 1)
+      .offset(offset);
+    const pageEdges = rows.slice(0, numItems);
+    const userRows =
+      pageEdges.length > 0 ? await getUsersByIdsChunked(pageEdges.map((row) => row.otherId)) : [];
+    const userById = new Map(userRows.map((row) => [row.id, row] as const));
+    const orderedUsers = pageEdges
+      .map((edge) => userById.get(edge.otherId))
+      .filter((row): row is typeof users.$inferSelect => Boolean(row));
+    const previews = await buildPersonPreviews(viewer.id, orderedUsers);
+    return {
+      page: previews,
+      results: previews,
+      continueCursor: String(offset + pageEdges.length),
+      isDone: rows.length <= numItems,
+    };
   },
   "likes:getForUserTarget": async ({ args, req }) => {
     const user = await requireAuthUser(req);

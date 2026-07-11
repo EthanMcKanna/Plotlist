@@ -304,10 +304,28 @@ export default function ProfileScreen() {
     if (relationship.inContacts) parts.push("In your contacts");
     if (relationship.isMutualFollow) parts.push("Mutual follow");
     else if (relationship.followsYou) parts.push("Follows you");
-    if (relationship.mutualCount > 0) {
-      parts.push(`${relationship.mutualCount} mutual${relationship.mutualCount === 1 ? "" : "s"}`);
-    }
     return parts.join(" · ") || null;
+  }, [profile?.relationship]);
+
+  const mutualPreview = profile?.relationship?.mutualPreview ?? [];
+  const mutualsLine = useMemo(() => {
+    const relationship = profile?.relationship;
+    const preview = relationship?.mutualPreview ?? [];
+    if (!relationship || relationship.mutualCount <= 0 || preview.length === 0) return null;
+
+    const names = preview
+      .slice(0, 2)
+      .map(
+        (person: any) =>
+          person.displayName ?? (person.username ? `@${person.username}` : "someone"),
+      );
+    const others = relationship.mutualCount - names.length;
+    if (others <= 0) {
+      return names.length === 2
+        ? `Followed by ${names[0]} and ${names[1]}`
+        : `Followed by ${names[0]}`;
+    }
+    return `Followed by ${names.join(", ")} and ${others} other${others === 1 ? "" : "s"}`;
   }, [profile?.relationship]);
 
   const isOwnProfile = me && me._id === userIdValue;
@@ -546,6 +564,48 @@ export default function ProfileScreen() {
                 </View>
               ) : null}
             </View>
+
+            {/* ── Mutual followers preview ── */}
+            {mutualsLine ? (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  guardedPush(`/profile/${userIdValue}/mutuals`);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={mutualsLine}
+                accessibilityHint="Shows the full list of mutual followers"
+                className="mt-3 flex-row items-center active:opacity-70"
+              >
+                <View className="flex-row">
+                  {mutualPreview.slice(0, 3).map((person: any, index: number) => (
+                    <View
+                      key={person._id}
+                      style={{
+                        marginLeft: index === 0 ? 0 : -9,
+                        borderRadius: 999,
+                        borderWidth: 2,
+                        borderColor: "#0D1821",
+                        zIndex: 3 - index,
+                      }}
+                    >
+                      <Avatar
+                        uri={person.avatarUrl}
+                        label={person.displayName ?? person.username}
+                        size={24}
+                      />
+                    </View>
+                  ))}
+                </View>
+                <Text
+                  className="ml-2 text-xs leading-4 text-text-secondary"
+                  style={{ flexShrink: 1 }}
+                  numberOfLines={2}
+                >
+                  {mutualsLine}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </LinearGradient>
 

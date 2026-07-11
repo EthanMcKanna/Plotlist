@@ -56,6 +56,7 @@ export const api = {
     getRelationship: ref("query", "follows:getRelationship"),
     listFollowersDetailed: ref("query", "follows:listFollowersDetailed"),
     listFollowingDetailed: ref("query", "follows:listFollowingDetailed"),
+    listMutualFollowers: ref("query", "follows:listMutualFollowers"),
   },
   followRequests: {
     listIncoming: ref("query", "followRequests:listIncoming"),
