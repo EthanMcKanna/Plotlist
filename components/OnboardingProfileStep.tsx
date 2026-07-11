@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { PrimaryButton } from "./PrimaryButton";
 import { TextField } from "./TextField";
 import { api } from "../lib/plotlist/api";
+import { getUserFacingApiErrorMessage } from "../lib/api/client";
 import { uploadAvatarImage } from "../lib/avatarUpload";
 import { sanitizeUsername, validateUsername } from "../lib/username";
 import { useMutation, useQuery } from "../lib/plotlist/react";
@@ -65,7 +66,7 @@ export function OnboardingProfileStep({
       if (msg.toLowerCase().includes("username already taken")) {
         Alert.alert("Username taken", "That username is already in use. Try another one.");
       } else {
-        Alert.alert("Could not save", msg);
+        Alert.alert("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
       }
     } finally {
       setSaving(false);

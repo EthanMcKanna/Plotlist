@@ -38,6 +38,7 @@ import { ListForm } from "../../components/ListForm";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
 import { sharePlotlistLink } from "../../lib/share";
+import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import type { Id } from "../../lib/plotlist/types";
 import { ReportModal } from "../../components/ReportModal";
 
@@ -437,7 +438,7 @@ export default function ListScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditVisible(false);
     } catch (error) {
-      Alert.alert("Could not save changes", String(error));
+      Alert.alert("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setSavingEdit(false);
     }

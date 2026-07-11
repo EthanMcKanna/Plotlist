@@ -37,6 +37,7 @@ import {
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
+import { moderateText } from "./moderation";
 import { ensurePhoneIdentity } from "./auth";
 import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
 import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
@@ -4027,6 +4028,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "users:ensureProfile": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = ensureProfileArgs.parse(args ?? {});
+    await moderateText("profile", [parsed.displayName, parsed.username]);
     const providedUsername = parsed.username
       ? parsed.username.toLowerCase().replace(/[^a-z0-9_]+/g, "")
       : user.username;
@@ -4054,6 +4056,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "users:updateProfile": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = updateProfileArgs.parse(args ?? {});
+    await moderateText("profile", [parsed.displayName, parsed.bio, parsed.username]);
     const username = parsed.username
       ? parsed.username.toLowerCase().replace(/[^a-z0-9_]+/g, "")
       : user.username;
@@ -4432,6 +4435,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "comments:add": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = targetArgs.extend({ text: z.string().min(1) }).parse(args ?? {});
+    await moderateText("comment", [parsed.text]);
     await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("comment");
     await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, text: parsed.text, createdAt: Date.now() });
@@ -4497,6 +4501,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       episodeNumber: z.number().optional(),
       episodeTitle: z.string().optional(),
     }).parse(args ?? {});
+    await moderateText("review", [parsed.reviewText]);
     const id = createId("review");
     const now = Date.now();
     await db.insert(reviews).values({
@@ -4526,6 +4531,8 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       // Omitted -> keep the existing note; empty string or null -> clear it.
       reviewText: z.string().nullable().optional(),
     }).parse(args ?? {});
+    // No-op unless the user actually wrote a note, so plain star taps stay fast.
+    await moderateText("review", [parsed.reviewText]);
     const existing = await db.select().from(reviews).where(and(eq(reviews.authorId, user.id), eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber))).limit(1);
     const now = Date.now();
     const normalizedText =
@@ -4575,6 +4582,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     if (!title) {
       throw new ApiError(400, "invalid_title", "Give your list a name.");
     }
+    await moderateText("list", [title, parsed.description]);
     const id = createId("list");
     const now = Date.now();
     await db.insert(lists).values({
@@ -4620,6 +4628,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       .where(and(eq(lists.id, parsed.listId), eq(lists.ownerId, user.id)))
       .limit(1);
     if (!listRows[0]) throw new ApiError(404, "list_not_found", "List not found");
+    await moderateText("list", [parsed.title, parsed.description]);
     const updates: Partial<typeof lists.$inferInsert> = { updatedAt: Date.now() };
     if (parsed.title !== undefined) {
       const title = parsed.title.trim();

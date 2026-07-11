@@ -28,6 +28,17 @@ export class PlotlistApiError extends Error {
   }
 }
 
+/**
+ * Message for errors the server wrote for the user to read (moderation
+ * rejections); null for everything else so callers keep their generic copy.
+ */
+export function getUserFacingApiErrorMessage(error: unknown): string | null {
+  if (error instanceof PlotlistApiError && error.code === "content_flagged") {
+    return error.message;
+  }
+  return null;
+}
+
 async function parseError(response: Response) {
   const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
   throw new PlotlistApiError(

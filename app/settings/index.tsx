@@ -15,6 +15,7 @@ import { PrimaryButton } from "../../components/PrimaryButton";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
 import { api } from "../../lib/plotlist/api";
+import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import { clearAuthTokens, getStoredSignInPhone } from "../../lib/authStorage";
 import { uploadAvatarImage } from "../../lib/avatarUpload";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
@@ -241,7 +242,7 @@ export default function SettingsScreen() {
       if (msg.toLowerCase().includes("username already taken")) {
         Alert.alert("Username taken", "That username is already in use. Try another one.");
       } else {
-        Alert.alert("Could not save", msg);
+        Alert.alert("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
       }
     } finally {
       setSaving(false);

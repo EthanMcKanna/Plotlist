@@ -1,6 +1,7 @@
 import { ApiError } from "../_lib/errors";
 import { json, methodNotAllowed } from "../_lib/http";
 import { createId } from "../_lib/ids";
+import { moderateImage } from "../_lib/moderation";
 import { getFileExtension, getRequestOrigin, verifyUploadToken } from "../_lib/uploads";
 import { getUploadsBucket } from "../../worker/storage";
 
@@ -41,6 +42,8 @@ export default async function handler(req: any, res: any) {
     if (body.length > MAX_UPLOAD_BYTES) {
       throw new ApiError(413, "upload_too_large", "Upload exceeds the 8MB limit");
     }
+
+    await moderateImage("avatar", body, contentType);
 
     const extension = getFileExtension(contentType);
     const key = `uploads/${payload.userId}/${createId("blob")}.${extension}`;

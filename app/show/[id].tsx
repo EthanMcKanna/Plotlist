@@ -64,6 +64,7 @@ import {
   ShowDetailSkeleton,
 } from "../../components/ShowDetailSkeleton";
 import { mapGenreIdsToNames } from "../../lib/plotlist/embeddingUtils";
+import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import {
   optimisticMarkSeasonWatched,
   optimisticToggleEpisode,
@@ -1512,7 +1513,7 @@ export default function ShowScreen() {
       setReviewText(draft.reviewText);
       setSpoiler(draft.spoiler);
       setReviewSheetVisible(true);
-      Alert.alert("Could not publish review", String(error));
+      Alert.alert("Could not publish review", getUserFacingApiErrorMessage(error) ?? String(error));
     }
   }, [createReview, isAuthenticated, isShowPreview, rating, reviewText, showId, spoiler]);
 
@@ -1580,7 +1581,7 @@ export default function ShowScreen() {
       setNewListMode(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Could not create list", String(error));
+      Alert.alert("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setCreatingList(false);
     }
@@ -3253,12 +3254,13 @@ export default function ShowScreen() {
                                     episodeTitle: selectedEpisode.episode.name,
                                     rating: myEpRating,
                                     reviewText: draft,
-                                  }).catch(() => {
+                                  }).catch((error) => {
                                     setEpisodeReviewText(draft);
                                     setEpisodeReviewExpanded(true);
                                     Alert.alert(
                                       "Couldn't save review",
-                                      "Check your connection and try again.",
+                                      getUserFacingApiErrorMessage(error) ??
+                                        "Check your connection and try again.",
                                     );
                                   });
                                 }}

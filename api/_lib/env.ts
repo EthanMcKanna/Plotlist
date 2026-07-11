@@ -12,6 +12,7 @@ const serverEnvSchema = z.object({
   APPLE_BUNDLE_ID: z.string().min(1).default("com.emckanna.Plotlist"),
   GEMINI_API_KEY: z.string().min(1).optional(),
   OMDB_API_KEY: z.string().min(1).optional(),
+  OPENAI_MODERATION_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2"),
   GEMINI_EMBEDDING_VERSION: z.string().default("shows-v2-ge2-1536"),
   ALLOW_APP_REVIEW_OTP_BYPASS: z.enum(["true", "false"]).optional(),

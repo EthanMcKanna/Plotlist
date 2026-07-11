@@ -24,6 +24,7 @@ import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
+import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -197,7 +198,7 @@ export default function ListsScreen() {
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Could not create list", String(error));
+      Alert.alert("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setCreating(false);
     }
@@ -228,7 +229,7 @@ export default function ListsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditingList(null);
     } catch (error) {
-      Alert.alert("Could not save changes", String(error));
+      Alert.alert("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setSavingEdit(false);
     }

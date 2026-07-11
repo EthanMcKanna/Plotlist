@@ -16,6 +16,7 @@ import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { guardedPush } from "../lib/navigation";
 import { formatRelativeTime } from "../lib/format";
+import { getUserFacingApiErrorMessage } from "../lib/api/client";
 import {
   buildOptimisticCommentEntry,
   canDeleteComment,
@@ -126,8 +127,11 @@ function CommentComposer({
     try {
       await onSubmit(trimmed);
       setText("");
-    } catch {
-      Alert.alert("Couldn't post comment", "Check your connection and try again.");
+    } catch (error) {
+      Alert.alert(
+        "Couldn't post comment",
+        getUserFacingApiErrorMessage(error) ?? "Check your connection and try again.",
+      );
     } finally {
       setSending(false);
     }

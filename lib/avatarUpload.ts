@@ -7,6 +7,18 @@ type UploadAvatarArgs = {
   generateUploadUrl: () => Promise<string>;
 };
 
+function uploadErrorMessage(status: number, body: string) {
+  try {
+    const payload = JSON.parse(body) as { error?: { message?: unknown } };
+    if (typeof payload.error?.message === "string" && payload.error.message) {
+      return payload.error.message;
+    }
+  } catch {
+    // Body wasn't the API's JSON error shape; fall through to the raw text.
+  }
+  return `Upload failed with ${status}: ${body}`;
+}
+
 function parseUploadResponse(body: string) {
   const payload = JSON.parse(body) as { storageId?: unknown; url?: unknown };
   const storageId = typeof payload.storageId === "string" ? payload.storageId : payload.url;
@@ -29,7 +41,7 @@ async function uploadWithFetch(uploadUrl: string, uri: string, contentType: stri
 
   const body = await uploadResponse.text();
   if (!uploadResponse.ok) {
-    throw new Error(`Upload failed with ${uploadResponse.status}: ${body}`);
+    throw new Error(uploadErrorMessage(uploadResponse.status, body));
   }
 
   return parseUploadResponse(body);
@@ -45,7 +57,7 @@ async function uploadWithFileSystem(uploadUrl: string, uri: string, contentType:
   });
 
   if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
-    throw new Error(`Upload failed with ${uploadResponse.status}: ${uploadResponse.body}`);
+    throw new Error(uploadErrorMessage(uploadResponse.status, uploadResponse.body));
   }
 
   return parseUploadResponse(uploadResponse.body);
