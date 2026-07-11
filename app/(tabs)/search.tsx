@@ -66,23 +66,6 @@ const VIBE_EXAMPLE_PROMPTS = [
   "dark crime saga with a magnetic antihero",
 ];
 
-// Compact browse entry: a curated slice of the facet taxonomy. The full
-// catalog lives at /facet/[key].
-const VIBE_BROWSE_FACET_KEYS = [
-  "cozy-comfort",
-  "prestige-antihero",
-  "mind-bending",
-  "cozy-crime",
-  "feel-good",
-  "true-crime-doc",
-  "k-drama",
-  "high-fantasy",
-  "nordic-noir",
-  "dark-comedy",
-  "gentle-baking",
-  "space-opera",
-];
-
 const DISCOVER_FETCH_LIMIT = 18;
 const DISCOVER_SKELETONS = [
   { accent: "#F59E0B", kicker: "Discover", title: "Trending Today" },
@@ -675,6 +658,12 @@ export default function SearchScreen() {
               setVibeResults([]);
               setVibeResultsQuery("");
               setVibeError(null);
+              // Vibe search is input-first, so bring the keyboard up with the
+              // scope token. People mode leads with browsable suggestions —
+              // leave the keyboard down there.
+              if (nextMode === "vibe") {
+                setTimeout(() => inputRef.current?.focus(), 60);
+              }
             }}
             onQueryChange={setQuery}
             onFocus={() => setIsFocused(true)}
@@ -836,63 +825,83 @@ export default function SearchScreen() {
             ) : trimmedQuery.length < VIBE_QUERY_MIN_LENGTH ? (
               <View>
                 <SectionLine label="Try a vibe" icon="sparkles-outline" />
-                <View className="mb-5 flex-row flex-wrap gap-2">
-                  {VIBE_EXAMPLE_PROMPTS.map((prompt) => (
+                <View style={styles.promptCard}>
+                  {VIBE_EXAMPLE_PROMPTS.map((prompt, promptIndex) => (
                     <Pressable
                       key={prompt}
                       onPress={() => handleVibePrompt(prompt)}
                       accessibilityRole="button"
                       accessibilityLabel={`Search for ${prompt}`}
-                      className="rounded-full px-3 py-2"
-                      style={styles.vibeChip}
+                      style={[
+                        styles.promptRow,
+                        promptIndex > 0 && styles.promptRowDivider,
+                      ]}
+                      className="active:opacity-70"
                     >
-                      <Text className="text-[13px] font-semibold text-text-secondary">
+                      <Ionicons
+                        name="sparkles-outline"
+                        size={14}
+                        color="#38BDF8"
+                        accessible={false}
+                        accessibilityElementsHidden
+                        aria-hidden={true}
+                        importantForAccessibility="no"
+                      />
+                      <Text className="min-w-0 flex-1 text-[15px] leading-5 text-text-secondary">
                         “{prompt}”
                       </Text>
+                      <Ionicons
+                        name="arrow-forward"
+                        size={14}
+                        color="#5A6070"
+                        accessible={false}
+                        accessibilityElementsHidden
+                        aria-hidden={true}
+                        importantForAccessibility="no"
+                      />
                     </Pressable>
                   ))}
                 </View>
-                <SectionLine label="Browse categories" icon="albums-outline" />
-                <View className="flex-row flex-wrap gap-2">
-                  {VIBE_BROWSE_FACET_KEYS.map((facetKey) => {
-                    const facet = FACET_DEFS.find(
-                      (candidate) => candidate.key === facetKey,
-                    );
-                    if (!facet) return null;
-                    return (
-                      <Pressable
-                        key={facet.key}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          guardedPush(`/facet/${facet.key}`);
-                        }}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Browse ${facet.title}`}
-                        className="rounded-full px-3 py-2"
-                        style={styles.facetChip}
-                      >
-                        <Text className="text-[13px] font-semibold" style={{ color: "#38BDF8" }}>
-                          {facet.title}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  <Pressable
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      guardedPush("/explore");
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Browse all ${FACET_DEFS.length} categories`}
-                    className="flex-row items-center gap-1 rounded-full px-3 py-2"
-                    style={styles.vibeChip}
-                  >
-                    <Text className="text-[13px] font-semibold text-text-secondary">
-                      All {FACET_DEFS.length} categories
+
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    guardedPush("/explore");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Browse all ${FACET_DEFS.length} categories`}
+                  style={styles.browseAllRow}
+                  className="active:opacity-70"
+                >
+                  <View style={styles.browseAllIcon}>
+                    <Ionicons
+                      name="grid"
+                      size={14}
+                      color="#F1F3F7"
+                      accessible={false}
+                      accessibilityElementsHidden
+                      aria-hidden={true}
+                      importantForAccessibility="no"
+                    />
+                  </View>
+                  <View className="min-w-0 flex-1">
+                    <Text className="text-[14px] font-bold text-text-primary">
+                      Browse categories
                     </Text>
-                    <Ionicons name="arrow-forward" size={12} color="#9BA1B0" />
-                  </Pressable>
-                </View>
+                    <Text className="text-[12px] text-text-tertiary">
+                      {FACET_DEFS.length} moods, genres, and formats
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color="#5A6070"
+                    accessible={false}
+                    accessibilityElementsHidden
+                    aria-hidden={true}
+                    importantForAccessibility="no"
+                  />
+                </Pressable>
               </View>
             ) : (
               <View>
@@ -997,14 +1006,44 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 14,
   },
-  facetChip: {
-    backgroundColor: "rgba(56,189,248,0.12)",
-    borderColor: "rgba(56,189,248,0.4)",
-    borderWidth: StyleSheet.hairlineWidth,
+  browseAllIcon: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
   },
-  vibeChip: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderColor: "rgba(255,255,255,0.1)",
+  browseAllRow: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 11,
+    marginTop: 12,
+    minHeight: 56,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+  promptCard: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  promptRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 48,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  promptRowDivider: {
+    borderTopColor: "rgba(255,255,255,0.07)",
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
 });

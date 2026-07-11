@@ -22,6 +22,11 @@ import {
   getGenreExplorerGroup,
   withAlpha,
 } from "../lib/genreExplorer";
+import {
+  getCachedFacetPosters,
+  missingFacetPreviewKeys,
+  storeFacetPreviews,
+} from "../lib/facetPreviewStore";
 import { FACET_DEFS, type FacetDef, type FacetGroupKey } from "../lib/plotlist/facets";
 
 const CARD_WIDTH = 148;
@@ -29,9 +34,74 @@ const CARD_HEIGHT = 198;
 const FAN_POSTER_WIDTH = 58;
 const FAN_POSTER_HEIGHT = 87;
 
-// Poster previews survive remounts (tab switches) for the whole session; the
-// artwork behind a category barely changes day to day.
-const facetPreviewCache = new Map<string, string[]>();
+// Horizontal row of facet-group pills (icon + title, tinted by the group
+// accent when active). Shared between the search page explorer and /explore
+// so group navigation looks identical everywhere.
+export function FacetGroupPills({
+  selected,
+  onSelect,
+  style,
+}: {
+  selected: FacetGroupKey;
+  onSelect: (key: FacetGroupKey) => void;
+  style?: object;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // Never compete for height with a sibling vertical ScrollView (both
+      // default to flexGrow: 1 inside a flex column).
+      style={styles.pillScroller}
+      contentContainerStyle={[styles.pillRow, style]}
+      accessibilityLabel="Category groups"
+    >
+      {GENRE_EXPLORER_GROUPS.map((candidate) => {
+        const isActive = candidate.key === selected;
+        return (
+          <Pressable
+            key={candidate.key}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onSelect(candidate.key);
+            }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            accessibilityLabel={`Show ${candidate.title} categories`}
+            style={[
+              styles.pill,
+              {
+                backgroundColor: isActive
+                  ? withAlpha(candidate.accent, 0.16)
+                  : "rgba(255,255,255,0.06)",
+                borderColor: isActive
+                  ? withAlpha(candidate.accent, 0.55)
+                  : "rgba(255,255,255,0.09)",
+              },
+            ]}
+            className="active:opacity-75"
+          >
+            <Ionicons
+              name={candidate.icon}
+              size={13}
+              color={isActive ? candidate.accent : "#9BA1B0"}
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
+            <Text
+              className="text-[13px] font-semibold"
+              style={{ color: isActive ? candidate.accent : "#9BA1B0" }}
+            >
+              {candidate.title}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
 
 function FanPoster({
   uri,
@@ -151,39 +221,24 @@ function AllCategoriesCard({ onPress }: { onPress: () => void }) {
 export function GenreExplorer() {
   const getFacetPreviews = useAction(api.embeddings.getFacetPreviews);
   const [selectedGroup, setSelectedGroup] = useState<FacetGroupKey>("mood");
-  // Bumped whenever the module-level preview cache gains entries so cards
-  // holding empty frames re-render with artwork.
+  // Bumped whenever the shared preview cache gains entries so cards holding
+  // empty frames re-render with artwork.
   const [, setPreviewEpoch] = useState(0);
 
   const group = getGenreExplorerGroup(selectedGroup);
   const facets = useMemo(() => getFacetsForGroup(selectedGroup), [selectedGroup]);
 
   useEffect(() => {
-    const missing = facets
-      .filter((facet) => !facetPreviewCache.has(facet.key))
-      .map((facet) => facet.key)
-      .slice(0, 40);
+    const missing = missingFacetPreviewKeys(facets);
     if (missing.length === 0) return;
     let cancelled = false;
 
     getFacetPreviews({ facetKeys: missing })
       .then((rows) => {
         if (cancelled) return;
-        if (Array.isArray(rows)) {
-          for (const row of rows) {
-            if (row?.key) {
-              facetPreviewCache.set(
-                row.key,
-                Array.isArray(row.posters) ? row.posters : [],
-              );
-            }
-          }
+        if (storeFacetPreviews(rows, missing)) {
+          setPreviewEpoch((epoch) => epoch + 1);
         }
-        // Keys the server skipped stay resolved so we don't refetch forever.
-        for (const key of missing) {
-          if (!facetPreviewCache.has(key)) facetPreviewCache.set(key, []);
-        }
-        setPreviewEpoch((epoch) => epoch + 1);
       })
       .catch(() => {
         // Cards degrade gracefully to gradient + title; retry on next mount.
@@ -193,11 +248,6 @@ export function GenreExplorer() {
       cancelled = true;
     };
   }, [facets, getFacetPreviews]);
-
-  const handleSelectGroup = useCallback((key: FacetGroupKey) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedGroup(key);
-  }, []);
 
   const handleOpenFacet = useCallback((facet: FacetDef) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -218,7 +268,7 @@ export function GenreExplorer() {
         <FacetCard
           facet={item}
           accent={group.accent}
-          posters={facetPreviewCache.get(item.key) ?? []}
+          posters={getCachedFacetPosters(item.key)}
           onPress={handleOpenFacet}
         />
       );
@@ -242,53 +292,7 @@ export function GenreExplorer() {
         onAction={handleOpenCatalog}
       />
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.pillRow}
-        accessibilityLabel="Category groups"
-      >
-        {GENRE_EXPLORER_GROUPS.map((candidate) => {
-          const isActive = candidate.key === selectedGroup;
-          return (
-            <Pressable
-              key={candidate.key}
-              onPress={() => handleSelectGroup(candidate.key)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
-              accessibilityLabel={`Show ${candidate.title} categories`}
-              style={[
-                styles.pill,
-                {
-                  backgroundColor: isActive
-                    ? withAlpha(candidate.accent, 0.16)
-                    : "rgba(255,255,255,0.06)",
-                  borderColor: isActive
-                    ? withAlpha(candidate.accent, 0.55)
-                    : "rgba(255,255,255,0.09)",
-                },
-              ]}
-              className="active:opacity-75"
-            >
-              <Ionicons
-                name={candidate.icon}
-                size={13}
-                color={isActive ? candidate.accent : "#9BA1B0"}
-                accessible={false}
-                accessibilityElementsHidden
-                aria-hidden={true}
-                importantForAccessibility="no"
-              />
-              <Text
-                className="text-[13px] font-semibold"
-                style={{ color: isActive ? candidate.accent : "#9BA1B0" }}
-              >
-                {candidate.title}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      <FacetGroupPills selected={selectedGroup} onSelect={setSelectedGroup} />
 
       <FlatList
         horizontal
@@ -386,5 +390,9 @@ const styles = StyleSheet.create({
   pillRow: {
     paddingHorizontal: 24,
     paddingTop: 14,
+  },
+  pillScroller: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
 });

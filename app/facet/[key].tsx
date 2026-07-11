@@ -28,7 +28,9 @@ import {
 } from "../../lib/genreExplorer";
 import { queryClient } from "../../lib/queryClient";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+// Clamp to the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx) so
+// the grid math holds in wide browser windows, not just on phones.
+const SCREEN_WIDTH = Math.min(Dimensions.get("window").width, 430);
 const H_PADDING = 24;
 const GAP = 12;
 const NUM_COLS = 3;

@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { ComponentProps, RefObject } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -9,15 +9,22 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { SegmentedControl } from "./SegmentedControl";
+import { withAlpha } from "../lib/genreExplorer";
+
+type IconName = ComponentProps<typeof Ionicons>["name"];
 
 export type SearchMode = "shows" | "vibe" | "people";
 
-const modeOptions = [
-  { value: "shows", label: "Shows" },
-  { value: "vibe", label: "Vibe" },
-  { value: "people", label: "People" },
-];
+// Show search is the default; vibe and people are scoped actions the user
+// opts into. While scoped, a dismissible token sits inside the field instead
+// of a persistent segmented control.
+const SCOPE_META: Record<
+  Exclude<SearchMode, "shows">,
+  { label: string; icon: IconName; accent: string }
+> = {
+  vibe: { label: "Vibe", icon: "sparkles", accent: "#38BDF8" },
+  people: { label: "People", icon: "people", accent: "#34D399" },
+};
 
 export function getSearchCommandCenterCopy(mode: SearchMode) {
   if (mode === "people") {
@@ -38,6 +45,102 @@ export function getSearchCommandCenterCopy(mode: SearchMode) {
     accessibilityLabel: "Search shows",
     placeholder: "Shows, genres, creators",
   };
+}
+
+function ScopeToken({
+  mode,
+  onDismiss,
+}: {
+  mode: Exclude<SearchMode, "shows">;
+  onDismiss: () => void;
+}) {
+  const meta = SCOPE_META[mode];
+  return (
+    <Pressable
+      onPress={onDismiss}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`Exit ${meta.label.toLowerCase()} search`}
+      style={[
+        styles.scopeToken,
+        {
+          backgroundColor: withAlpha(meta.accent, 0.14),
+          borderColor: withAlpha(meta.accent, 0.42),
+        },
+      ]}
+      className="active:opacity-70"
+    >
+      <Ionicons
+        name={meta.icon}
+        size={12}
+        color={meta.accent}
+        accessible={false}
+        accessibilityElementsHidden
+        aria-hidden={true}
+        importantForAccessibility="no"
+      />
+      <Text className="text-[12px] font-bold" style={{ color: meta.accent }}>
+        {meta.label}
+      </Text>
+      <Ionicons
+        name="close"
+        size={12}
+        color={meta.accent}
+        accessible={false}
+        accessibilityElementsHidden
+        aria-hidden={true}
+        importantForAccessibility="no"
+      />
+    </Pressable>
+  );
+}
+
+function ScopeAction({
+  icon,
+  accent,
+  title,
+  subtitle,
+  accessibilityLabel,
+  onPress,
+}: {
+  icon: IconName;
+  accent: string;
+  title: string;
+  subtitle: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={styles.scopeAction}
+      className="active:opacity-75"
+    >
+      <View
+        style={[styles.scopeActionIcon, { backgroundColor: withAlpha(accent, 0.14) }]}
+      >
+        <Ionicons
+          name={icon}
+          size={14}
+          color={accent}
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+      </View>
+      <View className="min-w-0 flex-1">
+        <Text className="text-[13px] font-bold text-text-primary" numberOfLines={1}>
+          {title}
+        </Text>
+        <Text className="text-[11px] text-text-tertiary" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </View>
+    </Pressable>
+  );
 }
 
 export function SearchCommandCenter({
@@ -64,6 +167,8 @@ export function SearchCommandCenter({
   onClear: () => void;
 }) {
   const copy = getSearchCommandCenterCopy(mode);
+  const scopeAccent = mode === "shows" ? "#38BDF8" : SCOPE_META[mode].accent;
+  const showScopeActions = mode === "shows" && query.length === 0;
 
   return (
     <View style={styles.container}>
@@ -82,20 +187,24 @@ export function SearchCommandCenter({
           styles.searchField,
           {
             borderColor: isFocused
-              ? "rgba(56, 189, 248, 0.78)"
+              ? withAlpha(scopeAccent, 0.78)
               : "rgba(255,255,255,0.08)",
           },
         ]}
       >
-        <Ionicons
-          name="search-outline"
-          size={20}
-          color={isFocused ? "#38BDF8" : "#9BA1B0"}
-          accessible={false}
-          accessibilityElementsHidden
-          aria-hidden={true}
-          importantForAccessibility="no"
-        />
+        {mode === "shows" ? (
+          <Ionicons
+            name="search-outline"
+            size={20}
+            color={isFocused ? "#38BDF8" : "#9BA1B0"}
+            accessible={false}
+            accessibilityElementsHidden
+            aria-hidden={true}
+            importantForAccessibility="no"
+          />
+        ) : (
+          <ScopeToken mode={mode} onDismiss={() => onModeChange("shows")} />
+        )}
         <TextInput
           ref={inputRef}
           value={query}
@@ -148,13 +257,26 @@ export function SearchCommandCenter({
         ) : null}
       </View>
 
-      <View style={styles.segmentWrap}>
-        <SegmentedControl
-          options={modeOptions}
-          value={mode}
-          onChange={(value) => onModeChange(value as SearchMode)}
-        />
-      </View>
+      {showScopeActions ? (
+        <View style={styles.scopeRow}>
+          <ScopeAction
+            icon="sparkles"
+            accent={SCOPE_META.vibe.accent}
+            title="Vibe search"
+            subtitle="Describe a mood"
+            accessibilityLabel="Switch to vibe search"
+            onPress={() => onModeChange("vibe")}
+          />
+          <ScopeAction
+            icon="people"
+            accent={SCOPE_META.people.accent}
+            title="Find people"
+            subtitle="Who to follow"
+            accessibilityLabel="Switch to people search"
+            onPress={() => onModeChange("people")}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -177,14 +299,44 @@ const styles = StyleSheet.create({
   container: {
     gap: 10,
   },
+  scopeAction: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.045)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    flexDirection: "row",
+    gap: 9,
+    minHeight: 52,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  scopeActionIcon: {
+    alignItems: "center",
+    borderRadius: 10,
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+  },
+  scopeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  scopeToken: {
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
   searchField: {
     backgroundColor: "rgba(255,255,255,0.055)",
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     minHeight: 48,
-  },
-  segmentWrap: {
-    marginTop: 2,
   },
   trailingControls: {
     alignItems: "center",

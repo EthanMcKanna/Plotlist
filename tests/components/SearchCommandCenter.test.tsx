@@ -32,7 +32,48 @@ describe("SearchCommandCenter", () => {
     expect(onQueryChange).toHaveBeenCalledWith("the");
   });
 
-  it("switches modes and keeps the clear affordance explicit", () => {
+  it("offers vibe and people as scoped actions from the idle shows surface", () => {
+    const onModeChange = jest.fn();
+
+    render(
+      <SearchCommandCenter
+        mode="shows"
+        query=""
+        isFocused={false}
+        onModeChange={onModeChange}
+        onQueryChange={jest.fn()}
+        onFocus={jest.fn()}
+        onBlur={jest.fn()}
+        onClear={jest.fn()}
+      />,
+    );
+
+    fireEvent.press(screen.getByLabelText("Switch to vibe search"));
+    fireEvent.press(screen.getByLabelText("Switch to people search"));
+
+    expect(onModeChange).toHaveBeenNthCalledWith(1, "vibe");
+    expect(onModeChange).toHaveBeenNthCalledWith(2, "people");
+  });
+
+  it("hides the scope actions while a query is in flight", () => {
+    render(
+      <SearchCommandCenter
+        mode="shows"
+        query="severance"
+        isFocused
+        onModeChange={jest.fn()}
+        onQueryChange={jest.fn()}
+        onFocus={jest.fn()}
+        onBlur={jest.fn()}
+        onClear={jest.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Switch to vibe search")).toBeNull();
+    expect(screen.queryByLabelText("Switch to people search")).toBeNull();
+  });
+
+  it("scopes the field with a dismissible token and keeps clear explicit", () => {
     const onModeChange = jest.fn();
     const onClear = jest.fn();
 
@@ -49,10 +90,11 @@ describe("SearchCommandCenter", () => {
       />,
     );
 
-    fireEvent.press(screen.getByText("Shows"));
+    fireEvent.press(screen.getByLabelText("Exit people search"));
     fireEvent.press(screen.getByLabelText("Clear search"));
 
     expect(screen.getByPlaceholderText("People or @username")).toBeTruthy();
+    expect(screen.getByText("People")).toBeTruthy();
     expect(onModeChange).toHaveBeenCalledWith("shows");
     expect(onClear).toHaveBeenCalledTimes(1);
   });
