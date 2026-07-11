@@ -68,6 +68,7 @@ import {
   getSmartListsV2,
   vibeSearchShows,
 } from "./recs-handlers";
+import { computeTasteMatchPercent } from "./recs";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
@@ -5068,7 +5069,23 @@ export const actionHandlers: Record<string, RpcHandler> = {
   "embeddings:getSimilarTasteUsers": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = optionalLimitArgs.parse(args ?? {});
-    return await getSimilarTasteUserPreviews(user.id, Math.min(parsed.limit ?? 10, 30));
+    const previews = await getSimilarTasteUserPreviews(user.id, Math.min(parsed.limit ?? 10, 30));
+    // Attach a calibrated taste-match percent per person (recs v2). Capped so
+    // a long list can't trigger a pile of profile builds in one request;
+    // failures leave the heuristic previews intact.
+    try {
+      await Promise.all(
+        previews.slice(0, 8).map(async (preview: any) => {
+          const targetId = preview?.user?._id ?? preview?.user?.id;
+          if (!targetId || targetId === user.id) return;
+          const percent = await computeTasteMatchPercent(user.id, targetId);
+          if (percent !== null) preview.tasteMatchPercent = percent;
+        }),
+      );
+    } catch (error) {
+      console.warn("[recs] similar-taste percent enrichment failed", error);
+    }
+    return previews;
   },
   "embeddings:getListsFromSimilarTasteUsers": async ({ args }) => {
     const parsed = optionalLimitArgs.parse(args ?? {});

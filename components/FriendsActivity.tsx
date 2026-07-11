@@ -46,6 +46,9 @@ export type PersonPreview = {
   mutualCount?: number;
   sharedShowCount?: number;
   sharedGenreCount?: number;
+  // Calibrated recs-v2 similarity percent (present when both users have
+  // taste profiles; 50 = an average pair of watchers).
+  tasteMatchPercent?: number;
 };
 
 type FriendsActivityProps = {
@@ -71,6 +74,7 @@ function hasPersonalSignal(person: PersonPreview, source: PeopleGroup["source"])
   if (person.inContacts || person.followsYou || person.isMutualFollow) return true;
   if ((person.mutualCount ?? 0) > 0) return true;
   if ((person.sharedShowCount ?? 0) > 0) return true;
+  if ((person.tasteMatchPercent ?? 0) >= 60) return true;
   if (source === "taste" && (person.sharedGenreCount ?? 0) >= 2) return true;
   return false;
 }
@@ -436,6 +440,8 @@ export function PersonChip({
       ? "In contacts"
       : person.followsYou
         ? "Follows you"
+      : (person.tasteMatchPercent ?? 0) >= 55
+        ? `${person.tasteMatchPercent}% match`
       : (person.mutualCount ?? 0) > 0
         ? `${person.mutualCount} mutual`
         : (person.sharedShowCount ?? 0) > 0

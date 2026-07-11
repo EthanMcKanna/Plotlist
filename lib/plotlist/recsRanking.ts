@@ -221,10 +221,75 @@ export function aggregateProfileFacets(
     .slice(0, limit);
 }
 
-// Cosine of two unit profile vectors → friendly 0–100 "taste match" percent.
-// Cosine 0.55 between two real profiles is already meaningfully similar, so
-// the curve is stretched rather than linear.
+// Taste-match calibration against a null distribution of random watcher
+// pairs. Profile centroids all live in one tight "TV cone": measured over
+// 79,800 synthetic random-taste profile pairs built from the real catalog
+// vectors (popularity-biased baskets of 8–40 shows, decayed weights,
+// 2026-07-10), pair cosine is mean 0.97374 ± 0.0102 — an uncalibrated cosine
+// would read ~98% for every pair of humans. The percent below is Φ-style:
+// "more similar than X% of random watcher pairs". An average pair reads 50;
+// +1σ ≈ 75; −1σ ≈ 25. Re-derive with scratchpad taste-calibration when the
+// embedding version changes.
+export const TASTE_MATCH_CALIBRATION = {
+  nullMean: 0.97374,
+  nullStd: 0.0102,
+  slope: 1.1,
+};
+
 export function tasteMatchPercent(cosine: number) {
-  const clamped = Math.max(0, Math.min(1, cosine));
-  return Math.round(100 * clamped ** 0.6);
+  const clamped = Math.max(-1, Math.min(1, cosine));
+  const z = (clamped - TASTE_MATCH_CALIBRATION.nullMean) / TASTE_MATCH_CALIBRATION.nullStd;
+  const phi = 1 / (1 + Math.exp(-TASTE_MATCH_CALIBRATION.slope * z));
+  return Math.max(1, Math.min(99, Math.round(100 * phi)));
+}
+
+export type TasteMatchTier = {
+  key: string;
+  label: string;
+  blurb: string;
+};
+
+// Anchors the percent — a bare number is meaningless without knowing what a
+// typical pair scores (50 = average pair of watchers, by construction).
+export function tasteMatchTier(percent: number): TasteMatchTier {
+  if (percent >= 85) {
+    return {
+      key: "kindred",
+      label: "Kindred spirits",
+      blurb: "You two could swap watchlists and barely notice.",
+    };
+  }
+  if (percent >= 70) {
+    return {
+      key: "very-similar",
+      label: "Very similar",
+      blurb: "Way more alike than most pairs of watchers.",
+    };
+  }
+  if (percent >= 55) {
+    return {
+      key: "in-common",
+      label: "Plenty in common",
+      blurb: "More alike than the average pair of watchers.",
+    };
+  }
+  if (percent >= 40) {
+    return {
+      key: "some-overlap",
+      label: "Some overlap",
+      blurb: "A few shared lanes, plenty to trade.",
+    };
+  }
+  if (percent >= 25) {
+    return {
+      key: "different-lanes",
+      label: "Different lanes",
+      blurb: "You watch different worlds — great for discovery.",
+    };
+  }
+  return {
+    key: "opposites",
+    label: "Opposites attract",
+    blurb: "Almost no overlap — their shelf is uncharted territory.",
+  };
 }

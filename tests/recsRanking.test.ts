@@ -11,6 +11,8 @@ import {
   signalWeightForRating,
   signalWeightForWatchStatus,
   tasteMatchPercent,
+  tasteMatchTier,
+  TASTE_MATCH_CALIBRATION,
 } from "../lib/plotlist/recsRanking";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -156,10 +158,35 @@ describe("normalizeSemanticScores", () => {
 });
 
 describe("tasteMatchPercent", () => {
-  it("maps cosine to a friendly 0-100 scale", () => {
-    expect(tasteMatchPercent(1)).toBe(100);
-    expect(tasteMatchPercent(0)).toBe(0);
-    expect(tasteMatchPercent(0.55)).toBeGreaterThan(55);
-    expect(tasteMatchPercent(-0.2)).toBe(0);
+  it("scores an average random pair at ~50 by construction", () => {
+    expect(tasteMatchPercent(TASTE_MATCH_CALIBRATION.nullMean)).toBe(50);
+  });
+
+  it("spreads honestly around the null distribution", () => {
+    const oneSigmaUp = TASTE_MATCH_CALIBRATION.nullMean + TASTE_MATCH_CALIBRATION.nullStd;
+    const oneSigmaDown = TASTE_MATCH_CALIBRATION.nullMean - TASTE_MATCH_CALIBRATION.nullStd;
+    expect(tasteMatchPercent(oneSigmaUp)).toBe(75);
+    expect(tasteMatchPercent(oneSigmaDown)).toBe(25);
+    // Near-identical profiles saturate high but never claim a perfect 100 —
+    // even cosine 1.0 is only ~2.6σ above the null mean.
+    expect(tasteMatchPercent(1)).toBeGreaterThanOrEqual(90);
+    expect(tasteMatchPercent(1)).toBeLessThanOrEqual(99);
+    // Wildly dissimilar profiles floor at 1, not 0.
+    expect(tasteMatchPercent(0.5)).toBe(1);
+    expect(tasteMatchPercent(-1)).toBe(1);
+  });
+});
+
+describe("tasteMatchTier", () => {
+  it("covers the full percent range with anchored labels", () => {
+    expect(tasteMatchTier(92).key).toBe("kindred");
+    expect(tasteMatchTier(75).key).toBe("very-similar");
+    expect(tasteMatchTier(60).key).toBe("in-common");
+    expect(tasteMatchTier(47).key).toBe("some-overlap");
+    expect(tasteMatchTier(30).key).toBe("different-lanes");
+    expect(tasteMatchTier(10).key).toBe("opposites");
+    for (let percent = 1; percent <= 99; percent += 1) {
+      expect(tasteMatchTier(percent).label.length).toBeGreaterThan(3);
+    }
   });
 });

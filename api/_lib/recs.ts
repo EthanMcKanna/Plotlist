@@ -296,7 +296,21 @@ export async function searchShowIdsByVibe(
   return await queryVectorCandidates(vector, { topK });
 }
 
+// Percent-only variant for list surfaces (people discovery chips) — skips
+// the shared-show hydration and picks ranking that profile pages need.
+export async function computeTasteMatchPercent(viewerId: string, targetUserId: string) {
+  const [viewerProfile, targetProfile] = await Promise.all([
+    getTasteProfile(viewerId),
+    getTasteProfile(targetUserId),
+  ]);
+  if (!viewerProfile || !targetProfile) return null;
+  return tasteMatchPercent(cosineSimilarity(viewerProfile.vector, targetProfile.vector));
+}
+
 // "Taste match" between the viewer and another user, for profile pages.
+// Returns the calibrated percent plus the two things that make it feel real:
+// WHY (shared facets + shared shows) and WHAT NOW (the target's loved shows
+// the viewer hasn't seen, ranked by the viewer's own taste vector).
 export async function computeTasteMatch(viewerId: string, targetUserId: string) {
   const [viewerProfile, targetProfile] = await Promise.all([
     getTasteProfile(viewerId),
@@ -307,15 +321,76 @@ export async function computeTasteMatch(viewerId: string, targetUserId: string) 
   const percent = tasteMatchPercent(
     cosineSimilarity(viewerProfile.vector, targetProfile.vector),
   );
-  const targetSeedIds = new Set(targetProfile.positiveSeeds.map((seed) => seed.showId));
+
+  // WHY, part 1: facets both profiles rank highly (scored by the weaker of
+  // the two affinities so a facet only counts when it's genuinely mutual).
+  const viewerFacets = new Map(viewerProfile.topFacets.map((facet) => [facet.key, facet.score]));
+  const sharedFacets = targetProfile.topFacets
+    .filter((facet) => viewerFacets.has(facet.key))
+    .map((facet) => ({
+      key: facet.key,
+      score: Number(Math.min(facet.score, viewerFacets.get(facet.key) ?? 0).toFixed(4)),
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 5);
+
+  // WHY, part 2: shows in both users' positive seeds.
+  const targetSeedWeights = new Map(
+    targetProfile.positiveSeeds.map((seed) => [seed.showId, seed.weight]),
+  );
   const sharedSeedIds = viewerProfile.positiveSeeds
-    .filter((seed) => targetSeedIds.has(seed.showId))
+    .filter((seed) => targetSeedWeights.has(seed.showId))
+    .sort(
+      (left, right) =>
+        Math.min(right.weight, targetSeedWeights.get(right.showId) ?? 0) -
+        Math.min(left.weight, targetSeedWeights.get(left.showId) ?? 0),
+    )
     .map((seed) => seed.showId)
-    .slice(0, 10);
+    .slice(0, 12);
   const sharedShows = sharedSeedIds.length
     ? await db.select().from(shows).where(inArray(shows.id, sharedSeedIds))
     : [];
-  return { percent, sharedShows };
+
+  // WHAT NOW: their strongest positives the viewer hasn't touched, ordered by
+  // a blend of how much THEY love it and how close it sits to the VIEWER's
+  // taste vector — "picks from their shelf, sorted for you".
+  const unseenSeeds = targetProfile.positiveSeeds
+    .filter(
+      (seed) =>
+        !viewerProfile.seenShowIds.has(seed.showId) &&
+        !viewerProfile.negativeShowIds.includes(seed.showId),
+    )
+    .slice(0, 40);
+  let picksForViewer: Array<{ show: typeof shows.$inferSelect; theirWeight: number }> = [];
+  if (unseenSeeds.length > 0) {
+    const seedVectors = await fetchShowVectors(unseenSeeds.map((seed) => seed.showId));
+    const maxWeight = Math.max(...unseenSeeds.map((seed) => seed.weight), 1e-6);
+    const scored = unseenSeeds
+      .map((seed) => {
+        const vector = seedVectors.get(seed.showId);
+        const affinity = vector ? cosineSimilarity(viewerProfile.vector, vector) : 0;
+        return {
+          showId: seed.showId,
+          theirWeight: seed.weight,
+          blended: (seed.weight / maxWeight) * 0.45 + affinity * 0.55,
+        };
+      })
+      .sort((left, right) => right.blended - left.blended)
+      .slice(0, 10);
+    const pickRows = scored.length
+      ? await db.select().from(shows).where(inArray(shows.id, scored.map((pick) => pick.showId)))
+      : [];
+    const rowById = new Map(pickRows.map((row) => [row.id, row]));
+    picksForViewer = scored
+      .map((pick) => {
+        const show = rowById.get(pick.showId);
+        return show && show.posterUrl ? { show, theirWeight: pick.theirWeight } : null;
+      })
+      .filter((pick): pick is NonNullable<typeof pick> => pick !== null)
+      .slice(0, 8);
+  }
+
+  return { percent, sharedFacets, sharedShows, picksForViewer };
 }
 
 // Attribution for "Because you watched X": among the user's strongest seeds,

@@ -32,21 +32,13 @@ import { SecondaryButton } from "../../components/SecondaryButton";
 import { Avatar } from "../../components/Avatar";
 import { GlassSurface } from "../../components/NativeGlass";
 import { ShimmerBlock } from "../../components/ShowDetailSkeleton";
-import { TasteMatchSummary } from "../../components/TasteMatchSummary";
+import { TasteMatchSummary, TasteMatchSummarySkeleton } from "../../components/TasteMatchSummary";
 
 type ProfileShowPreview = {
   _id: string;
   title: string;
   posterUrl?: string | null;
   year?: number;
-};
-
-type TopRatedPreview = {
-  reviewId: string;
-  rating: number;
-  showId: string;
-  title: string;
-  posterUrl?: string | null;
 };
 
 function MiniStat({
@@ -413,51 +405,20 @@ export default function ProfileScreen() {
   );
 
   const [tasteExperience, setTasteExperience] = useState<any | null>(null);
+  const [tasteLoading, setTasteLoading] = useState(false);
   const memberSince = formatMemberSince(profile?.memberSince ?? null);
-  const watchActivityCards = useMemo(
-    () =>
-      [
-        {
-          key: "completed",
-          label: "Completed",
-          value: profile?.counts.completed ?? 0,
-          icon: "checkmark-circle" as const,
-          iconColor: "#22C55E",
-          iconBg: "bg-green-500/15",
-        },
-        profile?.counts.watching !== null && profile?.counts.watching !== undefined
-          ? {
-              key: "watching",
-              label: "Watching",
-              value: profile.counts.watching,
-              icon: "eye" as const,
-              iconColor: "#0ea5e9",
-              iconBg: "bg-brand-500/15",
-            }
-          : null,
-        profile?.counts.watchlist !== null && profile?.counts.watchlist !== undefined
-          ? {
-              key: "watchlist",
-              label: "Watchlist",
-              value: profile.counts.watchlist,
-              icon: "bookmark" as const,
-              iconColor: "#F59E0B",
-              iconBg: "bg-amber-500/15",
-            }
-          : null,
-      ].filter((item): item is NonNullable<typeof item> => item !== null),
-    [profile],
-  );
 
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!isAuthenticated || !me?._id || me._id === userIdValue) {
       setTasteExperience(null);
+      setTasteLoading(false);
       return;
     }
 
     let cancelled = false;
+    setTasteLoading(true);
     getProfileTasteExperience({ userId: userIdValue })
       .then((result) => {
         if (!cancelled) {
@@ -467,6 +428,11 @@ export default function ProfileScreen() {
       .catch(() => {
         if (!cancelled) {
           setTasteExperience(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTasteLoading(false);
         }
       });
 
@@ -678,11 +644,23 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
+          {!isOwnProfile && !contentLocked && tasteLoading && !tasteExperience ? (
+            <View className="mt-4">
+              <TasteMatchSummarySkeleton />
+            </View>
+          ) : null}
+
           {!isOwnProfile && tasteExperience?.tasteMatch ? (
             <View className="mt-4">
               <TasteMatchSummary
                 percent={tasteExperience.tasteMatch.percent}
                 sharedFavoriteShows={tasteExperience.tasteMatch.sharedFavoriteShows ?? []}
+                sharedFacets={tasteExperience.tasteMatch.sharedFacets ?? []}
+                hasPicks={(tasteExperience.tasteMatch.picksForViewer ?? []).length > 0}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  guardedPush(`/profile/${userIdValue}/taste`);
+                }}
               />
             </View>
           ) : null}
@@ -776,62 +754,6 @@ export default function ProfileScreen() {
                   View full watchlist
                 </Text>
               </Pressable>
-            </View>
-          ) : null}
-
-          {/* ── Top Rated ── */}
-          {profile?.topRated && profile.topRated.length > 0 ? (
-            <View className="mt-7">
-              <SectionHeader title="Top Rated" />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                className="mt-3"
-              >
-                {profile.topRated.map((item: TopRatedPreview) => (
-                  <ShowPosterCard
-                    key={item.reviewId}
-                    show={{
-                      _id: item.showId,
-                      title: item.title,
-                      posterUrl: item.posterUrl,
-                    }}
-                    badge={String(item.rating)}
-                    onPress={() => guardedPush(`/show/${item.showId}`)}
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
-
-          {/* ── Watch Activity Summary ── */}
-          {(profile?.counts.shows ?? 0) > 0 && watchActivityCards.length > 0 ? (
-            <View className="mt-7">
-              <SectionHeader title="Watch Activity" />
-              <View className="mt-3 flex-row gap-2.5">
-                {watchActivityCards.map((card) => (
-                  <GlassSurface
-                    key={card.key}
-                    radius={8}
-                    // Content-layer stat tiles render solid, not glass.
-                    variant="surface"
-                    style={{ flex: 1 }}
-                    contentStyle={{ padding: 14 }}
-                  >
-                    <View className="flex-row items-center gap-2">
-                      <View
-                        className={`h-8 w-8 items-center justify-center rounded-full ${card.iconBg}`}
-                      >
-                        <Ionicons name={card.icon} size={16} color={card.iconColor} />
-                      </View>
-                      <Text className="text-xl font-bold text-text-primary">
-                        {card.value}
-                      </Text>
-                    </View>
-                    <Text className="mt-1.5 text-xs text-text-tertiary">{card.label}</Text>
-                  </GlassSurface>
-                ))}
-              </View>
             </View>
           ) : null}
 

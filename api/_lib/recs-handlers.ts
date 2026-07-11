@@ -451,7 +451,12 @@ export async function getProfileTasteExperienceV2(
       ? `Into ${facetTitles.slice(0, 3).join(", ")}${facetTitles.length > 3 ? " and more" : ""}`
       : null;
 
-  let tasteMatch: { percent: number; sharedFavoriteShows: unknown[] } | null = null;
+  let tasteMatch: {
+    percent: number;
+    sharedFavoriteShows: unknown[];
+    sharedFacets: Array<{ key: string; title: string; score: number }>;
+    picksForViewer: Array<{ show: unknown; theirWeight: number }>;
+  } | null = null;
   if (viewerId && viewerId !== targetUserId) {
     const match = await computeTasteMatch(viewerId, targetUserId);
     if (match) {
@@ -460,6 +465,16 @@ export async function getProfileTasteExperienceV2(
         sharedFavoriteShows: match.sharedShows
           .map((row) => toShowDoc(row))
           .filter((doc): doc is NonNullable<typeof doc> => Boolean(doc)),
+        sharedFacets: match.sharedFacets
+          .map((facet) => {
+            const def = facetByKey(facet.key);
+            return def ? { key: facet.key, title: def.title, score: facet.score } : null;
+          })
+          .filter((facet): facet is NonNullable<typeof facet> => facet !== null),
+        picksForViewer: match.picksForViewer.map((pick) => ({
+          show: toShowDoc(pick.show),
+          theirWeight: pick.theirWeight,
+        })),
       };
     }
   }
