@@ -4,7 +4,6 @@ import {
   buildOptimisticCommentEntry,
   canDeleteComment,
   commentAuthorLabel,
-  commentsHref,
   isOptimisticCommentId,
   normalizeCommentEntries,
   normalizeCommentText,
@@ -99,11 +98,5 @@ describe("buildOptimisticCommentEntry", () => {
     expect(entry.comment.authorId).toBe("user_9");
     expect(entry.comment.createdAt).toBe(123);
     expect(entry.author?.displayName).toBe("Me");
-  });
-});
-
-describe("commentsHref", () => {
-  it("builds the standalone comments route", () => {
-    expect(commentsHref("log", "log_1")).toBe("/comments?targetType=log&targetId=log_1");
   });
 });

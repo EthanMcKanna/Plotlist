@@ -35,10 +35,14 @@ jest.mock("../../lib/plotlist/react", () => ({
   usePaginatedQuery: () => mockPaginated,
 }));
 
+jest.mock("../../components/ReportModal", () => ({
+  ReportModal: () => null,
+}));
+
 import {
   CommentComposer,
+  CommentsSection,
   CommentThreadList,
-  CommentsPreview,
   useCommentThread,
 } from "../../components/Comments";
 
@@ -154,45 +158,74 @@ describe("comment thread", () => {
   });
 });
 
-describe("CommentsPreview", () => {
+// Mirrors how detail screens (lists, reviews) embed the inline section.
+function SectionHarness({ enabled = true, isOwner = false }: { enabled?: boolean; isOwner?: boolean }) {
+  const thread = useCommentThread("review", "review_1", { skip: !enabled });
+  return <CommentsSection thread={thread} enabled={enabled} isOwner={isOwner} />;
+}
+
+describe("CommentsSection", () => {
   beforeEach(() => {
     mockMe = { _id: "user_me", displayName: "Me" };
     mockPaginated = {
       results: [
         entry("c1", "Oldest comment", "Avery"),
-        entry("c2", "Middle comment", "Sam"),
-        entry("c3", "Newest comment", "Kai"),
+        entry("c2", "Second comment", "Sam"),
+        entry("c3", "Third comment", "Kai"),
+        entry("c4", "Newest comment", "Rue"),
       ],
       status: "Exhausted",
       loadMore: jest.fn(),
     };
+    mockAdd.mockClear();
     mockGuardedPush.mockClear();
   });
 
-  it("shows the most recent comments and a view-all affordance", () => {
-    render(<CommentsPreview targetType="review" targetId="review_1" />);
+  it("collapses to the most recent comments with a view-all affordance", () => {
+    render(<SectionHarness />);
 
-    expect(screen.queryByText(/Oldest comment/)).toBeNull();
-    expect(screen.getByText(/Middle comment/)).toBeTruthy();
-    expect(screen.getByText(/Newest comment/)).toBeTruthy();
-    expect(screen.getByText("View all comments")).toBeTruthy();
+    expect(screen.queryByText("Oldest comment")).toBeNull();
+    expect(screen.getByText("Second comment")).toBeTruthy();
+    expect(screen.getByText("Newest comment")).toBeTruthy();
+    expect(screen.getByText("View all 4 comments")).toBeTruthy();
   });
 
-  it("opens the thread with composer focus from the add-a-comment row", () => {
-    render(<CommentsPreview targetType="review" targetId="review_1" />);
+  it("expands the full thread inline instead of navigating away", () => {
+    render(<SectionHarness />);
 
-    fireEvent.press(screen.getByLabelText("Add a comment"));
-    expect(mockGuardedPush).toHaveBeenCalledWith(
-      "/comments?targetType=review&targetId=review_1&focus=1",
-    );
+    fireEvent.press(screen.getByText("View all 4 comments"));
+
+    expect(screen.getByText("Oldest comment")).toBeTruthy();
+    expect(screen.queryByText("View all 4 comments")).toBeNull();
+    expect(mockGuardedPush).not.toHaveBeenCalled();
   });
 
-  it("opens the thread without focus when tapping a comment", () => {
-    render(<CommentsPreview targetType="review" targetId="review_1" />);
+  it("posts through the inline composer", async () => {
+    render(<SectionHarness />);
 
-    fireEvent.press(screen.getByLabelText("View comment by Kai"));
-    expect(mockGuardedPush).toHaveBeenCalledWith(
-      "/comments?targetType=review&targetId=review_1",
-    );
+    fireEvent.changeText(screen.getByPlaceholderText("Add a comment…"), "  So good  ");
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText("Post comment"));
+    });
+
+    expect(mockAdd).toHaveBeenCalledWith({
+      targetType: "review",
+      targetId: "review_1",
+      text: "So good",
+    });
+  });
+
+  it("shows the owner hint instead of the thread when comments are off", () => {
+    render(<SectionHarness enabled={false} isOwner />);
+
+    expect(screen.getByText("Comments are off. Turn them on from Edit list.")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Add a comment…")).toBeNull();
+  });
+
+  it("shows a quiet notice to non-owners when comments are off", () => {
+    render(<SectionHarness enabled={false} />);
+
+    expect(screen.getByText("Comments are turned off for this list.")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Add a comment…")).toBeNull();
   });
 });

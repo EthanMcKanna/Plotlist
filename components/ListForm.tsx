@@ -1,4 +1,4 @@
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Switch, Text, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -7,6 +7,7 @@ export function ListForm({
   title,
   description,
   isPublic,
+  commentsEnabled = true,
   saving,
   submitLabel,
   savingLabel,
@@ -14,11 +15,13 @@ export function ListForm({
   onChangeTitle,
   onChangeDescription,
   onToggleVisibility,
+  onToggleComments,
   onSubmit,
 }: {
   title: string;
   description: string;
   isPublic: boolean;
+  commentsEnabled?: boolean;
   saving: boolean;
   submitLabel: string;
   savingLabel: string;
@@ -26,6 +29,7 @@ export function ListForm({
   onChangeTitle: (value: string) => void;
   onChangeDescription: (value: string) => void;
   onToggleVisibility: () => void;
+  onToggleComments?: () => void;
   onSubmit: () => void;
 }) {
   const canSubmit = Boolean(title.trim()) && !saving;
@@ -53,6 +57,32 @@ export function ListForm({
         className="mt-3 min-h-[72px] rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-[16px] leading-[22px] text-text-primary"
         style={{ textAlignVertical: "top" }}
       />
+      {/* Comment toggle only matters for public lists — private lists are
+          only ever seen by their owner. */}
+      {isPublic && onToggleComments ? (
+        <View className="mt-3 flex-row items-center justify-between rounded-xl border border-dark-border bg-dark-bg py-2.5 pl-4 pr-3">
+          <View className="flex-1 flex-row items-center gap-2.5 pr-3">
+            <Ionicons name="chatbubble-outline" size={16} color="#9BA1B0" />
+            <View className="flex-1">
+              <Text className="text-sm font-medium text-text-primary">Allow comments</Text>
+              <Text className="mt-0.5 text-xs text-text-tertiary">
+                Anyone who can see this list can comment
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={commentsEnabled}
+            onValueChange={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onToggleComments();
+            }}
+            trackColor={{ false: "#2A2F3A", true: "#0EA5E9" }}
+            thumbColor="#FFFFFF"
+            ios_backgroundColor="#2A2F3A"
+            accessibilityLabel="Allow comments"
+          />
+        </View>
+      ) : null}
       <View className="mt-4 flex-row items-center justify-between">
         <Pressable
           onPress={() => {

@@ -30,7 +30,12 @@ import Animated, {
 import { Screen } from "../../components/Screen";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
-import { CommentsPreview } from "../../components/Comments";
+import { ActionSheet } from "../../components/ActionSheet";
+import {
+  CommentsSection,
+  formatCommentCount,
+  useCommentThread,
+} from "../../components/Comments";
 import { LikeButton } from "../../components/LikeButton";
 import { Poster } from "../../components/Poster";
 import { Avatar } from "../../components/Avatar";
@@ -291,6 +296,9 @@ export default function ListScreen() {
           ...(args.title !== undefined ? { title: args.title } : null),
           ...(args.description !== undefined ? { description: args.description } : null),
           ...(args.isPublic !== undefined ? { isPublic: args.isPublic } : null),
+          ...(args.commentsEnabled !== undefined
+            ? { commentsEnabled: args.commentsEnabled }
+            : null),
         });
       }
     },
@@ -321,15 +329,27 @@ export default function ListScreen() {
     !listCoverUrl && legacyCoverStorageId ? { storageId: legacyCoverStorageId } : "skip",
   );
   const coverUrl = listCoverUrl ?? resolvedLegacyCoverUrl;
+  // Older cached list docs predate the toggle; missing means on.
+  const commentsEnabled = list ? list.commentsEnabled !== false : true;
+  const commentThread = useCommentThread("list", listId, {
+    skip: !list || !commentsEnabled,
+  });
+  const commentCountLabel = formatCommentCount(commentThread);
   const [orderedItems, setOrderedItems] = useState(items);
   const [showReport, setShowReport] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editIsPublic, setEditIsPublic] = useState(true);
+  const [editCommentsEnabled, setEditCommentsEnabled] = useState(true);
   const [savingEdit, setSavingEdit] = useState(false);
   const [followPending, setFollowPending] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  // Y offset of the comments section inside the scroll content, captured on
+  // layout so the action-bar comment button can jump straight to the thread.
+  const commentsYRef = useRef(0);
   const gridHeight = useMemo(() => {
     if (orderedItems.length === 0) return 0;
     const rows = Math.ceil(orderedItems.length / NUM_COLS);
@@ -418,8 +438,25 @@ export default function ListScreen() {
     setEditTitle(list.title ?? "");
     setEditDescription(list.description ?? "");
     setEditIsPublic(Boolean(list.isPublic));
+    setEditCommentsEnabled(list.commentsEnabled !== false);
     setEditVisible(true);
   }, [list]);
+
+  const handleScrollToComments = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    scrollRef.current?.scrollTo({
+      y: Math.max(commentsYRef.current - 12, 0),
+      animated: true,
+    });
+  }, []);
+
+  const handleComposerFocus = useCallback(() => {
+    // Let the keyboard start animating so automaticallyAdjustKeyboardInsets
+    // has grown the scroll range, then settle the composer just above it.
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 140);
+  }, []);
 
   const handleSaveEdit = useCallback(async () => {
     const trimmedTitle = editTitle.trim();
@@ -434,6 +471,7 @@ export default function ListScreen() {
         title: trimmedTitle,
         description: editDescription.trim() || null,
         isPublic: editIsPublic,
+        commentsEnabled: editCommentsEnabled,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditVisible(false);
@@ -442,7 +480,7 @@ export default function ListScreen() {
     } finally {
       setSavingEdit(false);
     }
-  }, [editDescription, editIsPublic, editTitle, listId, updateList]);
+  }, [editCommentsEnabled, editDescription, editIsPublic, editTitle, listId, updateList]);
 
   const handleDelete = useCallback(() => {
     Alert.alert(
@@ -554,8 +592,13 @@ export default function ListScreen() {
   return (
     <Screen>
       <ScrollView
+        ref={scrollRef}
         contentInsetAdjustmentBehavior="automatic"
+        // iOS: grow the bottom inset so the inline comment composer can sit
+        // above the keyboard (Android resizes the window natively).
+        automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         scrollEnabled={!draggingId}
         bounces={false}
         overScrollMode="never"
@@ -587,162 +630,170 @@ export default function ListScreen() {
             </View>
           ) : (
             <>
-          <View className="flex-row items-start justify-between gap-3">
-            <Text className="flex-1 text-2xl font-semibold text-text-primary">
-              {list.title}
-            </Text>
-            <View className="flex-row items-center gap-2">
-              {list.isPublic ? (
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    void sharePlotlistLink(`/list/${listId}`, `${list.title} on Plotlist`);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Share list"
-                  className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
-                >
-                  <Ionicons name="share-outline" size={16} color="#9BA1B0" />
-                </Pressable>
-              ) : null}
-              {isOwner ? (
-                <Pressable
-                  onPress={openEdit}
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit list"
-                  className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
-                >
-                  <Ionicons name="pencil" size={16} color="#9BA1B0" />
-                </Pressable>
-              ) : null}
-            </View>
-          </View>
-
-          {list.description ? (
-            <Text className="mt-2 text-sm text-text-secondary">
-              {list.description}
-            </Text>
+          {/* ── Hero cover ── */}
+          {coverUrl ? (
+            <Image
+              source={{ uri: coverUrl }}
+              style={{ width: "100%", height: 170, borderRadius: 20 }}
+              contentFit="cover"
+            />
           ) : null}
 
-          {/* ── Creator + meta ── */}
+          {/* ── Title ── */}
+          <Text
+            className={`text-[26px] font-bold leading-8 text-text-primary ${
+              coverUrl ? "mt-4" : ""
+            }`}
+          >
+            {list.title}
+          </Text>
+
+          {/* ── Byline ── */}
           {list.owner ? (
             <Pressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 guardedPush(`/profile/${list.owner._id}`);
               }}
-              className="mt-4 flex-row items-center gap-3 self-start rounded-full py-1 pr-3 active:opacity-70"
+              accessibilityRole="button"
+              accessibilityLabel={`View ${list.ownerName ?? "creator"}'s profile`}
+              className="mt-3 flex-row items-center gap-2.5 self-start active:opacity-70"
             >
               <Avatar
                 uri={list.owner.avatarUrl}
                 label={list.ownerName ?? list.owner.username}
-                size={32}
+                size={28}
               />
-              <View>
-                <Text className="text-sm font-semibold text-text-primary">
-                  {list.ownerName ?? "Unknown"}
+              <Text className="text-sm font-semibold text-text-primary" numberOfLines={1}>
+                {list.ownerName ?? "Unknown"}
+              </Text>
+              {list.owner.username ? (
+                <Text className="text-sm text-text-tertiary" numberOfLines={1}>
+                  @{list.owner.username}
                 </Text>
-                {list.owner.username ? (
-                  <Text className="text-xs text-text-tertiary">@{list.owner.username}</Text>
-                ) : null}
-              </View>
+              ) : null}
             </Pressable>
           ) : null}
 
-          <View className="mt-3 flex-row flex-wrap items-center gap-2">
-            <View className="flex-row items-center gap-1.5 rounded-full bg-dark-elevated px-3 py-1.5">
-              <Ionicons
-                name={list.isPublic ? "globe-outline" : "lock-closed-outline"}
-                size={12}
-                color="#9BA1B0"
-              />
-              <Text className="text-xs font-semibold text-text-secondary">
-                {list.isPublic ? "Public" : "Private"}
-              </Text>
-            </View>
-            <View className="rounded-full bg-dark-elevated px-3 py-1.5">
-              <Text className="text-xs font-semibold text-text-secondary">
-                {orderedItems.length} {orderedItems.length === 1 ? "show" : "shows"}
-              </Text>
-            </View>
+          {/* ── Meta line ── */}
+          <View className="mt-2.5 flex-row items-center gap-1.5">
+            <Ionicons
+              name={list.isPublic ? "globe-outline" : "lock-closed-outline"}
+              size={13}
+              color="#5A6070"
+            />
+            <Text className="text-[13px] text-text-tertiary">
+              {[
+                list.isPublic ? "Public list" : "Private list",
+                `${orderedItems.length} ${orderedItems.length === 1 ? "show" : "shows"}`,
+                list.isPublic
+                  ? `${list.followerCount ?? 0} ${
+                      (list.followerCount ?? 0) === 1 ? "follower" : "followers"
+                    }`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </View>
+
+          {/* ── Description ── */}
+          {list.description ? (
+            <Text className="mt-3 text-sm leading-[21px] text-text-secondary">
+              {list.description}
+            </Text>
+          ) : null}
+
+          {/* ── Action bar: engagement on the left, primary action on the right ── */}
+          <View className="mt-5 flex-row items-center border-y border-dark-border py-2">
             {list.isPublic ? (
-              <View className="rounded-full bg-dark-elevated px-3 py-1.5">
-                <Text className="text-xs font-semibold text-text-secondary">
-                  {list.followerCount ?? 0}{" "}
-                  {(list.followerCount ?? 0) === 1 ? "follower" : "followers"}
-                </Text>
+              <LikeButton targetType="list" targetId={listId} />
+            ) : null}
+            {commentsEnabled ? (
+              <Pressable
+                onPress={handleScrollToComments}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="View comments"
+                className={`flex-row items-center gap-1.5 py-1 pr-1 active:opacity-70 ${
+                  list.isPublic ? "ml-4" : ""
+                }`}
+              >
+                <Ionicons name="chatbubble-outline" size={22} color="#9BA1B0" />
+                {commentCountLabel ? (
+                  <Text className="text-[13px] font-semibold text-text-secondary">
+                    {commentCountLabel}
+                  </Text>
+                ) : null}
+              </Pressable>
+            ) : null}
+            {list.isPublic ? (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void sharePlotlistLink(`/list/${listId}`, `${list.title} on Plotlist`);
+                }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Share list"
+                className="ml-4 py-1 pr-1 active:opacity-70"
+              >
+                <Ionicons name="share-outline" size={22} color="#9BA1B0" />
+              </Pressable>
+            ) : null}
+            <View className="flex-1" />
+            {isOwner ? (
+              <Pressable
+                onPress={openEdit}
+                accessibilityRole="button"
+                accessibilityLabel="Edit list"
+                className="flex-row items-center gap-1.5 rounded-full border border-dark-border bg-dark-card px-4 py-2 active:bg-dark-hover"
+              >
+                <Ionicons name="pencil" size={13} color="#9BA1B0" />
+                <Text className="text-[13px] font-semibold text-text-secondary">Edit</Text>
+              </Pressable>
+            ) : list.isPublic ? (
+              <View className="flex-row items-center gap-1">
+                <Pressable
+                  onPress={handleToggleFollow}
+                  disabled={followPending}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    list.viewerIsFollowing ? "Unfollow list" : "Follow list"
+                  }
+                  className={`flex-row items-center gap-1.5 rounded-full px-4 py-2 ${
+                    list.viewerIsFollowing
+                      ? "border border-dark-border bg-dark-card active:bg-dark-hover"
+                      : "bg-brand-500 active:bg-brand-600"
+                  }`}
+                >
+                  <Ionicons
+                    name={list.viewerIsFollowing ? "checkmark" : "bookmark-outline"}
+                    size={14}
+                    color={list.viewerIsFollowing ? "#9BA1B0" : "#fff"}
+                  />
+                  <Text
+                    className={`text-[13px] font-semibold ${
+                      list.viewerIsFollowing ? "text-text-secondary" : "text-white"
+                    }`}
+                  >
+                    {list.viewerIsFollowing ? "Following" : "Follow"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setShowMenu(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="List options"
+                  className="h-9 w-9 items-center justify-center rounded-full active:bg-dark-hover"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color="#9BA1B0" />
+                </Pressable>
               </View>
             ) : null}
           </View>
-
-          {coverUrl ? (
-            <Image
-              source={{ uri: coverUrl }}
-              style={{ width: "100%", height: 180, borderRadius: 16, marginTop: 16 }}
-              contentFit="cover"
-            />
-          ) : null}
-
-          {/* ── Like (public lists only; private links dead-end for others) ── */}
-          {list.isPublic ? (
-            <View className="mt-4 flex-row items-center">
-              <LikeButton targetType="list" targetId={listId} />
-            </View>
-          ) : null}
-
-          {!isOwner && list.isPublic ? (
-            <View className="mt-4 flex-row items-center gap-2">
-              <Pressable
-                onPress={handleToggleFollow}
-                disabled={followPending}
-                accessibilityRole="button"
-                accessibilityLabel={list.viewerIsFollowing ? "Unfollow list" : "Follow list"}
-                className={`flex-1 flex-row items-center justify-center gap-2 rounded-full px-5 py-2.5 ${
-                  list.viewerIsFollowing
-                    ? "border border-dark-border bg-dark-card active:bg-dark-hover"
-                    : "bg-brand-500 active:bg-brand-600"
-                }`}
-              >
-                <Ionicons
-                  name={list.viewerIsFollowing ? "checkmark" : "bookmark-outline"}
-                  size={15}
-                  color={list.viewerIsFollowing ? "#9BA1B0" : "#fff"}
-                />
-                <Text
-                  className={`text-sm font-semibold ${
-                    list.viewerIsFollowing ? "text-text-secondary" : "text-white"
-                  }`}
-                >
-                  {list.viewerIsFollowing ? "Following" : "Follow list"}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowReport(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Report list"
-                className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card active:bg-dark-hover"
-              >
-                <Ionicons name="flag-outline" size={16} color="#9BA1B0" />
-              </Pressable>
-            </View>
-          ) : !isOwner ? (
-            <View className="mt-4">
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowReport(true);
-                }}
-                className="self-start rounded-full border border-dark-border bg-dark-card px-4 py-2"
-              >
-                <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Report list
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
 
           <View className="mt-6">
             <SectionHeader title="Shows" />
@@ -765,13 +816,37 @@ export default function ListScreen() {
             )}
           </View>
 
-          <View className="mt-8">
-            <CommentsPreview targetType="list" targetId={listId} />
+          <View
+            className="mt-8"
+            onLayout={(event) => {
+              commentsYRef.current = event.nativeEvent.layout.y;
+            }}
+          >
+            <CommentsSection
+              thread={commentThread}
+              enabled={commentsEnabled}
+              isOwner={isOwner}
+              onComposerFocus={handleComposerFocus}
+            />
           </View>
             </>
           )}
         </View>
       </ScrollView>
+      {/* ── Overflow menu (non-owner) ── */}
+      <ActionSheet
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        title={list?.title ?? "List"}
+        options={[
+          {
+            label: "Report list",
+            icon: "flag-outline",
+            destructive: true,
+            onPress: () => setShowReport(true),
+          },
+        ]}
+      />
       <ReportModal
         visible={showReport}
         onClose={() => setShowReport(false)}
@@ -817,12 +892,14 @@ export default function ListScreen() {
               title={editTitle}
               description={editDescription}
               isPublic={editIsPublic}
+              commentsEnabled={editCommentsEnabled}
               saving={savingEdit}
               submitLabel="Save"
               savingLabel="Saving..."
               onChangeTitle={setEditTitle}
               onChangeDescription={setEditDescription}
               onToggleVisibility={() => setEditIsPublic((prev) => !prev)}
+              onToggleComments={() => setEditCommentsEnabled((prev) => !prev)}
               onSubmit={handleSaveEdit}
             />
             <Pressable

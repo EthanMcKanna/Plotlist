@@ -95,6 +95,7 @@ export default function ListsScreen() {
         title: args.title,
         description: args.description ?? null,
         isPublic: args.isPublic ?? true,
+        commentsEnabled: args.commentsEnabled ?? true,
         coverUrl: null,
         createdAt: now,
         updatedAt: now,
@@ -123,6 +124,9 @@ export default function ListsScreen() {
                 ...(args.title !== undefined ? { title: args.title } : null),
                 ...(args.description !== undefined ? { description: args.description } : null),
                 ...(args.isPublic !== undefined ? { isPublic: args.isPublic } : null),
+                ...(args.commentsEnabled !== undefined
+                  ? { commentsEnabled: args.commentsEnabled }
+                  : null),
                 updatedAt: Date.now(),
               }
             : item;
@@ -159,6 +163,7 @@ export default function ListsScreen() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [isPublic, setIsPublic] = useState(true);
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
   const [creating, setCreating] = useState(false);
 
   const [selectedList, setSelectedList] = useState<any | null>(null);
@@ -169,6 +174,7 @@ export default function ListsScreen() {
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editIsPublic, setEditIsPublic] = useState(true);
+  const [editCommentsEnabled, setEditCommentsEnabled] = useState(true);
   const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
@@ -211,6 +217,7 @@ export default function ListsScreen() {
         title: trimmedTitle,
         description: description.trim() || undefined,
         isPublic,
+        commentsEnabled,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -218,13 +225,14 @@ export default function ListsScreen() {
     } finally {
       setCreating(false);
     }
-  }, [createList, description, isAuthenticated, isPublic, title]);
+  }, [commentsEnabled, createList, description, isAuthenticated, isPublic, title]);
 
   const openEdit = useCallback((list: any) => {
     setEditingList(list);
     setEditTitle(list.title ?? "");
     setEditDescription(list.description ?? "");
     setEditIsPublic(Boolean(list.isPublic));
+    setEditCommentsEnabled(list.commentsEnabled !== false);
   }, []);
 
   const handleSaveEdit = useCallback(async () => {
@@ -241,6 +249,7 @@ export default function ListsScreen() {
         title: trimmedTitle,
         description: editDescription.trim() || null,
         isPublic: editIsPublic,
+        commentsEnabled: editCommentsEnabled,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditingList(null);
@@ -249,7 +258,7 @@ export default function ListsScreen() {
     } finally {
       setSavingEdit(false);
     }
-  }, [editDescription, editIsPublic, editTitle, editingList, updateList]);
+  }, [editCommentsEnabled, editDescription, editIsPublic, editTitle, editingList, updateList]);
 
   const handleDelete = useCallback(
     (list: any) => {
@@ -438,6 +447,7 @@ export default function ListsScreen() {
               title={title}
               description={description}
               isPublic={isPublic}
+              commentsEnabled={commentsEnabled}
               saving={creating}
               submitLabel="Create"
               savingLabel="Creating..."
@@ -445,6 +455,7 @@ export default function ListsScreen() {
               onChangeTitle={setTitle}
               onChangeDescription={setDescription}
               onToggleVisibility={() => setIsPublic((prev) => !prev)}
+              onToggleComments={() => setCommentsEnabled((prev) => !prev)}
               onSubmit={handleCreate}
             />
           </View>
@@ -566,12 +577,14 @@ export default function ListsScreen() {
               title={editTitle}
               description={editDescription}
               isPublic={editIsPublic}
+              commentsEnabled={editCommentsEnabled}
               saving={savingEdit}
               submitLabel="Save"
               savingLabel="Saving..."
               onChangeTitle={setEditTitle}
               onChangeDescription={setEditDescription}
               onToggleVisibility={() => setEditIsPublic((prev) => !prev)}
+              onToggleComments={() => setEditCommentsEnabled((prev) => !prev)}
               onSubmit={handleSaveEdit}
             />
           </View>

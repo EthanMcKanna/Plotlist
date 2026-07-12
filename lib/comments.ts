@@ -90,7 +90,3 @@ export function buildOptimisticCommentEntry(args: {
     author: args.viewer,
   };
 }
-
-export function commentsHref(targetType: CommentTargetType, targetId: string): string {
-  return `/comments?targetType=${targetType}&targetId=${encodeURIComponent(targetId)}`;
-}

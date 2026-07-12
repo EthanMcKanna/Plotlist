@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, useLocalSearchParams } from "expo-router";
 
 import { ActionSheet, type ActionSheetOption } from "../components/ActionSheet";
 import {
@@ -25,8 +25,6 @@ import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation } from "../lib/plotlist/react";
 import type { CommentTargetType } from "../lib/comments";
-
-const TARGET_TYPES: CommentTargetType[] = ["review", "log", "list"];
 
 function CommentsThread({
   targetType,
@@ -84,12 +82,13 @@ function CommentsThread({
   );
 }
 
-// Standalone comments thread: the composer's home for every commentable
-// target, plus the like/report surface for watch logs (which have no detail
-// screen of their own).
+// Standalone comments thread for watch logs, which have no detail screen of
+// their own — this doubles as the place to like or report one. Lists and
+// reviews host their comments inline on their detail screens now, so old
+// links to those threads redirect there.
 export default function CommentsScreen() {
   const params = useLocalSearchParams();
-  const targetType = TARGET_TYPES.find((type) => type === params.targetType) ?? null;
+  const targetType: CommentTargetType | null = params.targetType === "log" ? "log" : null;
   const targetId = typeof params.targetId === "string" ? params.targetId : "";
   const autoFocusComposer = params.focus === "1";
   const { isAuthenticated } = useAuth();
@@ -125,6 +124,14 @@ export default function CommentsScreen() {
     ],
     [],
   );
+
+  // List and review threads moved inline onto their detail screens.
+  if (params.targetType === "list" && targetId) {
+    return <Redirect href={`/list/${targetId}`} />;
+  }
+  if (params.targetType === "review" && targetId) {
+    return <Redirect href={`/review/${targetId}`} />;
+  }
 
   return (
     <Screen>

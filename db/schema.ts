@@ -455,6 +455,7 @@ export const lists = sqliteTable(
     title: text("title").notNull(),
     description: text("description"),
     isPublic: boolean("is_public").notNull(),
+    commentsEnabled: boolean("comments_enabled").default(true).notNull(),
     coverUrl: text("cover_url"),
     createdAt: timestampMs("created_at").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),

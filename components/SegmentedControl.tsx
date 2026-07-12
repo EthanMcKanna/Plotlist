@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   Text,
+  View,
   type ViewStyle,
 } from "react-native";
 import Animated, {
@@ -12,8 +13,6 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-
-import { GlassSurface } from "./NativeGlass";
 
 type SegmentedControlProps = {
   options: { value: string; label: string }[];
@@ -67,13 +66,7 @@ export function SegmentedControl({
   }, []);
 
   return (
-    <GlassSurface
-      radius={8}
-      variant="control"
-      fallbackColor="rgba(17,19,24,0.92)"
-      contentStyle={styles.segmentContent}
-      onLayout={handleLayout}
-    >
+    <View style={styles.container} onLayout={handleLayout}>
       {segmentWidth > 0 && (
         <Animated.View
           style={[
@@ -103,24 +96,28 @@ export function SegmentedControl({
           </Pressable>
         );
       })}
-    </GlassSurface>
+    </View>
   );
 }
 
 const styles = {
+  container: {
+    backgroundColor: "rgba(17,19,24,0.92)",
+    borderColor: "#2A2E38",
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row" as const,
+    padding: PADDING,
+  },
   indicator: {
     backgroundColor: "rgba(241,243,247,0.10)",
     borderColor: "rgba(255,255,255,0.12)",
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
     bottom: 4,
     left: 4,
     position: "absolute" as const,
     top: 4,
     ...indicatorShadow,
-  },
-  segmentContent: {
-    flexDirection: "row" as const,
-    padding: PADDING,
   },
 };

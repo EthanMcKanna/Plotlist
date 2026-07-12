@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,11 @@ import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { LikeButton } from "../../components/LikeButton";
 import { ActionSheet } from "../../components/ActionSheet";
-import { CommentsPreview } from "../../components/Comments";
+import {
+  CommentsSection,
+  formatCommentCount,
+  useCommentThread,
+} from "../../components/Comments";
 import { GlassPressable } from "../../components/NativeGlass";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
@@ -96,6 +100,28 @@ export default function ReviewScreen() {
   const report = useMutation(api.reports.create);
   const [showReport, setShowReport] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const commentThread = useCommentThread("review", reviewId, { skip: !reviewId });
+  const commentCountLabel = formatCommentCount(commentThread);
+  const scrollRef = useRef<ScrollView>(null);
+  // Y offset of the comments section inside the scroll content, captured on
+  // layout so the comment button can jump straight to the thread.
+  const commentsYRef = useRef(0);
+
+  const handleScrollToComments = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    scrollRef.current?.scrollTo({
+      y: Math.max(commentsYRef.current - 12, 0),
+      animated: true,
+    });
+  }, []);
+
+  const handleComposerFocus = useCallback(() => {
+    // Let the keyboard start animating so automaticallyAdjustKeyboardInsets
+    // has grown the scroll range, then settle the composer just above it.
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 140);
+  }, []);
 
   if (isLoading) {
     return (
@@ -137,8 +163,13 @@ export default function ReviewScreen() {
       <View className="flex-1">
         <ReviewHeader />
         <ScrollView
+          ref={scrollRef}
           contentInsetAdjustmentBehavior="automatic"
+          // iOS: grow the bottom inset so the inline comment composer can sit
+          // above the keyboard (Android resizes the window natively).
+          automaticallyAdjustKeyboardInsets
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           bounces={false}
           overScrollMode="never"
         >
@@ -187,15 +218,29 @@ export default function ReviewScreen() {
             </Pressable>
 
             {review.reviewText ? (
-              <View className="mt-5 rounded-3xl border border-dark-border bg-dark-card p-4">
-                <Text className="text-base leading-6 text-text-primary">
-                  {review.reviewText}
-                </Text>
-              </View>
+              <Text className="mt-5 text-base leading-6 text-text-primary">
+                {review.reviewText}
+              </Text>
             ) : null}
 
-            <View className="mt-4 flex-row items-center justify-between">
+            {/* ── Action bar: engagement left, overflow right ── */}
+            <View className="mt-4 flex-row items-center border-y border-dark-border py-2">
               <LikeButton targetType="review" targetId={review._id} />
+              <Pressable
+                onPress={handleScrollToComments}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="View comments"
+                className="ml-4 flex-row items-center gap-1.5 py-1 pr-1 active:opacity-70"
+              >
+                <Ionicons name="chatbubble-outline" size={22} color="#9BA1B0" />
+                {commentCountLabel ? (
+                  <Text className="text-[13px] font-semibold text-text-secondary">
+                    {commentCountLabel}
+                  </Text>
+                ) : null}
+              </Pressable>
+              <View className="flex-1" />
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -203,14 +248,22 @@ export default function ReviewScreen() {
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Review options"
-                className="h-9 w-9 items-center justify-center rounded-full bg-dark-elevated active:bg-dark-hover"
+                className="h-9 w-9 items-center justify-center rounded-full active:bg-dark-hover"
               >
-                <Ionicons name="ellipsis-horizontal" size={16} color="#9BA1B0" />
+                <Ionicons name="ellipsis-horizontal" size={18} color="#9BA1B0" />
               </Pressable>
             </View>
 
-            <View className="mt-6">
-              <CommentsPreview targetType="review" targetId={review._id} />
+            <View
+              className="mt-6"
+              onLayout={(event) => {
+                commentsYRef.current = event.nativeEvent.layout.y;
+              }}
+            >
+              <CommentsSection
+                thread={commentThread}
+                onComposerFocus={handleComposerFocus}
+              />
             </View>
           </View>
         </ScrollView>

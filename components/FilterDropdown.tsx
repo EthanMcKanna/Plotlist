@@ -94,33 +94,23 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
   return (
     <>
-      <Pressable onPress={handleOpen}>
-        <GlassSurface
-          radius={8}
-          variant="control"
-          fallbackColor="rgba(17,19,24,0.92)"
-          contentStyle={{
-            alignItems: "center",
-            flexDirection: "row",
-            justifyContent: "space-between",
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-          }}
-        >
-          <View className="flex-row items-center gap-2">
-            <Text className="text-sm font-semibold text-text-primary">
-              {selectedOption.label}
-            </Text>
-            {selectedOption.count !== undefined && (
-              <View className="rounded-full bg-dark-elevated px-2 py-0.5">
-                <Text className="text-xs font-semibold text-text-secondary">
-                  {selectedOption.count}
-                </Text>
-              </View>
-            )}
-          </View>
-          <Ionicons name="chevron-down" size={18} color="#9BA1B0" />
-        </GlassSurface>
+      <Pressable
+        onPress={handleOpen}
+        className="flex-row items-center justify-between rounded-xl border border-dark-border bg-dark-card px-4 py-3 active:bg-dark-hover"
+      >
+        <View className="flex-row items-center gap-2">
+          <Text className="text-sm font-semibold text-text-primary">
+            {selectedOption.label}
+          </Text>
+          {selectedOption.count !== undefined && (
+            <View className="rounded-full bg-dark-elevated px-2 py-0.5">
+              <Text className="text-xs font-semibold text-text-secondary">
+                {selectedOption.count}
+              </Text>
+            </View>
+          )}
+        </View>
+        <Ionicons name="chevron-down" size={18} color="#9BA1B0" />
       </Pressable>
 
       <Modal

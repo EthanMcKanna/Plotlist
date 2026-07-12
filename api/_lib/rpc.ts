@@ -4461,6 +4461,17 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "comments:add": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = targetArgs.extend({ text: z.string().min(1) }).parse(args ?? {});
+    if (parsed.targetType === "list") {
+      // Owners can switch comments off per list; enforce it server-side so a
+      // stale client can't post through a disabled thread.
+      const listRows = await db.select().from(lists).where(eq(lists.id, parsed.targetId)).limit(1);
+      if (!listRows[0]) {
+        throw new ApiError(404, "list_not_found", "List not found");
+      }
+      if (!listRows[0].commentsEnabled) {
+        throw new ApiError(403, "comments_disabled", "Comments are turned off for this list.");
+      }
+    }
     await moderateText("comment", [parsed.text]);
     await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("comment");
@@ -4599,6 +4610,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         title: z.string().min(1).max(100),
         description: z.string().max(500).optional(),
         isPublic: z.boolean().optional(),
+        commentsEnabled: z.boolean().optional(),
         // Seeds the list with a first show so "new list" flows from a show
         // page land fully formed in one round trip.
         showId: z.string().optional(),
@@ -4617,6 +4629,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       title,
       description: parsed.description?.trim() || null,
       isPublic: parsed.isPublic ?? true,
+      commentsEnabled: parsed.commentsEnabled ?? true,
       coverUrl: null,
       createdAt: now,
       updatedAt: now,
@@ -4646,6 +4659,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         title: z.string().min(1).max(100).optional(),
         description: z.string().max(500).nullable().optional(),
         isPublic: z.boolean().optional(),
+        commentsEnabled: z.boolean().optional(),
       })
       .parse(args ?? {});
     const listRows = await db
@@ -4668,6 +4682,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     if (parsed.isPublic !== undefined) {
       updates.isPublic = parsed.isPublic;
+    }
+    if (parsed.commentsEnabled !== undefined) {
+      updates.commentsEnabled = parsed.commentsEnabled;
     }
     await db.update(lists).set(updates).where(eq(lists.id, parsed.listId));
     return { success: true };
