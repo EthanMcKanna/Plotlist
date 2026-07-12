@@ -52,7 +52,7 @@ import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
-import { ReviewRow } from "../../components/ReviewRow";
+import { ReviewRowCompact } from "../../components/ReviewRow";
 import { StarRating } from "../../components/StarRating";
 import { CastMember } from "../../components/CastMember";
 import { VideoPlayer } from "../../components/VideoPlayer";
@@ -1632,14 +1632,13 @@ export default function ShowScreen() {
 
   const renderReview = useCallback(
     ({ item }: { item: any }) => (
-      <ReviewRow
+      <ReviewRowCompact
         id={item.review._id}
         rating={item.review.rating}
         reviewText={item.review.reviewText}
         authorName={
           item.author?.displayName ?? item.author?.name ?? item.author?.username ?? "Someone"
         }
-        authorUsername={item.author?.username}
         authorAvatarUrl={item.authorAvatarUrl}
         createdAt={item.review.createdAt}
         spoiler={item.review.spoiler}
@@ -2433,18 +2432,7 @@ export default function ShowScreen() {
             Community Reviews
           </Text>
           {communitySummary ? (
-            <GlassSurface
-              radius={18}
-              variant="surface"
-              fallbackColor="rgba(22,26,34,0.68)"
-              style={{ marginBottom: 16 }}
-              contentStyle={{
-                alignItems: "center",
-                flexDirection: "row",
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-              }}
-            >
+            <View className="mb-2 flex-row items-center rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
               <View className="mr-3 flex-row">
                 {communitySummary.recentReviewers.map((reviewer: any, index: number) => (
                   <View
@@ -2465,7 +2453,7 @@ export default function ShowScreen() {
                   {communitySummary.reviewCount === 1 ? "" : "s"}.
                 </Text>
               </View>
-            </GlassSurface>
+            </View>
           ) : null}
           {reviews.length > 0 ? (
             <View>
@@ -2473,30 +2461,24 @@ export default function ShowScreen() {
                 data={reviews}
                 renderItem={renderReview}
                 keyExtractor={(item: any) => item.review._id}
-                estimatedItemSize={120}
-                ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-                contentContainerStyle={{ paddingBottom: 8 }}
+                estimatedItemSize={76}
+                contentContainerStyle={{ paddingBottom: 4 }}
                 scrollEnabled={false}
               />
               {reviewsStatus === "CanLoadMore" ? (
-                <GlassPressable
+                <Pressable
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     loadMoreReviews(20);
                   }}
-                  radius={999}
-                  variant="control"
-                  style={{ alignSelf: "flex-start", marginTop: 8 }}
-                  contentStyle={{
-                    alignItems: "center",
-                    paddingHorizontal: 16,
-                    paddingVertical: 8,
-                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="View more reviews"
+                  className="py-2 active:opacity-70"
                 >
-                  <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                    Load more
+                  <Text className="text-sm font-medium text-brand-400">
+                    View more reviews
                   </Text>
-                </GlassPressable>
+                </Pressable>
               ) : null}
             </View>
           ) : reviewsStatus === "LoadingFirstPage" ? (

@@ -25,6 +25,23 @@ jest.mock("expo-splash-screen", () => ({
   hideAsync: jest.fn(async () => undefined),
 }));
 
+// zeego renders native UIContextMenu/menu views jest-expo can't host; the
+// mock passes the trigger's children through so rows stay renderable.
+jest.mock("zeego/context-menu", () => {
+  // No createElement here: the css-interop babel transform would inject an
+  // out-of-scope import into the mock factory. Returning children directly
+  // is a valid React node.
+  const passthrough = ({ children }: { children?: unknown }) => children ?? null;
+  return {
+    Root: passthrough,
+    Trigger: passthrough,
+    Content: () => null,
+    Item: () => null,
+    ItemTitle: () => null,
+    ItemIcon: () => null,
+  };
+});
+
 // The Sentry SDK touches native modules at init time, which jest-expo does
 // not provide; component tests only need inert stand-ins.
 jest.mock("@sentry/react-native", () => ({

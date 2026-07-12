@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Avatar } from "./Avatar";
+import { CommentContextMenu } from "./CommentContextMenu";
 import { ReportModal } from "./ReportModal";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
@@ -125,33 +126,29 @@ function CommentRow({
     }
   }, [author?._id]);
 
-  const showOptions = useCallback(() => {
-    if (!deletable && !reportable) {
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (deletable) {
-      Alert.alert("Delete comment?", "This can't be undone.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => onDelete(comment._id) },
-      ]);
-      return;
-    }
-    Alert.alert("Comment options", undefined, [
+  const confirmDelete = useCallback(() => {
+    Alert.alert("Delete comment?", "This can't be undone.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Report comment", style: "destructive", onPress: () => onReport(comment._id) },
+      { text: "Delete", style: "destructive", onPress: () => onDelete(comment._id) },
     ]);
-  }, [comment._id, deletable, onDelete, onReport, reportable]);
+  }, [comment._id, onDelete]);
+
+  const reportComment = useCallback(() => onReport(comment._id), [comment._id, onReport]);
 
   return (
-    <Pressable
-      onLongPress={showOptions}
-      delayLongPress={350}
-      accessibilityHint={
-        deletable ? "Long press to delete" : reportable ? "Long press to report" : undefined
-      }
-      className={`flex-row gap-3 py-3 ${pending ? "opacity-60" : ""}`}
+    <CommentContextMenu
+      deletable={deletable}
+      reportable={reportable}
+      onViewProfile={author?._id ? openProfile : undefined}
+      onDelete={confirmDelete}
+      onReport={reportComment}
     >
+      <View
+        accessibilityHint={
+          deletable ? "Long press to delete" : reportable ? "Long press to report" : undefined
+        }
+        className={`flex-row gap-3 py-3 ${pending ? "opacity-60" : ""}`}
+      >
       <Pressable onPress={openProfile} disabled={!author?._id} className="active:opacity-80">
         <Avatar uri={author?.avatarUrl} label={label} size={32} />
       </Pressable>
@@ -167,8 +164,9 @@ function CommentRow({
           </Text>
         </View>
         <Text className="mt-0.5 text-[15px] leading-5 text-text-primary">{comment.text}</Text>
+        </View>
       </View>
-    </Pressable>
+    </CommentContextMenu>
   );
 }
 

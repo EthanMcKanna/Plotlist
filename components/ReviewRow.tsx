@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import { Poster } from "./Poster";
 import { Avatar } from "./Avatar";
 import { formatEpisodeCode, formatRelativeTime } from "../lib/format";
@@ -16,6 +17,76 @@ export function getReviewRowEpisodeLabel({
     return null;
   }
   return formatEpisodeCode(seasonNumber, episodeNumber);
+}
+
+// Compact review row in the comments design language: avatar + name/time
+// header, small star strip, plain text — no card chrome. Used where reviews
+// sit inline on a detail page (show page community reviews).
+export function ReviewRowCompact({
+  id,
+  rating,
+  reviewText,
+  authorName,
+  authorAvatarUrl,
+  createdAt,
+  spoiler = false,
+}: {
+  id: string;
+  rating: number;
+  reviewText?: string | null;
+  authorName?: string | null;
+  authorAvatarUrl?: string | null;
+  createdAt?: number;
+  spoiler?: boolean;
+}) {
+  const router = useRouter();
+  const label = authorName ?? "Someone";
+
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push(`/review/${id}`);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Review by ${label}, ${rating} out of 5 stars`}
+      className="flex-row gap-3 py-3 active:opacity-80"
+    >
+      <Avatar uri={authorAvatarUrl} label={label} size={32} />
+      <View className="flex-1">
+        <View className="flex-row items-center gap-1.5">
+          <Text className="shrink text-[13px] font-semibold text-text-primary" numberOfLines={1}>
+            {label}
+          </Text>
+          <View className="flex-row items-center gap-0.5">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Ionicons
+                key={i}
+                name={i < Math.round(rating) ? "star" : "star-outline"}
+                size={11}
+                color={i < Math.round(rating) ? "#fbbf24" : "#3b3f4a"}
+              />
+            ))}
+          </View>
+          {spoiler ? (
+            <View className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5">
+              <Text className="text-[10px] font-medium text-red-300">Spoilers</Text>
+            </View>
+          ) : null}
+          {createdAt ? (
+            <Text className="text-[11px] text-text-tertiary">
+              {formatRelativeTime(createdAt)}
+            </Text>
+          ) : null}
+        </View>
+        {reviewText ? (
+          <Text className="mt-0.5 text-[15px] leading-5 text-text-primary" numberOfLines={4}>
+            {reviewText}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
 }
 
 export function ReviewRow({
