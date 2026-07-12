@@ -369,6 +369,17 @@ export async function getFacetBrowse() {
   }));
 }
 
+// Facet chips for the show detail page: the show's assigned categories,
+// highest-affinity first. Pure D1 read — no vectors needed at request time,
+// so this works even when the Vectorize binding is absent.
+export async function getShowFacets(showId: string) {
+  const facetsByShow = await getFacetsForShows([showId]);
+  const entries = facetsByShow.get(showId) ?? [];
+  return entries
+    .filter((entry) => facetByKey(entry.key))
+    .map((entry) => ({ key: entry.key, score: entry.score }));
+}
+
 export async function getFacetShows(facetKey: string, limit: number) {
   const def = facetByKey(facetKey);
   if (!def) return null;

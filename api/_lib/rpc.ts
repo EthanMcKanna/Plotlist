@@ -66,6 +66,7 @@ import {
   getHomeRecommendationRailsV2,
   getPersonalizedRecommendationsV2,
   getProfileTasteExperienceV2,
+  getShowFacets,
   getSimilarShowsV2,
   getSmartListsV2,
   vibeSearchShows,
@@ -3844,6 +3845,10 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     const rows = await db.select().from(userTastePreferences).where(eq(userTastePreferences.userId, user.id)).limit(1);
     return rows[0] ? toDoc(rows[0]) : { favoriteShowIds: [], favoriteThemes: [] };
+  },
+  "embeddings:getShowFacets": async ({ args }) => {
+    const parsed = z.object({ showId: z.string() }).parse(args ?? {});
+    return await getShowFacets(parsed.showId);
   },
   "releaseCalendar:getHomePreview": async ({ args, req }) => {
     const user = await requireAuthUser(req);

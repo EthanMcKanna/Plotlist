@@ -159,6 +159,7 @@ export const api = {
     getListsFromSimilarTasteUsers: ref("action", "embeddings:getListsFromSimilarTasteUsers"),
     getSmartLists: ref("action", "embeddings:getSmartLists"),
     getSimilarShows: ref("action", "embeddings:getSimilarShows"),
+    getShowFacets: ref("query", "embeddings:getShowFacets"),
     getShowTasteSocialProof: ref("action", "embeddings:getShowTasteSocialProof"),
     getProfileTasteExperience: ref("action", "embeddings:getProfileTasteExperience"),
     searchByVibe: ref("action", "embeddings:searchByVibe"),

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -64,6 +71,9 @@ import {
   ShowDetailSkeleton,
 } from "../../components/ShowDetailSkeleton";
 import { mapGenreIdsToNames } from "../../lib/plotlist/embeddingUtils";
+import { facetByKey } from "../../lib/plotlist/facets";
+import { getGenreExplorerGroup, withAlpha } from "../../lib/genreExplorer";
+import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import {
   optimisticMarkSeasonWatched,
@@ -432,6 +442,31 @@ export default function ShowScreen() {
     api.watchStates.getForShow,
     !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
   );
+  const queriedShowFacets = useQuery(
+    api.embeddings.getShowFacets,
+    !isShowPreview && showId ? { showId } : "skip",
+  );
+  const facetChips = useMemo(() => {
+    if (!queriedShowFacets?.length) return [];
+    const chips: Array<{
+      key: string;
+      title: string;
+      icon: ComponentProps<typeof Ionicons>["name"];
+      accent: string;
+    }> = [];
+    for (const entry of queriedShowFacets) {
+      const def = facetByKey(entry.key);
+      if (!def) continue;
+      const group = getGenreExplorerGroup(def.group);
+      chips.push({
+        key: def.key,
+        title: def.title,
+        icon: group.icon,
+        accent: group.accent,
+      });
+    }
+    return chips;
+  }, [queriedShowFacets]);
   const watchState = isShowPreview
     ? { _id: "watch_preview", showId, status: "watching", updatedAt: Date.now() }
     : queriedWatchState;
@@ -2183,6 +2218,56 @@ export default function ShowScreen() {
                       {genre.name}
                     </Text>
                   </GlassSurface>
+                ))}
+              </View>
+            </View>
+          )}
+
+        {/* ─── Categories ─── */}
+        {facetChips.length > 0 && (
+            <View className="mt-8 px-6">
+              <Text
+                className="mb-3 text-xs font-bold uppercase text-text-tertiary"
+                style={{ letterSpacing: 1.5 }}
+              >
+                Categories
+              </Text>
+              <View className="flex-row flex-wrap gap-2">
+                {facetChips.map((facet) => (
+                  <Pressable
+                    key={facet.key}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      guardedPush(`/facet/${facet.key}`);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Browse ${facet.title} shows`}
+                    className="active:opacity-75"
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      paddingHorizontal: 14,
+                      paddingVertical: 7,
+                      backgroundColor: withAlpha(facet.accent, 0.12),
+                      borderColor: withAlpha(facet.accent, 0.3),
+                    }}
+                  >
+                    <Ionicons
+                      name={facet.icon}
+                      size={12}
+                      color={facet.accent}
+                      accessible={false}
+                      accessibilityElementsHidden
+                      aria-hidden={true}
+                      importantForAccessibility="no"
+                    />
+                    <Text className="text-xs font-semibold text-text-secondary">
+                      {facet.title}
+                    </Text>
+                  </Pressable>
                 ))}
               </View>
             </View>
