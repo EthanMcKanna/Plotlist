@@ -8,6 +8,7 @@ export function CommentContextMenu({
   reportable,
   onDelete,
   onReport,
+  entity = "Comment",
   children,
 }: CommentContextMenuProps) {
   if (!deletable && !reportable) {
@@ -19,9 +20,9 @@ export function CommentContextMenu({
       onDelete();
       return;
     }
-    Alert.alert("Comment options", undefined, [
+    Alert.alert(`${entity} options`, undefined, [
       { text: "Cancel", style: "cancel" },
-      { text: "Report comment", style: "destructive", onPress: onReport },
+      { text: `Report ${entity.toLowerCase()}`, style: "destructive", onPress: onReport },
     ]);
   };
 

@@ -53,6 +53,8 @@ import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { ReviewRowCompact } from "../../components/ReviewRow";
+import { CommentContextMenu } from "../../components/CommentContextMenu";
+import { ReportModal } from "../../components/ReportModal";
 import { StarRating } from "../../components/StarRating";
 import { CastMember } from "../../components/CastMember";
 import { VideoPlayer } from "../../components/VideoPlayer";
@@ -596,8 +598,17 @@ export default function ShowScreen() {
         (current) => {
           if (!current) return current;
           const page = current.page ?? current.results ?? [];
+          // One review per user per show: a re-submit replaces the viewer's
+          // existing show-level review (the server upserts the same way).
           const withoutDuplicate = page.filter(
-            (item: any) => item.review?._id !== optimisticReviewId,
+            (item: any) =>
+              item.review?._id !== optimisticReviewId &&
+              !(
+                me?._id &&
+                item.review?.authorId === me._id &&
+                item.review?.seasonNumber == null &&
+                item.review?.episodeNumber == null
+              ),
           );
           return {
             ...current,
@@ -608,6 +619,25 @@ export default function ShowScreen() {
       );
     },
   );
+  const deleteReview = useMutation(api.reviews.deleteReview).withOptimisticUpdate(
+    (localStore, args) => {
+      localStore.setPaginatedQuery(
+        api.reviews.listForShowDetailed,
+        { showId },
+        (current) => {
+          if (!current) return current;
+          const keep = (item: any) => item.review?._id !== args.reviewId;
+          return {
+            ...current,
+            page: (current.page ?? []).filter(keep),
+            results: (current.results ?? []).filter(keep),
+          };
+        },
+      );
+    },
+  );
+  const reportReview = useMutation(api.reports.create);
+  const [reportReviewId, setReportReviewId] = useState<string | null>(null);
   const rateEpisode = useMutation(api.reviews.rateEpisode).withOptimisticUpdate(
     (localStore, args) => optimisticRateEpisode(localStore, args),
   );
@@ -1630,21 +1660,64 @@ export default function ShowScreen() {
     showId,
   ]);
 
+  const handleDeleteReview = useCallback(
+    (reviewId: string) => {
+      Alert.alert("Delete review?", "This can't be undone.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteReview({ reviewId: reviewId as Id<"reviews"> }).catch(() => {
+              Alert.alert("Couldn't delete review", "Check your connection and try again.");
+            });
+          },
+        },
+      ]);
+    },
+    [deleteReview],
+  );
+
   const renderReview = useCallback(
-    ({ item }: { item: any }) => (
-      <ReviewRowCompact
-        id={item.review._id}
-        rating={item.review.rating}
-        reviewText={item.review.reviewText}
-        authorName={
-          item.author?.displayName ?? item.author?.name ?? item.author?.username ?? "Someone"
-        }
-        authorAvatarUrl={item.authorAvatarUrl}
-        createdAt={item.review.createdAt}
-        spoiler={item.review.spoiler}
-      />
-    ),
-    []
+    ({ item }: { item: any }) => {
+      const authorId = item.author?._id ?? item.review?.authorId ?? null;
+      const pending =
+        typeof item.review._id === "string" && item.review._id.startsWith("optimistic:");
+      const deletable =
+        !isShowPreview && !pending && Boolean(me?._id) && authorId === me?._id;
+      const reportable =
+        !isShowPreview && !pending && Boolean(me?._id) && authorId !== me?._id;
+      return (
+        <CommentContextMenu
+          entity="Review"
+          deletable={deletable}
+          reportable={reportable}
+          onViewProfile={
+            authorId
+              ? () => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  guardedPush(`/profile/${authorId}`);
+                }
+              : undefined
+          }
+          onDelete={() => handleDeleteReview(item.review._id)}
+          onReport={() => setReportReviewId(item.review._id)}
+        >
+          <ReviewRowCompact
+            id={item.review._id}
+            rating={item.review.rating}
+            reviewText={item.review.reviewText}
+            authorName={
+              item.author?.displayName ?? item.author?.name ?? item.author?.username ?? "Someone"
+            }
+            authorAvatarUrl={item.authorAvatarUrl}
+            createdAt={item.review.createdAt}
+            spoiler={item.review.spoiler}
+          />
+        </CommentContextMenu>
+      );
+    },
+    [handleDeleteReview, isShowPreview, me?._id]
   );
 
   // Build metadata line: "2024 · Drama, Thriller · 52m"
@@ -3522,6 +3595,19 @@ export default function ShowScreen() {
           </View>
           );
         })()}
+      <ReportModal
+        visible={reportReviewId !== null}
+        onClose={() => setReportReviewId(null)}
+        onSubmit={async (reason) => {
+          if (!reportReviewId) return;
+          try {
+            await reportReview({ targetType: "review", targetId: reportReviewId, reason });
+            Alert.alert("Report submitted", "Thanks — we'll take a look.");
+          } catch {
+            Alert.alert("Couldn't submit report", "Check your connection and try again.");
+          }
+        }}
+      />
     </View>
   );
 }

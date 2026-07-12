@@ -4539,8 +4539,37 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       episodeTitle: z.string().optional(),
     }).parse(args ?? {});
     await moderateText("review", [parsed.reviewText]);
-    const id = createId("review");
     const now = Date.now();
+    // One review per user per target: repeat submissions replace the existing
+    // show review (or episode review for the same S/E) instead of stacking.
+    const existing = await db
+      .select()
+      .from(reviews)
+      .where(
+        and(
+          eq(reviews.authorId, user.id),
+          eq(reviews.showId, parsed.showId),
+          parsed.seasonNumber != null
+            ? eq(reviews.seasonNumber, parsed.seasonNumber)
+            : isNull(reviews.seasonNumber),
+          parsed.episodeNumber != null
+            ? eq(reviews.episodeNumber, parsed.episodeNumber)
+            : isNull(reviews.episodeNumber),
+        ),
+      )
+      .limit(1);
+    if (existing[0]) {
+      await db.update(reviews).set({
+        rating: parsed.rating,
+        reviewText: parsed.reviewText ?? null,
+        spoiler: parsed.spoiler ?? false,
+        episodeTitle: parsed.episodeTitle ?? existing[0].episodeTitle,
+        updatedAt: now,
+      }).where(eq(reviews.id, existing[0].id));
+      // Followers already saw the original review; edits don't re-fan.
+      return existing[0].id;
+    }
+    const id = createId("review");
     await db.insert(reviews).values({
       id,
       authorId: user.id,

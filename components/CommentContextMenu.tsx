@@ -7,6 +7,8 @@ export type CommentContextMenuProps = {
   onViewProfile?: () => void;
   onDelete: () => void;
   onReport: () => void;
+  /** Noun used in menu item titles ("Report Comment" / "Report Review"). */
+  entity?: string;
   children: ReactNode;
 };
 
@@ -16,15 +18,16 @@ function afterDismiss(fn: () => void) {
   return () => setTimeout(fn, 250);
 }
 
-// Long-press context menu over a comment row: UIContextMenu on iOS (the
-// home-screen style popup with the row as its preview), a native popup menu
-// on Android. Web falls back to CommentContextMenu.web.tsx.
+// Long-press context menu over a comment or review row: UIContextMenu on iOS
+// (the home-screen style popup with the row as its preview), a native popup
+// menu on Android. Web falls back to CommentContextMenu.web.tsx.
 export function CommentContextMenu({
   deletable,
   reportable,
   onViewProfile,
   onDelete,
   onReport,
+  entity = "Comment",
   children,
 }: CommentContextMenuProps) {
   if (!deletable && !reportable) {
@@ -43,13 +46,13 @@ export function CommentContextMenu({
         ) : null}
         {reportable ? (
           <ContextMenu.Item key="report" destructive onSelect={afterDismiss(onReport)}>
-            <ContextMenu.ItemTitle>Report Comment</ContextMenu.ItemTitle>
+            <ContextMenu.ItemTitle>{`Report ${entity}`}</ContextMenu.ItemTitle>
             <ContextMenu.ItemIcon ios={{ name: "flag" }} />
           </ContextMenu.Item>
         ) : null}
         {deletable ? (
           <ContextMenu.Item key="delete" destructive onSelect={afterDismiss(onDelete)}>
-            <ContextMenu.ItemTitle>Delete Comment</ContextMenu.ItemTitle>
+            <ContextMenu.ItemTitle>{`Delete ${entity}`}</ContextMenu.ItemTitle>
             <ContextMenu.ItemIcon ios={{ name: "trash" }} />
           </ContextMenu.Item>
         ) : null}

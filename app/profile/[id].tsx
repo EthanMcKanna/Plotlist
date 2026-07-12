@@ -32,6 +32,7 @@ import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { SecondaryButton } from "../../components/SecondaryButton";
 import { Avatar } from "../../components/Avatar";
+import { SpoilerShield } from "../../components/SpoilerShield";
 import { GlassSurface } from "../../components/NativeGlass";
 import { ShimmerBlock } from "../../components/ShowDetailSkeleton";
 import { TasteMatchSummary, TasteMatchSummarySkeleton } from "../../components/TasteMatchSummary";
@@ -220,12 +221,16 @@ function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
             ) : null}
           </View>
           {review.reviewText ? (
-            <Text
-              className="mt-1.5 text-[13px] leading-5 text-text-secondary"
-              numberOfLines={3}
-            >
-              {review.reviewText}
-            </Text>
+            <View className="mt-1.5">
+              <SpoilerShield active={Boolean(review.spoiler)}>
+                <Text
+                  className="text-[13px] leading-5 text-text-secondary"
+                  numberOfLines={3}
+                >
+                  {review.reviewText}
+                </Text>
+              </SpoilerShield>
+            </View>
           ) : null}
           {review.spoiler ? (
             <View className="mt-1.5 flex-row items-center gap-1">

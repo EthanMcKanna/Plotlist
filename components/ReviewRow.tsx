@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { Poster } from "./Poster";
 import { Avatar } from "./Avatar";
+import { SpoilerShield } from "./SpoilerShield";
 import { formatEpisodeCode, formatRelativeTime } from "../lib/format";
 
 export function getReviewRowEpisodeLabel({
@@ -80,9 +81,13 @@ export function ReviewRowCompact({
           ) : null}
         </View>
         {reviewText ? (
-          <Text className="mt-0.5 text-[15px] leading-5 text-text-primary" numberOfLines={4}>
-            {reviewText}
-          </Text>
+          <View className="mt-0.5">
+            <SpoilerShield active={spoiler}>
+              <Text className="text-[15px] leading-5 text-text-primary" numberOfLines={4}>
+                {reviewText}
+              </Text>
+            </SpoilerShield>
+          </View>
         ) : null}
       </View>
     </Pressable>
@@ -209,9 +214,13 @@ export function ReviewRow({
           ) : null}
         </View>
 
-        <Text className="mt-3 text-sm text-text-secondary" numberOfLines={3}>
-          {reviewText}
-        </Text>
+        <View className="mt-3">
+          <SpoilerShield active={spoiler}>
+            <Text className="text-sm text-text-secondary" numberOfLines={3}>
+              {reviewText}
+            </Text>
+          </SpoilerShield>
+        </View>
       </View>
     </Pressable>
   );

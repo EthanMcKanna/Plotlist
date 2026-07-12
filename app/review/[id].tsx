@@ -28,6 +28,7 @@ import { formatDate, formatEpisodeCode } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { sharePlotlistLink } from "../../lib/share";
 import { ReportModal } from "../../components/ReportModal";
+import { SpoilerShield } from "../../components/SpoilerShield";
 
 function ReviewHeader() {
   return (
@@ -218,9 +219,13 @@ export default function ReviewScreen() {
             </Pressable>
 
             {review.reviewText ? (
-              <Text className="mt-5 text-base leading-6 text-text-primary">
-                {review.reviewText}
-              </Text>
+              <View className="mt-5">
+                <SpoilerShield active={Boolean(review.spoiler)}>
+                  <Text className="text-base leading-6 text-text-primary">
+                    {review.reviewText}
+                  </Text>
+                </SpoilerShield>
+              </View>
             ) : null}
 
             {/* ── Action bar: engagement left, overflow right ── */}
