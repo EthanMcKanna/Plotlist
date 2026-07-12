@@ -24,6 +24,7 @@ import {
   RELEASE_CALENDAR_MAX_ITEMS,
 } from "../lib/releaseCalendar";
 import { queryClient } from "../lib/queryClient";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 import {
   buildReleaseDiaryRows,
   getReleaseDiaryCounts,
@@ -299,7 +300,8 @@ function ReleasesHeader({
 }) {
   return (
     <View className="px-6 pb-2 pt-1">
-      <Pressable
+      {SHOW_BACK_BUTTON ? (
+        <Pressable
         onPress={() => {
           lightHaptic();
           router.back();
@@ -312,6 +314,7 @@ function ReleasesHeader({
       >
         <Ionicons name="chevron-back" size={26} color="#E8EAED" />
       </Pressable>
+      ) : null}
       <View className="mt-2 flex-row items-end justify-between">
         <Text className="text-[34px] font-bold text-text-primary">Releases</Text>
         <View className="pb-2">

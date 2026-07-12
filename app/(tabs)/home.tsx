@@ -208,6 +208,14 @@ export function HomeSurface({
     [surfaceNow],
   );
   const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
+  // Desktop-web rails are roughly twice as wide as a phone screen, so the
+  // discovery rails aim for more items there (the limiters simply return
+  // fewer when the pools run dry). Native targets are unchanged.
+  const targetFeatureRailItems = isDesktopWeb ? 10 : TARGET_FEATURE_RAIL_ITEMS;
+  const targetFreshRailItems = isDesktopWeb ? 9 : TARGET_FRESH_RAIL_ITEMS;
+  const targetQuickRailItems = isDesktopWeb ? 8 : TARGET_QUICK_RAIL_ITEMS;
+  const targetCriticsRailItems = isDesktopWeb ? 10 : MIN_POSTER_RAIL_ITEMS;
+  const reserveRailLimit = isDesktopWeb ? 8 : MIN_DISTINCT_POSTER_RAIL_ITEMS;
 
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler({
@@ -342,7 +350,7 @@ export function HomeSurface({
         forYouTopUpSources,
         forYouPreviewKeys,
         MIN_FEATURE_RAIL_ITEMS,
-        TARGET_FEATURE_RAIL_ITEMS,
+        targetFeatureRailItems,
       );
       const contextualLeadCandidates = hasPersonalTasteSignals
         ? promoteContextualHomeShelfLead(candidates, { now: surfaceNow })
@@ -352,7 +360,7 @@ export function HomeSurface({
         forYouPrecedingSurfaceItems,
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_FEATURE_RAIL_ITEMS,
-        TARGET_FEATURE_RAIL_ITEMS,
+        targetFeatureRailItems,
       );
     },
     [
@@ -362,6 +370,7 @@ export function HomeSurface({
       surfaceNow,
       forYouPreviewKeys,
       forYouPrecedingSurfaceItems,
+      targetFeatureRailItems,
     ],
   );
   const discoveryPreviewKeys = useMemo(
@@ -400,7 +409,7 @@ export function HomeSurface({
         [...visibleEditorialSurfaceItems, ...forYouItems],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_FEATURE_RAIL_ITEMS,
-        TARGET_FEATURE_RAIL_ITEMS,
+        targetFeatureRailItems,
       );
     },
     [
@@ -409,6 +418,7 @@ export function HomeSurface({
       heatPreviewKeys,
       forYouItems,
       visibleEditorialSurfaceItems,
+      targetFeatureRailItems,
     ],
   );
   const pulseHeatItems = useMemo(
@@ -449,7 +459,7 @@ export function HomeSurface({
         ],
         maxTitleAppearances: MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         minimumRemaining: MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        limit: MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        limit: reserveRailLimit,
         now: surfaceNow,
       }),
     [
@@ -457,6 +467,7 @@ export function HomeSurface({
       freshReservePreviewKeys,
       forYouItems,
       heatItems,
+      reserveRailLimit,
       surfaceNow,
       visibleEditorialSurfaceItems,
     ],
@@ -491,13 +502,14 @@ export function HomeSurface({
         ],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        MIN_DISTINCT_POSTER_RAIL_ITEMS,
+        reserveRailLimit,
       ),
     [
       criticsReserveCandidateItems,
       forYouItems,
       heatItems,
       freshReserveItems,
+      reserveRailLimit,
       visibleEditorialSurfaceItems,
     ],
   );
@@ -527,7 +539,7 @@ export function HomeSurface({
         ],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_QUICK_RAIL_ITEMS,
-        TARGET_QUICK_RAIL_ITEMS,
+        targetQuickRailItems,
       );
     },
     [
@@ -536,6 +548,7 @@ export function HomeSurface({
       quickPreviewKeys,
       forYouItems,
       heatItems,
+      targetQuickRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
@@ -571,7 +584,7 @@ export function HomeSurface({
         ],
         maxTitleAppearances: MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         minimumRemaining: MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        limit: TARGET_FRESH_RAIL_ITEMS,
+        limit: targetFreshRailItems,
         now: surfaceNow,
       });
     },
@@ -582,6 +595,7 @@ export function HomeSurface({
       heatItems,
       quickItems,
       surfaceNow,
+      targetFreshRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
@@ -613,7 +627,7 @@ export function HomeSurface({
         ],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        MIN_POSTER_RAIL_ITEMS,
+        targetCriticsRailItems,
       );
     },
     [
@@ -624,6 +638,7 @@ export function HomeSurface({
       heatItems,
       freshItems,
       quickItems,
+      targetCriticsRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
@@ -1059,6 +1074,8 @@ export function HomeSurface({
         );
       }
       case "contact-sync":
+        // Device contact sync is native-only.
+        if (Platform.OS === "web") return null;
         return (
           <View className="mt-6 px-6">
             <ContactsSyncCard

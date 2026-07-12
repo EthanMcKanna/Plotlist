@@ -29,11 +29,13 @@ import { guardedPush } from "../../lib/navigation";
 import { sharePlotlistLink } from "../../lib/share";
 import { ReportModal } from "../../components/ReportModal";
 import { SpoilerShield } from "../../components/SpoilerShield";
+import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
 
 function ReviewHeader() {
   return (
     <View className="flex-row items-center px-4 pt-2">
-      <GlassPressable
+      {SHOW_BACK_BUTTON ? (
+        <GlassPressable
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           router.back();
@@ -51,6 +53,7 @@ function ReviewHeader() {
       >
         <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
       </GlassPressable>
+      ) : null}
       <Text className="ml-3 text-lg font-bold text-text-primary">Review</Text>
     </View>
   );

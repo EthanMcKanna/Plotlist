@@ -14,6 +14,7 @@ import { guardedPush } from "../../lib/navigation";
 import { formatEpisodeCode, formatShortDate, formatWatchTimeLabel } from "../../lib/format";
 import { useAuth, useQuery } from "../../lib/plotlist/react";
 import type { WatchInsights } from "../../lib/watchInsights";
+import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
 
 function SectionTitle({ title, aside }: { title: string; aside?: string | null }) {
   return (
@@ -163,7 +164,8 @@ export default function WatchStatsScreen() {
         <View className="px-6 pt-2">
           {/* Header */}
           <View className="flex-row items-center gap-3">
-            <GlassPressable
+            {SHOW_BACK_BUTTON ? (
+              <GlassPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.back();
@@ -181,6 +183,7 @@ export default function WatchStatsScreen() {
             >
               <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
             </GlassPressable>
+            ) : null}
             <View>
               <Text className="text-2xl font-black text-text-primary">Watch Stats</Text>
               <Text className="text-xs text-text-tertiary">

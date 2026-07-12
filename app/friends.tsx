@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -27,6 +28,7 @@ import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsAct
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { useContactSync } from "../lib/useContactSync";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 const PAGE_SIZE = 40;
 
@@ -107,7 +109,9 @@ export default function FriendsScreen() {
     }
   }, []);
 
-  const showSyncPrompt = Boolean(contactStatus && !contactStatus.hasSynced);
+  // Device contact sync is native-only; the web header skips the prompt.
+  const showSyncPrompt =
+    Platform.OS !== "web" && Boolean(contactStatus && !contactStatus.hasSynced);
 
   const listHeader = useMemo(() => {
     if (people.length === 0 && !showSyncPrompt) return null;
@@ -149,7 +153,8 @@ export default function FriendsScreen() {
     <Screen>
       <View className="flex-1 px-6 pt-2">
         <View className="flex-row items-center gap-3">
-          <GlassPressable
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
@@ -167,6 +172,7 @@ export default function FriendsScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
+          ) : null}
           <View className="flex-1">
             <Text className="text-2xl font-black text-text-primary">Friends</Text>
             <Text className="mt-0.5 text-xs text-text-tertiary">

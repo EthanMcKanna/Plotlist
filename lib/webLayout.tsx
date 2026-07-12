@@ -16,6 +16,10 @@ export const WEB_READING_MAX_WIDTH = 680;
 
 export type WebNavMode = "sidebar" | "rail" | "tabs" | "native";
 
+// In-app back arrows are a native-app affordance; web relies on the
+// browser's own history controls.
+export const SHOW_BACK_BUTTON = Platform.OS !== "web";
+
 // Which navigation chrome the current viewport gets.
 export function useWebNavMode(): WebNavMode {
   const { width } = useWindowDimensions();

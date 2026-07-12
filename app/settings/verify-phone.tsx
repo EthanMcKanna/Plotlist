@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { GlassPressable } from "../../components/NativeGlass";
 import { OnboardingPhoneStep } from "../../components/OnboardingPhoneStep";
 import { Screen } from "../../components/Screen";
+import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
 
 // Settings re-entry point for the optional friend-discovery phone
 // verification, for people who skipped it during onboarding.
@@ -19,7 +20,8 @@ export default function VerifyPhoneScreen() {
   return (
     <Screen>
       <View className="px-6 pt-2">
-        <GlassPressable
+        {SHOW_BACK_BUTTON ? (
+          <GlassPressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.back();
@@ -37,6 +39,7 @@ export default function VerifyPhoneScreen() {
         >
           <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
         </GlassPressable>
+        ) : null}
       </View>
       <OnboardingPhoneStep showSkip={false} onDone={close} onSkip={close} />
     </Screen>

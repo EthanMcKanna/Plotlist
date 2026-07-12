@@ -25,6 +25,7 @@ import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation } from "../lib/plotlist/react";
 import type { CommentTargetType } from "../lib/comments";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 function CommentsThread({
   targetType,
@@ -140,7 +141,8 @@ export default function CommentsScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View className="flex-row items-center px-4 pt-2 pb-1">
-          <GlassPressable
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
@@ -158,6 +160,7 @@ export default function CommentsScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
+          ) : null}
           <Text className="ml-3 flex-1 text-lg font-bold text-text-primary">Comments</Text>
           {showLogActions ? (
             <View className="flex-row items-center gap-2">

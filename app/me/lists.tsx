@@ -25,7 +25,7 @@ import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
-import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
+import { SHOW_BACK_BUTTON, usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -400,7 +400,7 @@ export default function ListsScreen() {
         {/* ── Header ── */}
         <View className="flex-row items-center justify-between gap-3">
           <View className="flex-1 flex-row items-center gap-3">
-            {canGoBack ? (
+            {canGoBack && SHOW_BACK_BUTTON ? (
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

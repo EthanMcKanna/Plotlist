@@ -15,6 +15,7 @@ import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   follow: "person-add",
@@ -146,7 +147,8 @@ export default function NotificationsScreen() {
     <Screen>
       <View className="flex-1 px-4 pt-2">
         <View className="flex-row items-center gap-3 px-2">
-          <GlassPressable
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
@@ -164,6 +166,7 @@ export default function NotificationsScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
+          ) : null}
           <View className="flex-1">
             <Text className="text-2xl font-black text-text-primary">Notifications</Text>
           </View>

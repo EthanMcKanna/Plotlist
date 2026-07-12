@@ -17,11 +17,9 @@ import { GlassPressable } from "../../components/NativeGlass";
 import { Poster } from "../../components/Poster";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
-import {
-  usePosterGridLayout,
+import { SHOW_BACK_BUTTON, usePosterGridLayout,
   useWebPageStyle,
-  WEB_PAGE_MAX_WIDTH,
-} from "../../lib/webLayout";
+  WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 import {
   getProviderCatalogSignalLabel,
   hasProviderCatalogMore,
@@ -226,7 +224,8 @@ export default function ProviderScreen() {
       >
         <View className="px-6" style={pageStyle}>
           <View className="flex-row items-center gap-3">
-            <GlassPressable
+            {SHOW_BACK_BUTTON ? (
+              <GlassPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.back();
@@ -244,6 +243,7 @@ export default function ProviderScreen() {
             >
               <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
             </GlassPressable>
+            ) : null}
 
             <Image
               source={{ uri: provider.logoUrl }}

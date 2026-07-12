@@ -5,6 +5,7 @@ import { router } from "expo-router";
 
 import { GlassPressable } from "./NativeGlass";
 import { Screen } from "./Screen";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 export type LegalSection = {
   heading?: string;
@@ -27,7 +28,8 @@ export function LegalPage({
   return (
     <Screen>
       <View className="flex-row items-center px-4 pt-2">
-        <GlassPressable
+        {SHOW_BACK_BUTTON ? (
+          <GlassPressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.back();
@@ -45,6 +47,7 @@ export function LegalPage({
         >
           <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
         </GlassPressable>
+        ) : null}
       </View>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"

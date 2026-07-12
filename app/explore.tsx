@@ -36,11 +36,9 @@ import {
   missingFacetPreviewKeys,
   storeFacetPreviews,
 } from "../lib/facetPreviewStore";
-import {
-  usePosterGridLayout,
+import { SHOW_BACK_BUTTON, usePosterGridLayout,
   useWebPageStyle,
-  WEB_PAGE_MAX_WIDTH,
-} from "../lib/webLayout";
+  WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
 
 const H_PADDING = 24;
 const TILE_GAP = 12;
@@ -224,7 +222,8 @@ export default function ExploreScreen() {
       >
         <View className="px-6" style={pageStyle}>
           <View className="flex-row items-center gap-3">
-            <GlassPressable
+            {SHOW_BACK_BUTTON ? (
+              <GlassPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.back();
@@ -242,6 +241,7 @@ export default function ExploreScreen() {
             >
               <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
             </GlassPressable>
+            ) : null}
 
             <View className="flex-1">
               <Text className="text-xl font-black text-text-primary">

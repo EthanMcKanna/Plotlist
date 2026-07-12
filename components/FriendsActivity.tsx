@@ -401,7 +401,7 @@ export function FriendsActivity({
                 </Text>
               </Pressable>
 
-              {onSyncContacts ? (
+              {onSyncContacts && Platform.OS !== "web" ? (
                 <Pressable
                   onPress={() => {
                     if (syncingContacts) return;

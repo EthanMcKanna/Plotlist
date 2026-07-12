@@ -9,6 +9,7 @@ import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
+import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
 import {
   STREAMING_PROVIDER_OPTIONS,
   normalizeStreamingProviderKeys,
@@ -73,7 +74,8 @@ export default function StreamingServicesScreen() {
     <Screen scroll>
       <View className="px-6 pb-16 pt-2">
         <View className="flex-row items-center gap-3">
-          <GlassPressable
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
@@ -91,6 +93,7 @@ export default function StreamingServicesScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
+          ) : null}
           <View className="flex-1">
             <Text className="text-2xl font-black text-text-primary">My services</Text>
             <Text className="mt-0.5 text-xs text-text-tertiary">

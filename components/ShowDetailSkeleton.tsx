@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "./NativeGlass";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 // Shared with app/show/[id].tsx so the skeleton and the real hero can never
 // drift apart: same backdrop height, same floating poster geometry.
@@ -99,7 +100,7 @@ export function ShowDetailSkeleton({ onBack }: { onBack?: () => void }) {
         <ShimmerBlock width="84%" height={14} radius={7} style={{ marginTop: 8 }} />
       </View>
 
-      {onBack ? (
+      {onBack && SHOW_BACK_BUTTON ? (
         <GlassPressable
           onPress={onBack}
           radius={999}

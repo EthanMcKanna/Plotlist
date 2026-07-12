@@ -32,6 +32,7 @@ import {
   useQuery,
 } from "../../lib/plotlist/react";
 import {
+  SHOW_BACK_BUTTON,
   useContentWidth,
   useIsDesktopWeb,
   useWebPageStyle,
@@ -1962,24 +1963,29 @@ export default function ShowScreen() {
               isDesktopWeb && { maxWidth: WEB_SHOW_DETAIL_MAX_WIDTH },
             ]}
           >
-          <GlassPressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            onPress={handleBackPress}
-            radius={20}
-            surfaceStyle={{
-              height: 40,
-              width: 40,
-            }}
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="chevron-back" size={22} color="#F1F3F7" />
-          </GlassPressable>
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
+              accessibilityLabel="Back"
+              accessibilityRole="button"
+              onPress={handleBackPress}
+              radius={20}
+              surfaceStyle={{
+                height: 40,
+                width: 40,
+              }}
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
+            >
+              <Ionicons name="chevron-back" size={22} color="#F1F3F7" />
+            </GlassPressable>
+          ) : (
+            // Keeps the share button pinned right in the space-between row.
+            <View />
+          )}
 
           <GlassPressable
             accessibilityLabel="Share this show"

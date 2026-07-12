@@ -20,11 +20,9 @@ import { guardedPush } from "../../../lib/navigation";
 import { api } from "../../../lib/plotlist/api";
 import { tasteMatchTier } from "../../../lib/plotlist/recsRanking";
 import { queryClient } from "../../../lib/queryClient";
-import {
-  usePosterGridLayout,
+import { SHOW_BACK_BUTTON, usePosterGridLayout,
   useWebPageStyle,
-  WEB_PAGE_MAX_WIDTH,
-} from "../../../lib/webLayout";
+  WEB_PAGE_MAX_WIDTH } from "../../../lib/webLayout";
 
 const GAP = 12;
 
@@ -112,7 +110,8 @@ export default function TasteBreakdownScreen() {
       >
         <View className="px-6" style={pageStyle}>
           <View className="flex-row items-center gap-3">
-            <GlassPressable
+            {SHOW_BACK_BUTTON ? (
+              <GlassPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.back();
@@ -130,6 +129,7 @@ export default function TasteBreakdownScreen() {
             >
               <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
             </GlassPressable>
+            ) : null}
             <View className="flex-1">
               <Text className="text-xl font-black text-text-primary">Taste match</Text>
               <Text className="text-xs font-semibold text-text-tertiary" numberOfLines={1}>

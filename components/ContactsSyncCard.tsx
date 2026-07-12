@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -37,6 +37,12 @@ export function ContactsSyncCard({
   const compact = variant === "compact";
   const effectiveWidth = getContactsSyncCardEffectiveWidth(cardWidth, width);
   const inlineActions = shouldInlineContactsSyncActions(variant, effectiveWidth);
+
+  // Contact sync reads the device address book — there is nothing to sync
+  // in a browser, so the card never renders on web.
+  if (Platform.OS === "web") {
+    return null;
+  }
 
   return (
     <GlassSurface

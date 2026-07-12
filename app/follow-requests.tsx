@@ -11,6 +11,7 @@ import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery } from "../lib/plotlist/react";
+import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 function FollowRequestRow({
   item,
@@ -148,7 +149,8 @@ export default function FollowRequestsScreen() {
     <Screen>
       <View className="flex-1 px-4 pt-2">
         <View className="flex-row items-center gap-3 px-2">
-          <GlassPressable
+          {SHOW_BACK_BUTTON ? (
+            <GlassPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.back();
@@ -166,6 +168,7 @@ export default function FollowRequestsScreen() {
           >
             <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
           </GlassPressable>
+          ) : null}
           <View className="flex-1">
             <Text className="text-2xl font-black text-text-primary">Follow requests</Text>
           </View>

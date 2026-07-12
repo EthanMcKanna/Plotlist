@@ -9,6 +9,11 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import {
+  useContentWidth,
+  useIsDesktopWeb,
+  WEB_PAGE_MAX_WIDTH,
+} from "../lib/webLayout";
 import type { ComponentProps } from "react";
 import type { Ionicons } from "@expo/vector-icons";
 
@@ -68,6 +73,13 @@ function ShimmerBlock({
   );
 }
 
+const SKELETON_CARD_WIDTHS = {
+  banner: 320,
+  poster: 124,
+  ribbon: 244,
+  feature: 300,
+} as const;
+
 export function RailSkeleton({
   index,
   kicker,
@@ -79,6 +91,9 @@ export function RailSkeleton({
   cardWidth,
   cardHeight,
 }: RailSkeletonProps) {
+  const contentWidth = useContentWidth();
+  const isDesktopWeb = useIsDesktopWeb();
+
   if (variant === "hero") {
     return (
       <View style={styles.heroShell}>
@@ -86,6 +101,19 @@ export function RailSkeleton({
       </View>
     );
   }
+
+  // Phones keep the legacy fixed counts; desktop web renders enough cards
+  // to fill the (page-capped) rail width.
+  const legacyCount = variant === "banner" ? 2 : 4;
+  const footprint =
+    (variant === "banner" ? cardWidth ?? 320 : SKELETON_CARD_WIDTHS[variant]) +
+    12;
+  const skeletonCount = isDesktopWeb
+    ? Math.max(
+        legacyCount,
+        Math.ceil((Math.min(contentWidth, WEB_PAGE_MAX_WIDTH) - 48) / footprint),
+      )
+    : legacyCount;
 
   return (
     <View className="mt-8">
@@ -104,7 +132,7 @@ export function RailSkeleton({
         contentContainerStyle={styles.rail}
         scrollEnabled={false}
       >
-        {Array.from({ length: variant === "banner" ? 2 : 4 }).map((_, idx) => (
+        {Array.from({ length: skeletonCount }).map((_, idx) => (
           <SkeletonCard
             key={idx}
             variant={variant}

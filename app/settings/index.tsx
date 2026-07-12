@@ -571,6 +571,9 @@ export default function SettingsScreen() {
         </View>
 
         {/* ── Contacts ── */}
+        {/* Address-book sync is native-only; on web the section only appears
+            while the verify-phone row is relevant. */}
+        {Platform.OS !== "web" || (me && me.hasVerifiedPhone === false) ? (
         <View className="mt-10">
           <SectionHeader title="Contacts" />
           {me && me.hasVerifiedPhone === false ? (
@@ -606,6 +609,7 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
+        ) : null}
 
         {/* ── Help ── */}
         <View className="mt-10">
