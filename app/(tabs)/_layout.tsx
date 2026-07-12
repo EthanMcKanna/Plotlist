@@ -5,6 +5,8 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Platform, View, StyleSheet } from "react-native";
 
+import { useIsDesktopWeb } from "../../lib/webLayout";
+
 const iconSize = 22;
 
 // iOS gets the real UITabBar (system Liquid Glass on iOS 26, correct
@@ -32,6 +34,9 @@ function NativeTabsLayout() {
 }
 
 function JsTabsLayout() {
+  // Desktop web navigates through the persistent sidebar (see WebShell);
+  // the bottom tab bar only renders on narrow viewports.
+  const isDesktopWeb = useIsDesktopWeb();
   return (
     <Tabs
       screenOptions={{
@@ -43,6 +48,7 @@ function JsTabsLayout() {
           backgroundColor: "transparent",
           borderTopWidth: 0,
           elevation: 0,
+          ...(isDesktopWeb ? { display: "none" as const } : null),
         },
         tabBarBackground: () => (
           <BlurView intensity={80} style={StyleSheet.absoluteFill} tint="dark">

@@ -2,6 +2,7 @@ import { Modal, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
+import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
 export type ActionSheetOption = {
@@ -24,6 +25,9 @@ export function ActionSheet({
   title,
   options,
 }: ActionSheetProps) {
+  // Desktop web: a centered dialog instead of an edge-to-edge bottom sheet.
+  const isDesktopWeb = useIsDesktopWeb();
+  const sheetStyle = useWebSheetStyle(440);
   return (
     <Modal
       visible={visible}
@@ -31,18 +35,29 @@ export function ActionSheet({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <Pressable onPress={onClose} className="flex-1 justify-end bg-black/50">
-        <Pressable onPress={(e) => e.stopPropagation()}>
+      <Pressable
+        onPress={onClose}
+        className={`flex-1 bg-black/50 ${
+          isDesktopWeb ? "justify-center px-6" : "justify-end"
+        }`}
+      >
+        <Pressable onPress={(e) => e.stopPropagation()} style={sheetStyle}>
           <GlassSurface
             radius={28}
             variant="sheet"
-            style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
-            contentStyle={{ paddingBottom: 32, paddingTop: 16 }}
+            style={
+              isDesktopWeb
+                ? undefined
+                : { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }
+            }
+            contentStyle={{ paddingBottom: isDesktopWeb ? 20 : 32, paddingTop: 16 }}
           >
-          {/* Handle bar */}
-          <View className="mb-4 items-center">
-            <View className="h-1 w-10 rounded-full bg-dark-border" />
-          </View>
+          {/* Handle bar (touch affordance — hidden on desktop web) */}
+          {isDesktopWeb ? null : (
+            <View className="mb-4 items-center">
+              <View className="h-1 w-10 rounded-full bg-dark-border" />
+            </View>
+          )}
 
           {title && (
             <Text className="mb-4 px-6 text-center text-lg font-semibold text-text-primary">

@@ -2,7 +2,6 @@ import { useCallback, useRef } from "react";
 import {
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -29,6 +28,7 @@ import {
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 import { RailSkeleton } from "./RailSkeleton";
 
 export type ContinueWatchingItem = {
@@ -507,14 +507,11 @@ export function ContinueWatchingRail({
         accent={ACCENT}
         icon="play"
       />
-      <ScrollView
+      <HorizontalRail
         accessibilityLabel="Continue watching rail"
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rail}
         decelerationRate="fast"
+        contentContainerStyle={styles.rail}
         snapToInterval={cardWidth + gap}
-        snapToAlignment="start"
       >
         {activeItems.map((item, index) => (
           <ContinueWatchingCard
@@ -526,7 +523,7 @@ export function ContinueWatchingRail({
             onMarkWatched={handleMarkWatched}
           />
         ))}
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

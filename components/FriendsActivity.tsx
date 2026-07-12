@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -12,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp } from "react-native-reanimated";
+import { HorizontalRail } from "./HorizontalRail";
 
 import { Avatar } from "./Avatar";
 import { HomeSectionHeader } from "./HomeSectionHeader";
@@ -503,16 +503,14 @@ export function FriendsActivity({
 
       {people.length > 0 ? (
         <View className={visibleActivity.length > 0 ? "mt-2" : "mt-4"}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
+          <HorizontalRail
             contentContainerStyle={styles.peopleRail}
             decelerationRate="fast"
           >
             {people.map((person, idx) => (
               <PersonChip key={person.user._id} person={person} index={idx} />
             ))}
-          </ScrollView>
+          </HorizontalRail>
         </View>
       ) : null}
     </View>

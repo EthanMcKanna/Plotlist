@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,6 +15,7 @@ import { getLocalDateString } from "../lib/releaseCalendar";
 import { queryClient } from "../lib/queryClient";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 
 export type ReleaseGroup = { airDate: string; airDateTs: number; items?: any[] };
 export type HomeSchedulePreview = {
@@ -355,14 +356,11 @@ export function TonightStrip({
         onAction={() => guardedPush("/calendar")}
       />
 
-      <ScrollView
+      <HorizontalRail
         accessibilityLabel="Releases rail"
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rail}
         decelerationRate="fast"
+        contentContainerStyle={styles.rail}
         snapToInterval={CARD_WIDTH + 14}
-        snapToAlignment="start"
       >
         {items.map((item, index) => (
           <ScheduleCard
@@ -373,7 +371,7 @@ export function TonightStrip({
           />
         ))}
         <CalendarTailCard />
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

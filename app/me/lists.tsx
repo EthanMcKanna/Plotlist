@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
@@ -26,15 +25,14 @@ import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
+import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Match the genre explorer's card grid: two columns inside px-6, clamped to
-// the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx).
-const LIST_CARD_WIDTH =
-  (Math.min(Dimensions.get("window").width, 430) - 48 - 12) / 2;
+// Match the genre explorer's card grid: two columns inside px-6 on phones,
+// widening to more columns as the desktop web content column grows.
 const LIST_CARD_HEIGHT = 200;
 
 // Own lists lean brand-sky, private ones go quiet slate, followed lists get
@@ -68,6 +66,12 @@ export default function ListsScreen() {
   const { create } = useLocalSearchParams<{ create?: string }>();
   const canGoBack = router.canGoBack();
   const { isAuthenticated } = useAuth();
+  const { itemWidth: listCardWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: 12,
+    minColumns: 2,
+    targetItemWidth: 280,
+  });
   const me = useQuery(api.users.me);
   const meId = me?._id;
   const listArgs = isAuthenticated && meId ? { userId: meId } : "skip";
@@ -349,7 +353,7 @@ export default function ListsScreen() {
         posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
         meta={formatListMeta(item)}
         cornerIcon={item.isPublic ? undefined : "lock-closed"}
-        width={LIST_CARD_WIDTH}
+        width={listCardWidth}
         height={LIST_CARD_HEIGHT}
         accessibilityLabel={`Open list ${item.title}`}
         onPress={() => openList(item)}
@@ -361,7 +365,7 @@ export default function ListsScreen() {
         }}
       />
     ),
-    [openList],
+    [listCardWidth, openList],
   );
 
   const renderFollowedList = useCallback(
@@ -377,7 +381,7 @@ export default function ListsScreen() {
         ]
           .filter(Boolean)
           .join(" · ")}
-        width={LIST_CARD_WIDTH}
+        width={listCardWidth}
         height={LIST_CARD_HEIGHT}
         accessibilityLabel={`Open list ${item.title}${item.ownerName ? ` by ${item.ownerName}` : ""}`}
         onPress={() => openList(item)}
@@ -387,11 +391,11 @@ export default function ListsScreen() {
         }}
       />
     ),
-    [openList],
+    [listCardWidth, openList],
   );
 
   return (
-    <Screen scroll>
+    <Screen scroll webMaxWidth={WEB_PAGE_MAX_WIDTH}>
       <View className="px-6 pt-6 pb-8">
         {/* ── Header ── */}
         <View className="flex-row items-center justify-between gap-3">
@@ -491,7 +495,7 @@ export default function ListsScreen() {
                 <View
                   key={index}
                   className="rounded-[20px] border border-dark-border bg-dark-card opacity-50"
-                  style={{ height: LIST_CARD_HEIGHT, width: LIST_CARD_WIDTH }}
+                  style={{ height: LIST_CARD_HEIGHT, width: listCardWidth }}
                 />
               ))}
             </View>

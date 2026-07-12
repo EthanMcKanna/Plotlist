@@ -11,6 +11,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
 export type FilterOption = {
@@ -35,6 +36,8 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
   const insets = useSafeAreaInsets();
 
   const selectedOption = options.find((o) => o.value === value) ?? options[0];
+  const isDesktopWeb = useIsDesktopWeb();
+  const sheetStyle = useWebSheetStyle(440);
 
   const closeSheet = useCallback(() => {
     sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
@@ -139,7 +142,9 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
           </Animated.View>
 
           {/* Sheet */}
-          <Animated.View style={sheetAnimStyle}>
+          <Animated.View
+            style={[sheetAnimStyle, sheetStyle, isDesktopWeb && { marginBottom: 24 }]}
+          >
             <GestureDetector gesture={panGesture}>
               <Animated.View>
                 <GlassSurface
@@ -148,31 +153,33 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
                   style={{
                     borderTopLeftRadius: 24,
                     borderTopRightRadius: 24,
-                    borderBottomLeftRadius: 0,
-                    borderBottomRightRadius: 0,
+                    borderBottomLeftRadius: isDesktopWeb ? 24 : 0,
+                    borderBottomRightRadius: isDesktopWeb ? 24 : 0,
                   }}
                   contentStyle={{
                     paddingTop: 12,
-                    paddingBottom: insets.bottom + 20,
+                    paddingBottom: isDesktopWeb ? 20 : insets.bottom + 20,
                   }}
                 >
-                  {/* Handle — swipe affordance */}
-                  <View
-                    style={{
-                      alignItems: "center",
-                      paddingVertical: 8,
-                      marginBottom: 12,
-                    }}
-                  >
+                  {/* Handle — swipe affordance (touch only) */}
+                  {isDesktopWeb ? null : (
                     <View
                       style={{
-                        width: 36,
-                        height: 4,
-                        borderRadius: 2,
-                        backgroundColor: "#3A3E48",
+                        alignItems: "center",
+                        paddingVertical: 8,
+                        marginBottom: 12,
                       }}
-                    />
-                  </View>
+                    >
+                      <View
+                        style={{
+                          width: 36,
+                          height: 4,
+                          borderRadius: 2,
+                          backgroundColor: "#3A3E48",
+                        }}
+                      />
+                    </View>
+                  )}
 
                   <Text
                     style={{

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -37,13 +36,14 @@ import {
   missingFacetPreviewKeys,
   storeFacetPreviews,
 } from "../lib/facetPreviewStore";
+import {
+  usePosterGridLayout,
+  useWebPageStyle,
+  WEB_PAGE_MAX_WIDTH,
+} from "../lib/webLayout";
 
-// Clamp to the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx) so
-// the tile math holds in wide browser windows, not just on phones.
-const FRAME_WIDTH = Math.min(Dimensions.get("window").width, 430);
 const H_PADDING = 24;
 const TILE_GAP = 12;
-const TILE_WIDTH = (FRAME_WIDTH - H_PADDING * 2 - TILE_GAP) / 2;
 const TILE_HEIGHT = 96;
 
 // Show counts change slowly (nightly-ish ingest), so one fetch per app
@@ -54,11 +54,13 @@ function FacetTile({
   facet,
   accent,
   count,
+  width,
   onPress,
 }: {
   facet: FacetDef;
   accent: string;
   count: number;
+  width: number;
   onPress: (facet: FacetDef) => void;
 }) {
   const poster = getCachedFacetPosters(facet.key)[0] ?? null;
@@ -72,7 +74,7 @@ function FacetTile({
           ? `Browse ${facet.title}, ${countLabel} shows`
           : `Browse ${facet.title}`
       }
-      style={styles.tile}
+      style={[styles.tile, { width }]}
       className="active:opacity-85"
     >
       <LinearGradient
@@ -122,6 +124,13 @@ export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
   const getFacetBrowse = useAction(api.embeddings.getFacetBrowse);
   const getFacetPreviews = useAction(api.embeddings.getFacetPreviews);
+  const { itemWidth: tileWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: TILE_GAP,
+    minColumns: 2,
+    targetItemWidth: 260,
+  });
+  const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
 
   const [filter, setFilter] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<FacetGroupKey>("mood");
@@ -199,6 +208,7 @@ export default function ExploreScreen() {
           facet={facet}
           accent={accentFor(facet)}
           count={showCounts?.get(facet.key) ?? 0}
+          width={tileWidth}
           onPress={handleOpenFacet}
         />
       ))}
@@ -207,72 +217,74 @@ export default function ExploreScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
-      {/* Header */}
+      {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
-        className="px-6 pb-4 border-b border-dark-border"
+        className="pb-4 border-b border-dark-border"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row items-center gap-3">
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.back();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            radius={20}
-            variant="control"
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
-          </GlassPressable>
-
-          <View className="flex-1">
-            <Text className="text-xl font-black text-text-primary">
-              Explore
-            </Text>
-            <Text className="text-xs font-semibold text-text-tertiary">
-              {FACET_DEFS.length} categories across the catalog
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.filterField} className="mt-4 flex-row items-center px-3">
-          <Ionicons
-            name="search-outline"
-            size={17}
-            color="#6D7484"
-            accessible={false}
-            accessibilityElementsHidden
-            aria-hidden={true}
-            importantForAccessibility="no"
-          />
-          <TextInput
-            value={filter}
-            onChangeText={setFilter}
-            placeholder="Filter categories"
-            placeholderTextColor="#6D7484"
-            accessibilityLabel="Filter categories"
-            className="ml-2 flex-1 py-2.5 text-[15px] text-text-primary"
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          {filter.length > 0 ? (
-            <Pressable
-              onPress={() => setFilter("")}
-              hitSlop={8}
+        <View className="px-6" style={pageStyle}>
+          <View className="flex-row items-center gap-3">
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Clear filter"
-              className="active:opacity-70"
+              accessibilityLabel="Go back"
+              radius={20}
+              variant="control"
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
             >
-              <Ionicons name="close-circle" size={18} color="#6D7484" />
-            </Pressable>
-          ) : null}
+              <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+            </GlassPressable>
+
+            <View className="flex-1">
+              <Text className="text-xl font-black text-text-primary">
+                Explore
+              </Text>
+              <Text className="text-xs font-semibold text-text-tertiary">
+                {FACET_DEFS.length} categories across the catalog
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.filterField} className="mt-4 flex-row items-center px-3">
+            <Ionicons
+              name="search-outline"
+              size={17}
+              color="#6D7484"
+              accessible={false}
+              accessibilityElementsHidden
+              aria-hidden={true}
+              importantForAccessibility="no"
+            />
+            <TextInput
+              value={filter}
+              onChangeText={setFilter}
+              placeholder="Filter categories"
+              placeholderTextColor="#6D7484"
+              accessibilityLabel="Filter categories"
+              className="ml-2 flex-1 py-2.5 text-[15px] text-text-primary"
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {filter.length > 0 ? (
+              <Pressable
+                onPress={() => setFilter("")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear filter"
+                className="active:opacity-70"
+              >
+                <Ionicons name="close-circle" size={18} color="#6D7484" />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       </View>
 
@@ -291,6 +303,7 @@ export default function ExploreScreen() {
           paddingBottom: insets.bottom + 40,
           paddingHorizontal: H_PADDING,
           paddingTop: isFiltering ? 16 : 14,
+          ...pageStyle,
         }}
         keyboardShouldPersistTaps="handled"
       >
@@ -347,7 +360,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     height: TILE_HEIGHT,
     overflow: "hidden",
-    width: TILE_WIDTH,
   },
   // The corner poster only intrudes on the lower-right, so the title keeps
   // the full width; only the count row needs to clear the artwork.

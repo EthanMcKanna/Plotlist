@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -27,15 +26,13 @@ import {
   withAlpha,
 } from "../../lib/genreExplorer";
 import { queryClient } from "../../lib/queryClient";
+import {
+  usePosterGridLayout,
+  useWebPageStyle,
+  WEB_PAGE_MAX_WIDTH,
+} from "../../lib/webLayout";
 
-// Clamp to the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx) so
-// the grid math holds in wide browser windows, not just on phones.
-const SCREEN_WIDTH = Math.min(Dimensions.get("window").width, 430);
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const ITEM_WIDTH =
-  (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
 
 type FacetItem = {
   _id: string;
@@ -68,21 +65,28 @@ export function splitFacetFeature(items: FacetItem[]): {
 }
 
 function GridSkeleton() {
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
+  const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
   return (
-    <View className="flex-1 px-6 pt-6">
+    <View className="flex-1 px-6 pt-6" style={pageStyle}>
       <View className="flex-row flex-wrap">
         {Array.from({ length: 9 }, (_, index) => (
           <View
             key={index}
             style={{
-              width: ITEM_WIDTH,
-              marginRight: index % NUM_COLS === NUM_COLS - 1 ? 0 : GAP,
+              width: itemWidth,
+              marginRight: index % numColumns === numColumns - 1 ? 0 : GAP,
               marginBottom: GAP + 8,
             }}
           >
             <View
               className="rounded-xl bg-dark-elevated"
-              style={{ height: ITEM_WIDTH * 1.5 }}
+              style={{ height: itemWidth * 1.5 }}
             />
             <View className="mt-2 h-3 w-4/5 rounded bg-dark-elevated" />
           </View>
@@ -101,6 +105,13 @@ export default function FacetScreen() {
   const facetKey = typeof params.key === "string" ? params.key : "";
   const facet = facetByKey(facetKey);
   const group = facet ? getGenreExplorerGroup(facet.group) : null;
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
+  const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
 
   const getFacetShows = useAction(api.embeddings.getFacetShows);
 
@@ -156,17 +167,17 @@ export default function FacetScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: FacetItem; index: number }) => {
-      const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
+      const isLastInRow = index % numColumns === numColumns - 1;
       return (
         <View
           style={{
-            width: ITEM_WIDTH,
+            width: itemWidth,
             marginRight: isLastInRow ? 0 : GAP,
             marginBottom: GAP,
           }}
         >
           <Pressable onPress={() => handlePress(item)} className="active:opacity-80">
-            <Poster uri={item.show.posterUrl ?? undefined} width={ITEM_WIDTH} />
+            <Poster uri={item.show.posterUrl ?? undefined} width={itemWidth} />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
@@ -182,7 +193,7 @@ export default function FacetScreen() {
         </View>
       );
     },
-    [handlePress],
+    [handlePress, itemWidth, numColumns],
   );
 
   const listHeader = useMemo(() => {
@@ -283,106 +294,109 @@ export default function FacetScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
-      {/* Header */}
+      {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
-        className="px-6 pb-4 border-b border-dark-border"
+        className="pb-4 border-b border-dark-border"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row items-center gap-3">
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.back();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            radius={20}
-            variant="control"
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
-          </GlassPressable>
+        <View className="px-6" style={pageStyle}>
+          <View className="flex-row items-center gap-3">
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              radius={20}
+              variant="control"
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
+            >
+              <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+            </GlassPressable>
 
-          <View className="flex-1">
-            <Text className="text-xl font-black text-text-primary">
-              {facet.title}
-            </Text>
-            <View className="flex-row items-center gap-1.5">
-              <Ionicons
-                name={group.icon}
-                size={11}
-                color={group.accent}
-                accessible={false}
-                accessibilityElementsHidden
-                aria-hidden={true}
-                importantForAccessibility="no"
-              />
-              <Text
-                className="text-xs font-semibold"
-                style={{ color: group.accent }}
-              >
-                {FACET_GROUPS[facet.group]?.title ?? "Category"}
+            <View className="flex-1">
+              <Text className="text-xl font-black text-text-primary">
+                {facet.title}
               </Text>
+              <View className="flex-row items-center gap-1.5">
+                <Ionicons
+                  name={group.icon}
+                  size={11}
+                  color={group.accent}
+                  accessible={false}
+                  accessibilityElementsHidden
+                  aria-hidden={true}
+                  importantForAccessibility="no"
+                />
+                <Text
+                  className="text-xs font-semibold"
+                  style={{ color: group.accent }}
+                >
+                  {FACET_GROUPS[facet.group]?.title ?? "Category"}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
-        <Text
-          className="mt-3 text-[13px] leading-5 text-text-secondary"
-          numberOfLines={3}
-        >
-          {facet.description}
-        </Text>
-
-        {relatedFacets.length > 0 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="mt-3 -mx-6"
-            contentContainerStyle={styles.relatedRow}
-            accessibilityLabel={`More ${group.title} categories`}
+          <Text
+            className="mt-3 text-[13px] leading-5 text-text-secondary"
+            numberOfLines={3}
           >
-            {relatedFacets.map((related) => (
-              <Pressable
-                key={related.key}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  router.replace(`/facet/${related.key}`);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`Browse ${related.title}`}
-                style={[
-                  styles.relatedChip,
-                  {
-                    backgroundColor: withAlpha(group.accent, 0.1),
-                    borderColor: withAlpha(group.accent, 0.3),
-                  },
-                ]}
-                className="active:opacity-75"
-              >
-                <Text className="text-[12px] font-semibold text-text-secondary">
-                  {related.title}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
+            {facet.description}
+          </Text>
+
+          {relatedFacets.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="mt-3 -mx-6"
+              contentContainerStyle={styles.relatedRow}
+              accessibilityLabel={`More ${group.title} categories`}
+            >
+              {relatedFacets.map((related) => (
+                <Pressable
+                  key={related.key}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.replace(`/facet/${related.key}`);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Browse ${related.title}`}
+                  style={[
+                    styles.relatedChip,
+                    {
+                      backgroundColor: withAlpha(group.accent, 0.1),
+                      borderColor: withAlpha(group.accent, 0.3),
+                    },
+                  ]}
+                  className="active:opacity-75"
+                >
+                  <Text className="text-[12px] font-semibold text-text-secondary">
+                    {related.title}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+        </View>
       </View>
 
       {/* Featured + grid */}
       {isLoading ? (
         <GridSkeleton />
       ) : (
-        <View className="flex-1 px-6 pt-5">
+        <View className="flex-1 px-6 pt-5" style={pageStyle}>
           <FlashList
+            key={`grid-${numColumns}`}
             data={rest}
             renderItem={renderItem}
-            numColumns={NUM_COLS}
-            estimatedItemSize={ITEM_WIDTH * 1.5 + 48}
+            numColumns={numColumns}
+            estimatedItemSize={itemWidth * 1.5 + 48}
             contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
             keyExtractor={(item: FacetItem) => item._id}
             ListHeaderComponent={listHeader}

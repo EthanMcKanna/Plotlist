@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Dimensions,
   Pressable,
   ScrollView,
   StatusBar,
@@ -26,21 +25,21 @@ import { ReportModal } from "../../components/ReportModal";
 import { api } from "../../lib/plotlist/api";
 import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
+import { usePosterGridLayout, useWebPageStyle } from "../../lib/webLayout";
 import { getFollowButtonState } from "../../lib/profilePrivacy";
 import { sharePlotlistLink } from "../../lib/share";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { SecondaryButton } from "../../components/SecondaryButton";
 import { Avatar } from "../../components/Avatar";
+import { PageTitle } from "../../components/PageTitle";
 import { SpoilerShield } from "../../components/SpoilerShield";
 import { GlassSurface } from "../../components/NativeGlass";
 import { ShimmerBlock } from "../../components/ShowDetailSkeleton";
 import { TasteMatchSummary, TasteMatchSummarySkeleton } from "../../components/TasteMatchSummary";
 
-// Two public-list cards per row inside the px-6 content column, clamped to
-// the web app frame (see WEB_APP_MAX_WIDTH in app/_layout.tsx).
-const PUBLIC_LIST_CARD_WIDTH =
-  (Math.min(Dimensions.get("window").width, 430) - 48 - 12) / 2;
+// Public profile reads as a single centered column on desktop web.
+const WEB_PROFILE_MAX_WIDTH = 960;
 
 type ProfileShowPreview = {
   _id: string;
@@ -253,6 +252,16 @@ function formatMemberSince(timestamp: number | null) {
 export default function ProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const webPageStyle = useWebPageStyle(WEB_PROFILE_MAX_WIDTH);
+  // Two cards per row on phones; wider columns add cards (desktop web).
+  const publicListGrid = usePosterGridLayout({
+    maxWidth: WEB_PROFILE_MAX_WIDTH,
+    horizontalPadding: 48,
+    gap: 12,
+    minColumns: 2,
+    targetItemWidth: 280,
+  });
+  const publicListCardWidth = publicListGrid.itemWidth;
   const userId = typeof params.id === "string" ? params.id : "";
 
   const userIdValue = userId as Id<"users">;
@@ -313,7 +322,7 @@ export default function ProfileScreen() {
             ? `${item.itemCount} ${item.itemCount === 1 ? "show" : "shows"}`
             : null
         }
-        width={PUBLIC_LIST_CARD_WIDTH}
+        width={publicListCardWidth}
         height={200}
         accessibilityLabel={`Open list ${item.title}`}
         onPress={() => {
@@ -322,7 +331,7 @@ export default function ProfileScreen() {
         }}
       />
     ),
-    [],
+    [publicListCardWidth],
   );
 
   const relationshipSummary = useMemo(() => {
@@ -537,6 +546,9 @@ export default function ProfileScreen() {
         title={profile?.user?.username ? `@${profile.user.username}` : undefined}
         options={menuOptions}
       />
+      <PageTitle
+        title={profile?.user?.displayName ?? profile?.user?.name ?? null}
+      />
       <ReportModal
         visible={reportVisible}
         onClose={() => setReportVisible(false)}
@@ -656,7 +668,7 @@ export default function ProfileScreen() {
           </View>
         </LinearGradient>
 
-        <View className="px-6">
+        <View className="px-6" style={webPageStyle}>
           {/* ── Stats Bar ── */}
           <GlassSurface
             radius={8}
@@ -871,8 +883,8 @@ export default function ProfileScreen() {
             <SectionHeader title="Public Lists" />
             {publicListsStatus === "LoadingFirstPage" ? (
               <View className="mt-4" style={{ flexDirection: "row", gap: 12 }}>
-                <ShimmerBlock width={PUBLIC_LIST_CARD_WIDTH} height={200} radius={20} />
-                <ShimmerBlock width={PUBLIC_LIST_CARD_WIDTH} height={200} radius={20} />
+                <ShimmerBlock width={publicListCardWidth} height={200} radius={20} />
+                <ShimmerBlock width={publicListCardWidth} height={200} radius={20} />
               </View>
             ) : publicLists.length > 0 ? (
               <View>

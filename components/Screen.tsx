@@ -3,20 +3,28 @@ import { ScrollView, ScrollViewProps, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useWebPageStyle, WEB_READING_MAX_WIDTH } from "../lib/webLayout";
+
 export function Screen({
   children,
   scroll = false,
   className,
   hasTabBar = false,
   keyboardShouldPersistTaps = "handled",
+  // Desktop web renders page content as a centered column of this width;
+  // pass null for full-bleed screens. Native and narrow web are untouched.
+  webMaxWidth = WEB_READING_MAX_WIDTH,
 }: {
   children: ReactNode;
   scroll?: boolean;
   className?: string;
   hasTabBar?: boolean;
   keyboardShouldPersistTaps?: ScrollViewProps["keyboardShouldPersistTaps"];
+  webMaxWidth?: number | null;
 }) {
   const safeAreaEdges = hasTabBar ? ["top", "left", "right"] as const : ["top", "left", "right", "bottom"] as const;
+  const webColumnStyle = useWebPageStyle(webMaxWidth ?? undefined);
+  const columnStyle = webMaxWidth == null ? null : webColumnStyle;
 
   if (scroll) {
     return (
@@ -39,6 +47,7 @@ export function Screen({
             bounces={false}
             overScrollMode="never"
             className={className}
+            contentContainerStyle={columnStyle}
           >
             {children}
           </ScrollView>
@@ -59,7 +68,7 @@ export function Screen({
         edges={safeAreaEdges}
         className={`flex-1 ${className ?? ""}`}
       >
-        <View className="flex-1">{children}</View>
+        <View className="flex-1" style={columnStyle}>{children}</View>
       </SafeAreaView>
     </View>
   );

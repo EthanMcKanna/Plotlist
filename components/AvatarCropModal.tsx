@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   Modal,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -17,9 +17,9 @@ import Animated, {
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as Haptics from "expo-haptics";
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const CROP_SIZE = SCREEN_W - 80;
-const OVERLAY_BORDER = Math.max(SCREEN_W, SCREEN_H);
+// Crop box tracks the viewport but is capped so desktop web (and resizes)
+// keep a sensible circle; phone sizes are unchanged (width - 80 < 400).
+const MAX_CROP_SIZE = 400;
 
 function clamp(val: number, min: number, max: number) {
   "worklet";
@@ -44,6 +44,9 @@ export function AvatarCropModal({
   onCancel,
 }: Props) {
   const [cropping, setCropping] = useState(false);
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const CROP_SIZE = Math.min(screenW - 80, MAX_CROP_SIZE);
+  const OVERLAY_BORDER = Math.max(screenW, screenH);
 
   const baseScale =
     imageWidth > 0 && imageHeight > 0
@@ -238,8 +241,8 @@ export function AvatarCropModal({
                   height: overlayTotal,
                   borderRadius: overlayTotal / 2,
                   borderWidth: OVERLAY_BORDER,
-                  left: (SCREEN_W - CROP_SIZE) / 2 - OVERLAY_BORDER,
-                  top: (SCREEN_H * 0.42 - CROP_SIZE / 2) - OVERLAY_BORDER,
+                  left: (screenW - CROP_SIZE) / 2 - OVERLAY_BORDER,
+                  top: (screenH * 0.42 - CROP_SIZE / 2) - OVERLAY_BORDER,
                 },
               ]}
             />
@@ -251,8 +254,8 @@ export function AvatarCropModal({
                   width: CROP_SIZE,
                   height: CROP_SIZE,
                   borderRadius: CROP_SIZE / 2,
-                  left: (SCREEN_W - CROP_SIZE) / 2,
-                  top: SCREEN_H * 0.42 - CROP_SIZE / 2,
+                  left: (screenW - CROP_SIZE) / 2,
+                  top: screenH * 0.42 - CROP_SIZE / 2,
                 },
               ]}
             />

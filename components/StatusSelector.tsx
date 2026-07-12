@@ -12,6 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
 type WatchStatus = "watchlist" | "watching" | "completed" | "dropped";
@@ -86,6 +87,8 @@ export function StatusSelector({
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
   const insets = useSafeAreaInsets();
+  const isDesktopWeb = useIsDesktopWeb();
+  const sheetStyle = useWebSheetStyle(440);
 
   useEffect(() => {
     setSelectedStatus(currentStatus);
@@ -260,7 +263,9 @@ export function StatusSelector({
           </Animated.View>
 
           {/* Sheet */}
-          <Animated.View style={sheetAnimStyle}>
+          <Animated.View
+            style={[sheetAnimStyle, sheetStyle, isDesktopWeb && { marginBottom: 24 }]}
+          >
             <GestureDetector gesture={panGesture}>
               <Animated.View>
                 <GlassSurface
@@ -269,31 +274,33 @@ export function StatusSelector({
                   style={{
                     borderTopLeftRadius: 24,
                     borderTopRightRadius: 24,
-                    borderBottomLeftRadius: 0,
-                    borderBottomRightRadius: 0,
+                    borderBottomLeftRadius: isDesktopWeb ? 24 : 0,
+                    borderBottomRightRadius: isDesktopWeb ? 24 : 0,
                   }}
                   contentStyle={{
                     paddingTop: 12,
-                    paddingBottom: insets.bottom + 20,
+                    paddingBottom: isDesktopWeb ? 20 : insets.bottom + 20,
                   }}
                 >
-                  {/* Handle — swipe affordance */}
-                  <View
-                    style={{
-                      alignItems: "center",
-                      paddingVertical: 8,
-                      marginBottom: 12,
-                    }}
-                  >
+                  {/* Handle — swipe affordance (touch only) */}
+                  {isDesktopWeb ? null : (
                     <View
                       style={{
-                        width: 36,
-                        height: 4,
-                        borderRadius: 2,
-                        backgroundColor: "#3A3E48",
+                        alignItems: "center",
+                        paddingVertical: 8,
+                        marginBottom: 12,
                       }}
-                    />
-                  </View>
+                    >
+                      <View
+                        style={{
+                          width: 36,
+                          height: 4,
+                          borderRadius: 2,
+                          backgroundColor: "#3A3E48",
+                        }}
+                      />
+                    </View>
+                  )}
 
                   <Text
                     style={{

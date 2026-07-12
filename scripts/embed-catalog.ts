@@ -276,7 +276,9 @@ async function phasePull() {
   for (const row of prefRows) {
     try {
       for (const id of JSON.parse(row.favorite_show_ids ?? "[]")) attached.add(id);
-    } catch {}
+    } catch {
+      // Malformed favorites JSON — skip the row.
+    }
   }
   console.log(`[pull] ${attached.size} user-attached shows`);
 
@@ -383,7 +385,7 @@ async function phaseEnrich() {
       );
       const enrichment = extractEnrichmentFromTmdbDetails(payload);
       save.run(JSON.stringify(enrichment), Date.now(), row.show_id);
-    } catch (error: any) {
+    } catch {
       failed += 1;
       // 404s and hard failures still embed from the base row.
       save.run("{}", Date.now(), row.show_id);

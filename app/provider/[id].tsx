@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   Pressable,
   Text,
   View,
@@ -19,6 +18,11 @@ import { Poster } from "../../components/Poster";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
 import {
+  usePosterGridLayout,
+  useWebPageStyle,
+  WEB_PAGE_MAX_WIDTH,
+} from "../../lib/webLayout";
+import {
   getProviderCatalogSignalLabel,
   hasProviderCatalogMore,
   mergeProviderCatalogItems,
@@ -29,12 +33,7 @@ import type { HomeEditorialProviderKey } from "../../lib/homeEditorialSeeds";
 
 const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const ITEM_WIDTH =
-  (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
 
 type ProviderConfig = {
   category: HomeEditorialProviderKey;
@@ -63,6 +62,13 @@ export default function ProviderScreen() {
   const featuredTitle =
     typeof params.featuredTitle === "string" ? params.featuredTitle : null;
   const provider = PROVIDERS[providerId];
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
+  const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
 
   const getTmdbList = useAction(api.shows.getTmdbList);
   const ingestFromCatalog = useAction(api.shows.ingestFromCatalog);
@@ -162,12 +168,12 @@ export default function ProviderScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: ProviderCatalogItem; index: number }) => {
-      const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
+      const isLastInRow = index % numColumns === numColumns - 1;
       const signalLabel = getProviderCatalogSignalLabel(item);
       return (
         <View
           style={{
-            width: ITEM_WIDTH,
+            width: itemWidth,
             marginRight: isLastInRow ? 0 : GAP,
             marginBottom: GAP,
           }}
@@ -176,7 +182,7 @@ export default function ProviderScreen() {
             onPress={() => handlePress(item)}
             className="active:opacity-80"
           >
-            <Poster uri={item.posterUrl} width={ITEM_WIDTH} />
+            <Poster uri={item.posterUrl} width={itemWidth} />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
@@ -200,7 +206,7 @@ export default function ProviderScreen() {
         </View>
       );
     },
-    [handlePress],
+    [handlePress, itemWidth, numColumns],
   );
 
   if (!provider) {
@@ -213,43 +219,45 @@ export default function ProviderScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
-      {/* Header */}
+      {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
-        className="px-6 pb-4 border-b border-dark-border"
+        className="pb-4 border-b border-dark-border"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row items-center gap-3">
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.back();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            radius={20}
-            variant="control"
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
-          </GlassPressable>
+        <View className="px-6" style={pageStyle}>
+          <View className="flex-row items-center gap-3">
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              radius={20}
+              variant="control"
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
+            >
+              <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+            </GlassPressable>
 
-          <Image
-            source={{ uri: provider.logoUrl }}
-            style={{ width: 36, height: 36, borderRadius: 9 }}
-            contentFit="cover"
-          />
-          <View className="flex-1">
-            <Text className="text-xl font-black text-text-primary">
-              {provider.label}
-            </Text>
-            <Text className="text-xs font-semibold text-text-tertiary">
-              What's on right now
-            </Text>
+            <Image
+              source={{ uri: provider.logoUrl }}
+              style={{ width: 36, height: 36, borderRadius: 9 }}
+              contentFit="cover"
+            />
+            <View className="flex-1">
+              <Text className="text-xl font-black text-text-primary">
+                {provider.label}
+              </Text>
+              <Text className="text-xs font-semibold text-text-tertiary">
+                What's on right now
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -260,12 +268,13 @@ export default function ProviderScreen() {
           <ActivityIndicator size="large" color="#0ea5e9" />
         </View>
       ) : (
-        <View className="flex-1 px-6 pt-6">
+        <View className="flex-1 px-6 pt-6" style={pageStyle}>
           <FlashList
+            key={`grid-${numColumns}`}
             data={shows}
             renderItem={renderItem}
-            numColumns={NUM_COLS}
-            estimatedItemSize={ITEM_WIDTH * 1.5 + 48}
+            numColumns={numColumns}
+            estimatedItemSize={itemWidth * 1.5 + 48}
             contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
             keyExtractor={(item: ProviderCatalogItem) =>
               item.externalId ?? item.title

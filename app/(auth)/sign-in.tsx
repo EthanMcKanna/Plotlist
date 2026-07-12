@@ -8,13 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Dimensions,
   Keyboard,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type ViewStyle,
 } from "react-native";
@@ -64,8 +64,8 @@ import {
 import { formatPhoneNumber, normalizePhoneNumber } from "../../lib/phone";
 import { useAuthActions } from "../../lib/plotlist/auth";
 import { useAction } from "../../lib/plotlist/react";
+import { useWebSheetStyle } from "../../lib/webLayout";
 
-const { width: SCREEN_W } = Dimensions.get("window");
 
 // ── Image bases & constants ───────────────────────────────────────
 const TMDB_P = "https://image.tmdb.org/t/p/w342";
@@ -154,7 +154,11 @@ function PosterRow({
     transform: [{ translateX: tx.value + dragX.value * depthFactor }],
   }));
 
-  const tripled = [...shows, ...shows, ...shows];
+  // Enough copies that the marquee window always stays covered — 3 on
+  // phones (unchanged), more on wide desktop-web viewports.
+  const { width: viewportWidth } = useWindowDimensions();
+  const copies = Math.max(3, Math.ceil(viewportWidth / ROW_W) + 2);
+  const tripled = Array.from({ length: copies }, () => shows).flat();
 
   return (
     <View style={{ height: PH, overflow: "hidden", marginBottom: GAP }}>
@@ -330,7 +334,7 @@ function PosterWall() {
             top: 0,
             left: 0,
             bottom: 0,
-            width: SCREEN_W * 0.2,
+            width: "20%",
             pointerEvents: "none",
           }}
         />
@@ -344,7 +348,7 @@ function PosterWall() {
             top: 0,
             right: 0,
             bottom: 0,
-            width: SCREEN_W * 0.2,
+            width: "20%",
             pointerEvents: "none",
           }}
         />
@@ -536,6 +540,9 @@ export default function SignInScreen() {
   const { signIn } = useAuthActions();
   const startVerification = useAction(api.phone.startVerification);
   const insets = useSafeAreaInsets();
+  // Desktop web centers the auth form as a fixed-width column; phones keep
+  // the full-bleed bottom sheet (the style is null off desktop).
+  const webFormStyle = useWebSheetStyle(460);
   const DismissContainer = Platform.OS === "web" ? View : Pressable;
   const dismissContainerProps =
     Platform.OS === "web" ? {} : { onPress: Keyboard.dismiss };
@@ -764,7 +771,7 @@ export default function SignInScreen() {
           <DismissContainer {...dismissContainerProps}>
             <View
               className="px-7"
-              style={{ paddingBottom: insets.bottom + 20 }}
+              style={[{ paddingBottom: insets.bottom + 20 }, webFormStyle]}
             >
               {/* ── Brand ── */}
               <Animated.View

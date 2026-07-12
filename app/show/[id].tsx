@@ -9,7 +9,6 @@ import {
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -20,6 +19,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -31,7 +31,16 @@ import {
   usePaginatedQuery,
   useQuery,
 } from "../../lib/plotlist/react";
+import {
+  useContentWidth,
+  useIsDesktopWeb,
+  useWebPageStyle,
+  useWebSheetStyle,
+  WEB_READING_MAX_WIDTH,
+} from "../../lib/webLayout";
 import { FlashList } from "../../components/FlashList";
+import { HorizontalRail, RailArrowsBox } from "../../components/HorizontalRail";
+import { PageTitle } from "../../components/PageTitle";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -94,8 +103,9 @@ import {
   type SeasonLoadState,
 } from "../../lib/seasonGuide";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const BACKDROP_HEIGHT = SHOW_BACKDROP_HEIGHT;
+// Detail pages read best as a single centered column on desktop web.
+const WEB_SHOW_DETAIL_MAX_WIDTH = 1040;
 const DISMISS_THRESHOLD = 120;
 const DISMISS_VELOCITY = 500;
 const POSTER_HEIGHT = SHOW_POSTER_HEIGHT;
@@ -386,6 +396,19 @@ export default function ShowScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Reactive stand-ins for the old module-scope Dimensions constants: the
+  // content column (excludes the desktop-web sidebar) and window height.
+  const contentWidth = useContentWidth();
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
+  const isDesktopWeb = useIsDesktopWeb();
+  const webPageStyle = useWebPageStyle(WEB_SHOW_DETAIL_MAX_WIDTH);
+  const webSheetStyle = useWebSheetStyle(560);
+  const webReadingStyle = useWebPageStyle(WEB_READING_MAX_WIDTH);
+  // Episode sheet width: full-bleed on phones, centered panel on desktop.
+  const episodeSheetSideInset = isDesktopWeb
+    ? Math.max((contentWidth - 640) / 2, 0)
+    : 0;
+  const episodeSheetWidth = contentWidth - episodeSheetSideInset * 2;
   const previewParam =
     typeof params.preview === "string"
       ? params.preview
@@ -858,7 +881,7 @@ export default function ShowScreen() {
   const revealReviewInput = useCallback(() => {
     // The hero image is a full-width 16:9 block above the content, so the
     // review card's absolute scroll offset is heroHeight + its layout Y.
-    const heroHeight = (SCREEN_WIDTH * 9) / 16;
+    const heroHeight = (episodeSheetWidth * 9) / 16;
     const target = Math.max(heroHeight + reviewCardYRef.current - 12, 0);
     // Let the keyboard begin animating so automaticallyAdjustKeyboardInsets has
     // expanded the scroll range before we scroll.
@@ -1820,21 +1843,23 @@ export default function ShowScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
+      <PageTitle title={show?.title} />
       <ScrollView
         contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
+        contentContainerStyle={webPageStyle}
       >
         {/* ─── Cinematic Hero ─── */}
         <View style={{ height: BACKDROP_HEIGHT + POSTER_HEIGHT * 0.45 }}>
           {/* Backdrop */}
-          <View style={{ height: BACKDROP_HEIGHT, width: SCREEN_WIDTH }}>
+          <View style={{ height: BACKDROP_HEIGHT, width: "100%" }}>
             {backdropUri ? (
               <Image
                 source={{ uri: backdropUri }}
-                style={{ width: SCREEN_WIDTH, height: BACKDROP_HEIGHT }}
+                style={{ width: "100%", height: BACKDROP_HEIGHT }}
                 contentFit="cover"
                 cachePolicy="memory-disk"
                 priority="high"
@@ -1842,7 +1867,7 @@ export default function ShowScreen() {
               />
             ) : (
               <View
-                style={{ width: SCREEN_WIDTH, height: BACKDROP_HEIGHT }}
+                style={{ width: "100%", height: BACKDROP_HEIGHT }}
                 className="bg-dark-elevated"
               />
             )}
@@ -1912,18 +1937,31 @@ export default function ShowScreen() {
           </View>
         </View>
 
-        {/* Navigation overlay — back button & activity menu */}
+        {/* Navigation overlay — back button & activity menu; the inner row
+            tracks the content column on desktop web */}
         <View
+          pointerEvents="box-none"
           style={{
             position: "absolute",
             top: insets.top + 8,
-            left: 16,
-            right: 16,
-            flexDirection: "row",
-            justifyContent: "space-between",
+            left: 0,
+            right: 0,
+            alignItems: "center",
             zIndex: 10,
           }}
         >
+          <View
+            pointerEvents="box-none"
+            style={[
+              {
+                width: "100%",
+                flexDirection: "row",
+                justifyContent: "space-between",
+                paddingHorizontal: 16,
+              },
+              isDesktopWeb && { maxWidth: WEB_SHOW_DETAIL_MAX_WIDTH },
+            ]}
+          >
           <GlassPressable
             accessibilityLabel="Back"
             accessibilityRole="button"
@@ -1967,6 +2005,7 @@ export default function ShowScreen() {
           >
             <Ionicons name="share-outline" size={19} color="#F1F3F7" />
           </GlassPressable>
+          </View>
         </View>
 
         {/* ─── Title & Metadata ─── */}
@@ -2223,11 +2262,7 @@ export default function ShowScreen() {
                 </View>
               </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingRight: 8 }}
-              >
+              <HorizontalRail contentContainerStyle={{ paddingRight: 8 }}>
                 {activeDetails.watchProviders.map((provider: any) => (
                   <GlassPressable
                     key={provider.id}
@@ -2263,7 +2298,7 @@ export default function ShowScreen() {
                     </Text>
                   </GlassPressable>
                 ))}
-              </ScrollView>
+              </HorizontalRail>
             </View>
           )}
 
@@ -2355,21 +2390,23 @@ export default function ShowScreen() {
               >
                 Cast
               </Text>
-              <FlashList
-                data={activeDetails.cast}
-                renderItem={({ item }: { item: any }) => (
-                  <CastMember
-                    name={item.name}
-                    role={item.character}
-                    profilePath={item.profilePath}
-                  />
-                )}
-                keyExtractor={(item: any) => String(item.id)}
-                estimatedItemSize={120}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 4 }}
-              />
+              <RailArrowsBox>
+                <FlashList
+                  data={activeDetails.cast}
+                  renderItem={({ item }: { item: any }) => (
+                    <CastMember
+                      name={item.name}
+                      role={item.character}
+                      profilePath={item.profilePath}
+                    />
+                  )}
+                  keyExtractor={(item: any) => String(item.id)}
+                  estimatedItemSize={120}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 4 }}
+                />
+              </RailArrowsBox>
             </View>
           )}
 
@@ -2383,21 +2420,23 @@ export default function ShowScreen() {
               >
                 Crew
               </Text>
-              <FlashList
-                data={activeDetails.crew}
-                renderItem={({ item }: { item: any }) => (
-                  <CastMember
-                    name={item.name}
-                    role={item.job}
-                    profilePath={item.profilePath}
-                  />
-                )}
-                keyExtractor={(item: any) => String(item.id)}
-                estimatedItemSize={120}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 4 }}
-              />
+              <RailArrowsBox>
+                <FlashList
+                  data={activeDetails.crew}
+                  renderItem={({ item }: { item: any }) => (
+                    <CastMember
+                      name={item.name}
+                      role={item.job}
+                      profilePath={item.profilePath}
+                    />
+                  )}
+                  keyExtractor={(item: any) => String(item.id)}
+                  estimatedItemSize={120}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 4 }}
+                />
+              </RailArrowsBox>
             </View>
           )}
 
@@ -2473,23 +2512,25 @@ export default function ShowScreen() {
               >
                 Trailers & Videos
               </Text>
-              <FlashList
-                data={activeDetails.videos}
-                renderItem={({ item }: { item: any }) => (
-                  <View style={{ width: 256, marginRight: 16 }}>
-                    <VideoPlayer
-                      videoKey={item.key}
-                      title={item.name}
-                      type={item.type}
-                    />
-                  </View>
-                )}
-                keyExtractor={(item: any) => item.id}
-                estimatedItemSize={272}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 24, paddingRight: 16 }}
-              />
+              <RailArrowsBox>
+                <FlashList
+                  data={activeDetails.videos}
+                  renderItem={({ item }: { item: any }) => (
+                    <View style={{ width: 256, marginRight: 16 }}>
+                      <VideoPlayer
+                        videoKey={item.key}
+                        title={item.name}
+                        type={item.type}
+                      />
+                    </View>
+                  )}
+                  keyExtractor={(item: any) => item.id}
+                  estimatedItemSize={272}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 24, paddingRight: 16 }}
+                />
+              </RailArrowsBox>
             </View>
           )}
 
@@ -2576,49 +2617,50 @@ export default function ShowScreen() {
               >
                 More Like This
               </Text>
+              <RailArrowsBox>
               <FlashList
-                data={similarShowItems}
-                renderItem={({ item }: { item: any }) => {
-                  const itemShow = item.show ?? item;
-                  const candidateShowId = item.showId ?? itemShow._id ?? itemShow.id ?? item._id;
-                  const itemShowId =
-                    typeof candidateShowId === "string" && candidateShowId.startsWith("show_")
-                      ? candidateShowId
-                      : undefined;
-                  const itemExternalId =
-                    item.externalId ?? itemShow.externalId ?? itemShow.id ?? candidateShowId;
-                  const itemTitle =
-                    itemShow.title ?? itemShow.name ?? itemShow.original_name ?? "Untitled";
-                  const itemPosterUrl =
-                    itemShow.posterUrl ??
-                    item.posterUrl ??
-                    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
-                  const itemPosterPath =
-                    itemShow.posterPath ??
-                    item.posterPath ??
-                    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
-                  const itemRating =
-                    typeof item.score === "number"
-                      ? undefined
-                      : itemShow.tmdbVoteAverage ??
-                        itemShow.voteAverage ??
-                        itemShow.vote_average ??
-                        item.voteAverage;
-
-                  return (
-                    <SimilarShowCard
-                      showId={itemShowId}
-                      externalId={itemShowId ? undefined : String(itemExternalId)}
-                      title={itemTitle}
-                      posterUrl={itemPosterUrl}
-                      posterPath={itemPosterPath}
-                      rating={itemRating}
-                      subtitle={
-                        item.sharedGenres?.length
-                          ? item.sharedGenres.join(" • ")
-                          : itemShow.overview ?? item.overview
-                      }
-                    />
+                  data={similarShowItems}
+                  renderItem={({ item }: { item: any }) => {
+                    const itemShow = item.show ?? item;
+                    const candidateShowId = item.showId ?? itemShow._id ?? itemShow.id ?? item._id;
+                    const itemShowId =
+                      typeof candidateShowId === "string" && candidateShowId.startsWith("show_")
+                        ? candidateShowId
+                        : undefined;
+                    const itemExternalId =
+                      item.externalId ?? itemShow.externalId ?? itemShow.id ?? candidateShowId;
+                    const itemTitle =
+                      itemShow.title ?? itemShow.name ?? itemShow.original_name ?? "Untitled";
+                    const itemPosterUrl =
+                      itemShow.posterUrl ??
+                      item.posterUrl ??
+                      tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+                    const itemPosterPath =
+                      itemShow.posterPath ??
+                      item.posterPath ??
+                      tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+                    const itemRating =
+                      typeof item.score === "number"
+                        ? undefined
+                        : itemShow.tmdbVoteAverage ??
+                          itemShow.voteAverage ??
+                          itemShow.vote_average ??
+                          item.voteAverage;
+  
+                    return (
+                      <SimilarShowCard
+                        showId={itemShowId}
+                        externalId={itemShowId ? undefined : String(itemExternalId)}
+                        title={itemTitle}
+                        posterUrl={itemPosterUrl}
+                        posterPath={itemPosterPath}
+                        rating={itemRating}
+                        subtitle={
+                          item.sharedGenres?.length
+                            ? item.sharedGenres.join(" • ")
+                            : itemShow.overview ?? item.overview
+                        }
+                      />
                   );
                 }}
                 keyExtractor={(item: any) => {
@@ -2638,6 +2680,7 @@ export default function ShowScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 24, paddingRight: 16 }}
               />
+              </RailArrowsBox>
             </View>
           )}
 
@@ -2666,15 +2709,24 @@ export default function ShowScreen() {
           <GlassSurface
             radius={28}
             variant="sheet"
-            style={{
-              borderBottomLeftRadius: 0,
-              borderBottomRightRadius: 0,
+            style={[
+              {
+                borderBottomLeftRadius: isDesktopWeb ? 28 : 0,
+                borderBottomRightRadius: isDesktopWeb ? 28 : 0,
+              },
+              webSheetStyle,
+              isDesktopWeb && { marginBottom: 24 },
+            ]}
+            contentStyle={{
+              paddingTop: 16,
+              paddingBottom: isDesktopWeb ? 24 : insets.bottom + 24,
             }}
-            contentStyle={{ paddingTop: 16, paddingBottom: insets.bottom + 24 }}
           >
-            <View className="mb-4 items-center">
-              <View className="h-1 w-10 rounded-full bg-dark-border" />
-            </View>
+            {isDesktopWeb ? null : (
+              <View className="mb-4 items-center">
+                <View className="h-1 w-10 rounded-full bg-dark-border" />
+              </View>
+            )}
             <Text className="mb-4 px-6 text-lg font-semibold text-text-primary">
               Add to list
             </Text>
@@ -2816,7 +2868,10 @@ export default function ShowScreen() {
         onRequestClose={() => setReviewSheetVisible(false)}
       >
         <View className="flex-1 bg-dark-bg" style={{ backgroundColor: "#0D0F14" }}>
-          <View className="flex-row items-center justify-between border-b border-dark-border px-6 py-4">
+          <View
+            className="flex-row items-center justify-between border-b border-dark-border px-6 py-4"
+            style={webReadingStyle}
+          >
             <Pressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2850,11 +2905,14 @@ export default function ShowScreen() {
           <ScrollView
             className="flex-1"
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{
-              paddingHorizontal: 24,
-              paddingTop: 24,
-              paddingBottom: insets.bottom + 32,
-            }}
+            contentContainerStyle={[
+              {
+                paddingHorizontal: 24,
+                paddingTop: 24,
+                paddingBottom: insets.bottom + 32,
+              },
+              webReadingStyle,
+            ]}
             keyboardShouldPersistTaps="handled"
           >
             <View className="mb-6">
@@ -2982,13 +3040,18 @@ export default function ShowScreen() {
                     // constant gap keeps a consistent sliver of backdrop on
                     // every device (including non-notched ones).
                     top: Math.max(insets.top, 12) + 6,
-                    left: 0,
-                    right: 0,
+                    left: episodeSheetSideInset,
+                    right: episodeSheetSideInset,
                     bottom: 0,
                     backgroundColor: "transparent",
                     borderTopLeftRadius: 20,
                     borderTopRightRadius: 20,
                     overflow: "hidden",
+                  },
+                  isDesktopWeb && {
+                    top: Math.max(insets.top, 12) + 30,
+                    bottom: 32,
+                    borderRadius: 20,
                   },
                   episodeSheetStyle,
                 ]}
@@ -2999,8 +3062,8 @@ export default function ShowScreen() {
                   fallbackColor="rgba(13,15,20,0.94)"
                   style={{
                     flex: 1,
-                    borderBottomLeftRadius: 0,
-                    borderBottomRightRadius: 0,
+                    borderBottomLeftRadius: isDesktopWeb ? 20 : 0,
+                    borderBottomRightRadius: isDesktopWeb ? 20 : 0,
                   }}
                   contentStyle={{ flex: 1 }}
                 >
@@ -3031,10 +3094,18 @@ export default function ShowScreen() {
                   </View>
                 )}
 
-                {/* Drag grabber overlaid on image */}
+                {/* Drag grabber overlaid on image (touch affordance) */}
                 <View
                   pointerEvents="none"
-                  style={{ position: "absolute", top: 8, left: 0, right: 0, alignItems: "center", zIndex: 10 }}
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    left: 0,
+                    right: 0,
+                    alignItems: "center",
+                    zIndex: 10,
+                    display: isDesktopWeb ? "none" : "flex",
+                  }}
                 >
                   <View
                     style={{

@@ -639,7 +639,12 @@ export default function SearchScreen() {
   /* ── JSX ───────────────────────────────────────────────────── */
 
   return (
-    <Screen scroll hasTabBar keyboardShouldPersistTaps="always">
+    <Screen
+      scroll
+      hasTabBar
+      keyboardShouldPersistTaps="always"
+      webMaxWidth={960}
+    >
       <View style={{ paddingBottom: 100 }}>
         <View className="px-5 pt-2">
           <SearchCommandCenter

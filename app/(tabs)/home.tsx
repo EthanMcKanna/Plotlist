@@ -12,7 +12,7 @@ import {
   Platform,
   RefreshControl,
   StyleSheet,
-  useWindowDimensions,
+  Text,
   View,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -41,7 +41,11 @@ import {
   getFriendsActivityPeople,
 } from "../../components/FriendsActivity";
 import { LoadingScreen } from "../../components/LoadingScreen";
-import { HOME_TOP_BAR_HEIGHT, HomeTopBar } from "../../components/HomeTopBar";
+import {
+  getHomeTopBarGreetingLine,
+  HOME_TOP_BAR_HEIGHT,
+  HomeTopBar,
+} from "../../components/HomeTopBar";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { SignatureRail, type SignatureRailItem } from "../../components/SignatureRail";
 import {
@@ -53,6 +57,11 @@ import {
 } from "../../components/TonightStrip";
 
 import { useContactSync } from "../../lib/useContactSync";
+import {
+  useContentWidth,
+  useIsDesktopWeb,
+  useWebPageStyle,
+} from "../../lib/webLayout";
 import {
   buildFreshRailRoomTopUpItems,
   buildVisibleFreshRailItems,
@@ -183,7 +192,9 @@ export function HomeSurface({
   continueWatchingItems: providedContinueWatchingItems,
   schedulePreview: providedSchedulePreview,
 }: HomeSurfaceProps) {
-  const { width } = useWindowDimensions();
+  const width = useContentWidth();
+  const isDesktopWeb = useIsDesktopWeb();
+  const webPageStyle = useWebPageStyle();
   const insets = useSafeAreaInsets();
   const surfaceNow = data.generatedAt;
   // Discovery rail kickers shift with the time of day (titles stay fixed).
@@ -1098,6 +1109,19 @@ export function HomeSurface({
     );
   };
 
+  // Desktop web replaces the floating mobile top bar (avatar + bell live in
+  // the sidebar there) with an inline greeting header.
+  const desktopHeader = isDesktopWeb ? (
+    <View className="px-6 pb-2 pt-8">
+      <Text className="text-[28px] font-black tracking-tight text-text-primary">
+        {getHomeTopBarGreetingLine(
+          new Date(surfaceNow),
+          data.me?.displayName ?? data.me?.name ?? null,
+        )}
+      </Text>
+    </View>
+  ) : null;
+
   return (
     <View testID="home-surface" style={styles.root}>
       <Animated.FlatList
@@ -1106,11 +1130,15 @@ export function HomeSurface({
         data={sections}
         keyExtractor={(item) => item.kind}
         renderItem={renderItem}
+        ListHeaderComponent={desktopHeader}
         initialNumToRender={initialRenderSectionCount}
         maxToRenderPerBatch={initialRenderSectionCount}
         contentContainerStyle={[
           styles.listContent,
-          { paddingTop: insets.top + HOME_TOP_BAR_HEIGHT },
+          webPageStyle,
+          isDesktopWeb
+            ? styles.desktopListContent
+            : { paddingTop: insets.top + HOME_TOP_BAR_HEIGHT },
         ]}
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
@@ -1125,13 +1153,15 @@ export function HomeSurface({
         }
       />
 
-      <HomeTopBar
-        scrollY={scrollY}
-        displayName={data.me?.displayName ?? data.me?.name ?? null}
-        username={data.me?.username ?? null}
-        avatarUrl={data.me?.avatarUrl ?? null}
-        notificationCount={unreadNotifications}
-      />
+      {isDesktopWeb ? null : (
+        <HomeTopBar
+          scrollY={scrollY}
+          displayName={data.me?.displayName ?? data.me?.name ?? null}
+          username={data.me?.username ?? null}
+          avatarUrl={data.me?.avatarUrl ?? null}
+          notificationCount={unreadNotifications}
+        />
+      )}
     </View>
   );
 }
@@ -1222,5 +1252,8 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 110,
+  },
+  desktopListContent: {
+    paddingBottom: 56,
   },
 });

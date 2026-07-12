@@ -2,7 +2,6 @@ import { memo } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -15,6 +14,7 @@ import {
   getSeasonToggleLabel,
   type SeasonLoadState,
 } from "../lib/seasonGuide";
+import { HorizontalRail } from "./HorizontalRail";
 import { GlassPressable, GlassSurface } from "./NativeGlass";
 import { ImdbLogo } from "./ImdbBadge";
 import { ShimmerBlock } from "./ShowDetailSkeleton";
@@ -367,9 +367,7 @@ function EpisodeGuideComponent({
                   </GlassPressable>
                 </View>
               ) : episodes.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <HorizontalRail
                   contentContainerStyle={{
                     paddingHorizontal: 24,
                     gap: 14,
@@ -507,7 +505,7 @@ function EpisodeGuideComponent({
                       </Pressable>
                     );
                   })}
-                </ScrollView>
+                </HorizontalRail>
               ) : (
                 <View className="px-6">
                   <Text className="text-sm text-text-tertiary">

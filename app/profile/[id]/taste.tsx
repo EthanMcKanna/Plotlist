@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,12 +20,13 @@ import { guardedPush } from "../../../lib/navigation";
 import { api } from "../../../lib/plotlist/api";
 import { tasteMatchTier } from "../../../lib/plotlist/recsRanking";
 import { queryClient } from "../../../lib/queryClient";
+import {
+  usePosterGridLayout,
+  useWebPageStyle,
+  WEB_PAGE_MAX_WIDTH,
+} from "../../../lib/webLayout";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const GRID_ITEM_WIDTH = (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
 
 function pressShow(show: any) {
   const showId = show?._id ?? show?.id;
@@ -49,6 +49,13 @@ export default function TasteBreakdownScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
   const userIdValue = typeof params.id === "string" ? params.id : "";
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
+  const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
 
   const profile = useQuery(
     api.users.profile,
@@ -98,35 +105,37 @@ export default function TasteBreakdownScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
-      {/* Header */}
+      {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
-        className="px-6 pb-4 border-b border-dark-border"
+        className="pb-4 border-b border-dark-border"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row items-center gap-3">
-          <GlassPressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.back();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            radius={20}
-            variant="control"
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
-          </GlassPressable>
-          <View className="flex-1">
-            <Text className="text-xl font-black text-text-primary">Taste match</Text>
-            <Text className="text-xs font-semibold text-text-tertiary" numberOfLines={1}>
-              {displayName ? `You and ${displayName}` : "The two of you"}
-            </Text>
+        <View className="px-6" style={pageStyle}>
+          <View className="flex-row items-center gap-3">
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.back();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              radius={20}
+              variant="control"
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
+            >
+              <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+            </GlassPressable>
+            <View className="flex-1">
+              <Text className="text-xl font-black text-text-primary">Taste match</Text>
+              <Text className="text-xs font-semibold text-text-tertiary" numberOfLines={1}>
+                {displayName ? `You and ${displayName}` : "The two of you"}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -146,7 +155,9 @@ export default function TasteBreakdownScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: insets.bottom + 48, ...pageStyle }}
+        >
           {/* Hero */}
           <View className="px-6 pt-6">
             <View className="flex-row items-baseline gap-3">
@@ -239,19 +250,19 @@ export default function TasteBreakdownScreen() {
               </Text>
               <View className="mt-3 flex-row flex-wrap">
                 {sharedShows.map((show: any, index: number) => {
-                  const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
+                  const isLastInRow = index % numColumns === numColumns - 1;
                   return (
                     <Pressable
                       key={show._id ?? `${show.title}-${index}`}
                       onPress={() => pressShow(show)}
                       className="active:opacity-80"
                       style={{
-                        width: GRID_ITEM_WIDTH,
+                        width: itemWidth,
                         marginRight: isLastInRow ? 0 : GAP,
                         marginBottom: GAP,
                       }}
                     >
-                      <Poster uri={show.posterUrl ?? undefined} width={GRID_ITEM_WIDTH} />
+                      <Poster uri={show.posterUrl ?? undefined} width={itemWidth} />
                       <Text
                         className="mt-2 text-xs font-medium text-text-primary"
                         numberOfLines={2}

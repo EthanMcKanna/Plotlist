@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -42,38 +41,53 @@ import { Avatar } from "../../components/Avatar";
 import { ListForm } from "../../components/ListForm";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
+import { usePosterGridLayout } from "../../lib/webLayout";
 import { sharePlotlistLink } from "../../lib/share";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import type { Id } from "../../lib/plotlist/types";
+import { PageTitle } from "../../components/PageTitle";
 import { ReportModal } from "../../components/ReportModal";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const ITEM_WIDTH =
-  (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
-const POSTER_HEIGHT = ITEM_WIDTH * 1.5;
 const METADATA_HEIGHT = 54;
-const ITEM_HEIGHT = POSTER_HEIGHT + METADATA_HEIGHT;
 const CARD_SPRING = { damping: 24, stiffness: 180, mass: 0.95 };
+// The page reads as a single centered column on desktop web; the drag grid
+// gains columns as that column widens (3 on phones, unchanged natively).
+const WEB_LIST_MAX_WIDTH = 920;
 
-function getGridPosition(index: number) {
+type DragGridMetrics = {
+  numColumns: number;
+  itemWidth: number;
+  itemHeight: number;
+};
+
+function getGridPosition(index: number, grid: DragGridMetrics) {
   "worklet";
   return {
-    x: (index % NUM_COLS) * (ITEM_WIDTH + GAP),
-    y: Math.floor(index / NUM_COLS) * (ITEM_HEIGHT + GAP),
+    x: (index % grid.numColumns) * (grid.itemWidth + GAP),
+    y: Math.floor(index / grid.numColumns) * (grid.itemHeight + GAP),
   };
 }
 
-function getIndexFromPosition(x: number, y: number, itemCount: number) {
+function getIndexFromPosition(
+  x: number,
+  y: number,
+  itemCount: number,
+  grid: DragGridMetrics,
+) {
   "worklet";
   const col = Math.max(
     0,
-    Math.min(NUM_COLS - 1, Math.floor((x + ITEM_WIDTH / 2) / (ITEM_WIDTH + GAP))),
+    Math.min(
+      grid.numColumns - 1,
+      Math.floor((x + grid.itemWidth / 2) / (grid.itemWidth + GAP)),
+    ),
   );
-  const row = Math.max(0, Math.floor((y + ITEM_HEIGHT / 2) / (ITEM_HEIGHT + GAP)));
-  return Math.max(0, Math.min(itemCount - 1, row * NUM_COLS + col));
+  const row = Math.max(
+    0,
+    Math.floor((y + grid.itemHeight / 2) / (grid.itemHeight + GAP)),
+  );
+  return Math.max(0, Math.min(itemCount - 1, row * grid.numColumns + col));
 }
 
 function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number) {
@@ -108,6 +122,7 @@ function SortablePosterCard({
   index,
   totalItems,
   isOwner,
+  grid,
   draggingId,
   activeIndex,
   activeX,
@@ -124,6 +139,7 @@ function SortablePosterCard({
   index: number;
   totalItems: number;
   isOwner: boolean;
+  grid: DragGridMetrics;
   draggingId: string | null;
   activeIndex: SharedValue<number>;
   activeX: SharedValue<number>;
@@ -139,13 +155,13 @@ function SortablePosterCard({
   const itemId = getDetailedListItemId(item) ?? `${index}`;
   const show = getDetailedListItemShow(item);
   const isActive = draggingId === itemId;
-  const target = getGridPosition(index);
+  const target = getGridPosition(index, grid);
   const canDrag = isOwner && totalItems > 1;
 
   const animatedStyle = useAnimatedStyle(
     () => ({
       position: "absolute",
-      width: ITEM_WIDTH,
+      width: grid.itemWidth,
       zIndex: isActive ? 20 : 1,
       transform: [
         {
@@ -159,7 +175,7 @@ function SortablePosterCard({
         },
       ],
     }),
-    [isActive, target.x, target.y],
+    [isActive, target.x, target.y, grid.itemWidth],
   );
 
   const dragGesture = Gesture.Pan()
@@ -176,6 +192,7 @@ function SortablePosterCard({
         activeX.value,
         activeY.value,
         totalItems,
+        grid,
       );
 
       if (nextIndex !== activeIndex.value) {
@@ -186,7 +203,7 @@ function SortablePosterCard({
       if (activeIndex.value < 0) {
         return;
       }
-      const targetPosition = getGridPosition(activeIndex.value);
+      const targetPosition = getGridPosition(activeIndex.value, grid);
       activeX.value = withSpring(targetPosition.x, CARD_SPRING);
       activeScale.value = withSpring(1, CARD_SPRING);
       activeY.value = withSpring(targetPosition.y, CARD_SPRING, (finished) => {
@@ -208,7 +225,7 @@ function SortablePosterCard({
           className="active:opacity-80"
         >
           <View className="overflow-hidden rounded-2xl">
-            <Poster uri={show?.posterUrl} width={ITEM_WIDTH} />
+            <Poster uri={show?.posterUrl} width={grid.itemWidth} />
             <View className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1">
               <Text className="text-[11px] font-semibold text-white">
                 #{index + 1}
@@ -350,11 +367,26 @@ export default function ListScreen() {
   // Y offset of the comments section inside the scroll content, captured on
   // layout so the action-bar comment button can jump straight to the thread.
   const commentsYRef = useRef(0);
+  const posterGrid = usePosterGridLayout({
+    maxWidth: WEB_LIST_MAX_WIDTH,
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
+  const grid = useMemo<DragGridMetrics>(
+    () => ({
+      numColumns: posterGrid.numColumns,
+      itemWidth: posterGrid.itemWidth,
+      itemHeight: posterGrid.itemWidth * 1.5 + METADATA_HEIGHT,
+    }),
+    [posterGrid.numColumns, posterGrid.itemWidth],
+  );
   const gridHeight = useMemo(() => {
     if (orderedItems.length === 0) return 0;
-    const rows = Math.ceil(orderedItems.length / NUM_COLS);
-    return rows * ITEM_HEIGHT + (rows - 1) * GAP;
-  }, [orderedItems.length]);
+    const rows = Math.ceil(orderedItems.length / grid.numColumns);
+    return rows * grid.itemHeight + (rows - 1) * GAP;
+  }, [orderedItems.length, grid]);
   const orderedItemsRef = useRef(orderedItems);
   const draggingIdRef = useRef<string | null>(null);
   const activeIndex = useSharedValue(-1);
@@ -511,7 +543,7 @@ export default function ListScreen() {
   }, [deleteList, list?.title, listId, router]);
 
   const handleDragStart = useCallback((itemId: string, index: number) => {
-    const position = getGridPosition(index);
+    const position = getGridPosition(index, grid);
     draggingIdRef.current = itemId;
     setDraggingId(itemId);
     activeIndex.value = index;
@@ -521,7 +553,7 @@ export default function ListScreen() {
     activeY.value = position.y;
     activeScale.value = withSpring(1.02, CARD_SPRING);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [activeIndex, activeScale, activeX, activeY, dragOriginX, dragOriginY]);
+  }, [activeIndex, activeScale, activeX, activeY, dragOriginX, dragOriginY, grid]);
 
   const handleDragMove = useCallback(
     (toIndex: number) => {
@@ -559,6 +591,7 @@ export default function ListScreen() {
         index={index}
         totalItems={orderedItems.length}
         isOwner={isOwner}
+        grid={grid}
         draggingId={draggingId}
         activeIndex={activeIndex}
         activeX={activeX}
@@ -580,6 +613,7 @@ export default function ListScreen() {
       dragOriginX,
       dragOriginY,
       draggingId,
+      grid,
       handleDragEnd,
       handleDragMove,
       handleDragStart,
@@ -590,7 +624,8 @@ export default function ListScreen() {
   );
 
   return (
-    <Screen>
+    <Screen webMaxWidth={WEB_LIST_MAX_WIDTH}>
+      <PageTitle title={list?.title} />
       <ScrollView
         ref={scrollRef}
         contentInsetAdjustmentBehavior="automatic"

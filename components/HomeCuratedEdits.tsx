@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 import {
   getFeatureCardVisibleMetaLine,
   type SignatureRailItem,
@@ -60,14 +61,11 @@ export function HomeCuratedEdits({
         accent="#FDE68A"
         icon="albums"
       />
-      <ScrollView
+      <HorizontalRail
         accessibilityLabel="Picks rail"
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rail}
         decelerationRate="fast"
+        contentContainerStyle={styles.rail}
         snapToInterval={metrics.cardWidth + 14}
-        snapToAlignment="start"
       >
         {edits.map((edit) => (
           <CuratedEditCard
@@ -78,7 +76,7 @@ export function HomeCuratedEdits({
             onPressItem={onPressItem}
           />
         ))}
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

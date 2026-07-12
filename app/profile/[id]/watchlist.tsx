@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Dimensions, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { FlashList } from "../../../components/FlashList";
 import { useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -11,14 +11,10 @@ import { Screen } from "../../../components/Screen";
 import { SegmentedControl } from "../../../components/SegmentedControl";
 import { api } from "../../../lib/plotlist/api";
 import { guardedPush } from "../../../lib/navigation";
+import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../../lib/webLayout";
 import type { Id } from "../../../lib/plotlist/types";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const ITEM_WIDTH =
-  (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
 
 type SortOption = "date" | "title" | "year";
 
@@ -52,6 +48,12 @@ export default function PublicWatchlistScreen() {
   const userId = typeof params.id === "string" ? params.id : "";
   const userIdValue = userId as Id<"users">;
   const [sortBy, setSortBy] = useState<SortOption>("date");
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
 
   const profile = useQuery(api.users.profile, { userId: userIdValue });
   const canViewWatchlist = profile?.permissions.watchlist ?? false;
@@ -81,11 +83,11 @@ export default function PublicWatchlistScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: WatchlistItem; index: number }) => {
-      const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
+      const isLastInRow = index % numColumns === numColumns - 1;
       return (
         <View
           style={{
-            width: ITEM_WIDTH,
+            width: itemWidth,
             marginRight: isLastInRow ? 0 : GAP,
             marginBottom: GAP,
           }}
@@ -97,7 +99,7 @@ export default function PublicWatchlistScreen() {
             }}
             className="active:opacity-80"
           >
-            <Poster uri={item.show?.posterUrl} width={ITEM_WIDTH} />
+            <Poster uri={item.show?.posterUrl} width={itemWidth} />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
@@ -111,13 +113,13 @@ export default function PublicWatchlistScreen() {
         </View>
       );
     },
-    [],
+    [itemWidth, numColumns],
   );
 
   const profileName = profile?.user?.displayName ?? profile?.user?.name ?? "This user";
 
   return (
-    <Screen>
+    <Screen webMaxWidth={WEB_PAGE_MAX_WIDTH}>
       <View className="flex-1 px-6 pt-6">
         <Text className="text-2xl font-semibold text-text-primary">Watchlist</Text>
         <Text className="mt-1 text-sm text-text-tertiary">
@@ -156,11 +158,12 @@ export default function PublicWatchlistScreen() {
             <View className="mt-6 flex-1">
               {items.length > 0 ? (
                 <FlashList
+                  key={`grid-${numColumns}`}
                   data={items}
                   renderItem={renderItem}
                   keyExtractor={(item: WatchlistItem) => item.state._id}
-                  numColumns={NUM_COLS}
-                  estimatedItemSize={ITEM_WIDTH * 1.5 + 48}
+                  numColumns={numColumns}
+                  estimatedItemSize={itemWidth * 1.5 + 48}
                   contentContainerStyle={{ paddingBottom: 40 }}
                   onEndReached={() => {
                     if (status === "CanLoadMore") {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
@@ -12,6 +12,7 @@ import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import { getLocalDateString } from "../lib/releaseCalendar";
 import { SectionHeader } from "./SectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 
 function flattenGroups(groups?: Array<{ items?: any[] }>) {
   return (groups ?? []).flatMap((group) => group.items ?? []);
@@ -73,9 +74,7 @@ export function ReleaseCalendarPreview() {
         />
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      <HorizontalRail
         contentContainerStyle={{
           paddingHorizontal: 24,
           paddingTop: 14,
@@ -168,7 +167,7 @@ export function ReleaseCalendarPreview() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

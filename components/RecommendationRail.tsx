@@ -1,6 +1,7 @@
-import { ScrollView, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { SimilarShowCard } from "./SimilarShowCard";
+import { HorizontalRail } from "./HorizontalRail";
 
 type RecommendationRailProps = {
   title: string;
@@ -50,9 +51,7 @@ export function RecommendationRail({
           </Text>
         ) : null}
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      <HorizontalRail
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingRight: 16 }}
       >
         {items.map((item, index) => {
@@ -74,7 +73,7 @@ export function RecommendationRail({
             />
           );
         })}
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

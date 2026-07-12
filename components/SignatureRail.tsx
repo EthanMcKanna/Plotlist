@@ -2,7 +2,6 @@ import { useState, type ComponentProps } from "react";
 import {
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -14,6 +13,7 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 import { getHomeDisplayMetaLine, getHomeDisplayMetaLabels } from "../lib/homeDisplayMeta";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -115,18 +115,15 @@ export function SignatureRail({
         actionLabel={actionLabel}
         onAction={onAction}
       />
-      <ScrollView
+      <HorizontalRail
         accessibilityLabel={`${title} rail`}
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
         contentContainerStyle={
           layout === "feature" ? styles.featureRail : styles.posterRail
         }
-        decelerationRate="fast"
         snapToInterval={
           layout === "feature" ? featureCardWidth + 14 : POSTER_WIDTH + 14
         }
-        snapToAlignment="start"
       >
         {visible.map((item, idx) =>
           layout === "feature" ? (
@@ -149,7 +146,7 @@ export function SignatureRail({
             />
           ),
         )}
-      </ScrollView>
+      </HorizontalRail>
     </View>
   );
 }

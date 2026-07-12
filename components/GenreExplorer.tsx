@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import * as Haptics from "expo-haptics";
 
 import { FanPreviewCard } from "./FanPreviewCard";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { HorizontalRail } from "./HorizontalRail";
 import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
 import { useAction } from "../lib/plotlist/react";
@@ -232,18 +234,33 @@ export function GenreExplorer() {
 
       <FacetGroupPills selected={selectedGroup} onSelect={setSelectedGroup} />
 
-      <FlatList
-        horizontal
-        data={cards}
-        renderItem={renderCard}
-        keyExtractor={(item) => (item === "all" ? "all" : item.key)}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.cardRow}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
-        accessibilityLabel={`${group.title} categories`}
-      />
+      {Platform.OS === "web" ? (
+        // Desktop web gets hover scroll-arrows; card counts are small enough
+        // to render eagerly there.
+        <HorizontalRail
+          accessibilityLabel={`${group.title} categories`}
+          contentContainerStyle={styles.cardRow}
+        >
+          {cards.map((item) => (
+            <View key={item === "all" ? "all" : item.key}>
+              {renderCard({ item })}
+            </View>
+          ))}
+        </HorizontalRail>
+      ) : (
+        <FlatList
+          horizontal
+          data={cards}
+          renderItem={renderCard}
+          keyExtractor={(item) => (item === "all" ? "all" : item.key)}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.cardRow}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={5}
+          accessibilityLabel={`${group.title} categories`}
+        />
+      )}
     </View>
   );
 }

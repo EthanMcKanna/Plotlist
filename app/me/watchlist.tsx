@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Dimensions, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "../../components/FlashList";
 import { useAuth, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
@@ -13,13 +13,9 @@ import { Poster } from "../../components/Poster";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
+import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const H_PADDING = 24;
 const GAP = 12;
-const NUM_COLS = 3;
-const ITEM_WIDTH =
-  (SCREEN_WIDTH - H_PADDING * 2 - GAP * (NUM_COLS - 1)) / NUM_COLS;
 
 type StatusFilter = "all" | "watchlist" | "watching" | "completed" | "dropped";
 type SortOption = "date" | "title" | "year";
@@ -70,6 +66,12 @@ export default function WatchlistScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(parseFilter(params.filter));
   const [sortBy, setSortBy] = useState<SortOption>("date");
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
+  const { numColumns, itemWidth } = usePosterGridLayout({
+    horizontalPadding: 48,
+    gap: GAP,
+    minColumns: 3,
+    targetItemWidth: 150,
+  });
 
   const sortSheetOptions = useMemo<ActionSheetOption[]>(
     () =>
@@ -169,11 +171,11 @@ export default function WatchlistScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: WatchlistItem; index: number }) => {
-      const isLastInRow = index % NUM_COLS === NUM_COLS - 1;
+      const isLastInRow = index % numColumns === numColumns - 1;
       return (
         <View
           style={{
-            width: ITEM_WIDTH,
+            width: itemWidth,
             marginRight: isLastInRow ? 0 : GAP,
             marginBottom: GAP,
           }}
@@ -187,7 +189,7 @@ export default function WatchlistScreen() {
           >
             <Poster
               uri={item.show.posterUrl}
-              width={ITEM_WIDTH}
+              width={itemWidth}
             />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
@@ -202,7 +204,7 @@ export default function WatchlistScreen() {
         </View>
       );
     },
-    []
+    [itemWidth, numColumns]
   );
 
   const getEmptyStateText = () => {
@@ -238,7 +240,7 @@ export default function WatchlistScreen() {
   const emptyState = getEmptyStateText();
 
   return (
-    <Screen>
+    <Screen webMaxWidth={WEB_PAGE_MAX_WIDTH}>
       <ActionSheet
         visible={sortSheetVisible}
         onClose={() => setSortSheetVisible(false)}
@@ -281,11 +283,12 @@ export default function WatchlistScreen() {
         <View className="mt-6 flex-1">
           {items.length > 0 ? (
             <FlashList
+              key={`grid-${numColumns}`}
               data={items}
               renderItem={renderItem}
               keyExtractor={(item: WatchlistItem) => item.state._id}
-              numColumns={NUM_COLS}
-              estimatedItemSize={ITEM_WIDTH * 1.5 + 48}
+              numColumns={numColumns}
+              estimatedItemSize={itemWidth * 1.5 + 48}
               contentContainerStyle={{ paddingBottom: 40 }}
               onEndReached={() => {
                 if (status === "CanLoadMore") {
