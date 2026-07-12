@@ -133,7 +133,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const needsOnboarding =
       isAuthenticated && (effectiveOnboardingStep ?? "profile") !== "complete";
 
-    if (!isAuthenticated && !inAuthGroup && !inDevPreview) {
+    // Web has public marketing/legal pages: signed-out visitors stay on the
+    // landing page at "/" (see app/index.tsx) and can read legal docs from
+    // its footer. Native keeps the straight-to-sign-in launch.
+    const isPublicWebRoute =
+      Platform.OS === "web" &&
+      (atRoot || (pathname?.startsWith("/legal") ?? false));
+
+    if (!isAuthenticated && !inAuthGroup && !inDevPreview && !isPublicWebRoute) {
       setIsRouteSettled(false);
       replaceRoute(router, "/sign-in");
       return;
