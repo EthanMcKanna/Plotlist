@@ -1,10 +1,21 @@
 import { createContext, useContext } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
-// Breakpoints for the web shell. Native never enters these branches — every
-// hook below collapses to the mobile value when Platform.OS !== "web".
+// Breakpoints for the web shell. Navigation chrome (sidebar/rail) is still
+// web-only, but the *content* helpers below also activate on iPad windows
+// wide enough for the regular size class — so tablets get the same page
+// columns, grids, and centered sheets as desktop web while keeping native
+// navigation. Narrow iPad windows (Split View / Slide Over) fall back to the
+// phone layout, which is exactly the adaptive behavior Apple expects.
 export const WEB_SIDEBAR_BREAKPOINT = 1024;
 export const WEB_RAIL_BREAKPOINT = 768;
+
+// iPadOS regular-width threshold: at/above this the window behaves like a
+// "big screen" (full-screen iPad, 2/3 Split View, large Stage Manager
+// windows); below it (~compact width) screens keep their phone layout.
+export const TABLET_WIDE_BREAKPOINT = 700;
+
+export const IS_TABLET = Platform.OS === "ios" && Platform.isPad === true;
 
 export const WEB_SIDEBAR_WIDTH = 248;
 export const WEB_RAIL_WIDTH = 76;
@@ -41,6 +52,16 @@ export function useIsDesktopWeb(): boolean {
   return mode === "sidebar" || mode === "rail";
 }
 
+// Wide-content mode: desktop web, or a regular-width iPad window. Gates the
+// big-screen *content* treatments (centered columns, dialog-style sheets,
+// fuller rails) — never navigation chrome, which stays native on iPad.
+export function useIsWideLayout(): boolean {
+  const { width } = useWindowDimensions();
+  const isDesktopWeb = useIsDesktopWeb();
+  if (isDesktopWeb) return true;
+  return IS_TABLET && width >= TABLET_WIDE_BREAKPOINT;
+}
+
 // Width of the area screens actually render into (window minus side nav).
 // The web shell provides it; native and narrow web fall through to the
 // window width, so existing card-size math is unchanged off desktop.
@@ -55,11 +76,12 @@ export function useContentWidth(): number {
   return contextual ?? width;
 }
 
-// Centered column style for page content on desktop web; null elsewhere so
-// callers can spread it into contentContainerStyle / style arrays safely.
+// Centered column style for page content on desktop web and wide iPad
+// windows; null elsewhere so callers can spread it into
+// contentContainerStyle / style arrays safely.
 export function useWebPageStyle(maxWidth: number = WEB_PAGE_MAX_WIDTH) {
-  const isDesktop = useIsDesktopWeb();
-  if (!isDesktop) return null;
+  const isWide = useIsWideLayout();
+  if (!isWide) return null;
   return {
     alignSelf: "center" as const,
     maxWidth,
@@ -113,10 +135,10 @@ export function usePosterGridLayout(
 }
 
 // Bottom sheets and dialogs: full-width on phones, centered constrained
-// panels on desktop web.
+// panels on desktop web and wide iPad windows.
 export function useWebSheetStyle(maxWidth = 520) {
-  const isDesktop = useIsDesktopWeb();
-  if (!isDesktop) return null;
+  const isWide = useIsWideLayout();
+  if (!isWide) return null;
   return {
     alignSelf: "center" as const,
     maxWidth,

@@ -11,7 +11,7 @@ import Animated, {
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import {
   useContentWidth,
-  useIsDesktopWeb,
+  useIsWideLayout,
   WEB_PAGE_MAX_WIDTH,
 } from "../lib/webLayout";
 import type { ComponentProps } from "react";
@@ -92,7 +92,7 @@ export function RailSkeleton({
   cardHeight,
 }: RailSkeletonProps) {
   const contentWidth = useContentWidth();
-  const isDesktopWeb = useIsDesktopWeb();
+  const isWideLayout = useIsWideLayout();
 
   if (variant === "hero") {
     return (
@@ -108,7 +108,7 @@ export function RailSkeleton({
   const footprint =
     (variant === "banner" ? cardWidth ?? 320 : SKELETON_CARD_WIDTHS[variant]) +
     12;
-  const skeletonCount = isDesktopWeb
+  const skeletonCount = isWideLayout
     ? Math.max(
         legacyCount,
         Math.ceil((Math.min(contentWidth, WEB_PAGE_MAX_WIDTH) - 48) / footprint),

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 
-import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
+import { useIsWideLayout, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 import { PrimaryButton } from "./PrimaryButton";
 import { SecondaryButton } from "./SecondaryButton";
@@ -29,7 +29,7 @@ export function ReportModal({
     onClose();
   };
 
-  const isDesktopWeb = useIsDesktopWeb();
+  const isWideLayout = useIsWideLayout();
   const sheetStyle = useWebSheetStyle(440);
 
   return (
@@ -42,7 +42,7 @@ export function ReportModal({
       <Pressable
         onPress={onClose}
         className={`flex-1 bg-black/50 px-6 py-16 ${
-          isDesktopWeb ? "justify-center" : ""
+          isWideLayout ? "justify-center" : ""
         }`}
       >
         <Pressable onPress={(e) => e.stopPropagation()} style={sheetStyle}>

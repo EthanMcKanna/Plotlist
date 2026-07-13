@@ -2,7 +2,7 @@ import { Modal, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
-import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
+import { useIsWideLayout, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
 export type ActionSheetOption = {
@@ -25,8 +25,9 @@ export function ActionSheet({
   title,
   options,
 }: ActionSheetProps) {
-  // Desktop web: a centered dialog instead of an edge-to-edge bottom sheet.
-  const isDesktopWeb = useIsDesktopWeb();
+  // Desktop web and wide iPad windows: a centered dialog instead of an
+  // edge-to-edge bottom sheet.
+  const isWideLayout = useIsWideLayout();
   const sheetStyle = useWebSheetStyle(440);
   return (
     <Modal
@@ -38,7 +39,7 @@ export function ActionSheet({
       <Pressable
         onPress={onClose}
         className={`flex-1 bg-black/50 ${
-          isDesktopWeb ? "justify-center px-6" : "justify-end"
+          isWideLayout ? "justify-center px-6" : "justify-end"
         }`}
       >
         <Pressable onPress={(e) => e.stopPropagation()} style={sheetStyle}>
@@ -46,14 +47,15 @@ export function ActionSheet({
             radius={28}
             variant="sheet"
             style={
-              isDesktopWeb
+              isWideLayout
                 ? undefined
                 : { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }
             }
-            contentStyle={{ paddingBottom: isDesktopWeb ? 20 : 32, paddingTop: 16 }}
+            contentStyle={{ paddingBottom: isWideLayout ? 20 : 32, paddingTop: 16 }}
           >
-          {/* Handle bar (touch affordance — hidden on desktop web) */}
-          {isDesktopWeb ? null : (
+          {/* Handle bar — decorative here (no drag gesture), so wide
+              layouts drop it along with the bottom-sheet look */}
+          {isWideLayout ? null : (
             <View className="mb-4 items-center">
               <View className="h-1 w-10 rounded-full bg-dark-border" />
             </View>

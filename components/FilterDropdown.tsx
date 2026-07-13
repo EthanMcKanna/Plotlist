@@ -11,7 +11,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
+import {
+  useIsDesktopWeb,
+  useIsWideLayout,
+  useWebSheetStyle,
+} from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
 export type FilterOption = {
@@ -37,6 +41,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
   const selectedOption = options.find((o) => o.value === value) ?? options[0];
   const isDesktopWeb = useIsDesktopWeb();
+  const isWideLayout = useIsWideLayout();
   const sheetStyle = useWebSheetStyle(440);
 
   const closeSheet = useCallback(() => {
@@ -143,7 +148,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
           {/* Sheet */}
           <Animated.View
-            style={[sheetAnimStyle, sheetStyle, isDesktopWeb && { marginBottom: 24 }]}
+            style={[sheetAnimStyle, sheetStyle, isWideLayout && { marginBottom: 24 }]}
           >
             <GestureDetector gesture={panGesture}>
               <Animated.View>
@@ -153,15 +158,16 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
                   style={{
                     borderTopLeftRadius: 24,
                     borderTopRightRadius: 24,
-                    borderBottomLeftRadius: isDesktopWeb ? 24 : 0,
-                    borderBottomRightRadius: isDesktopWeb ? 24 : 0,
+                    borderBottomLeftRadius: isWideLayout ? 24 : 0,
+                    borderBottomRightRadius: isWideLayout ? 24 : 0,
                   }}
                   contentStyle={{
                     paddingTop: 12,
-                    paddingBottom: isDesktopWeb ? 20 : insets.bottom + 20,
+                    paddingBottom: isWideLayout ? 20 : insets.bottom + 20,
                   }}
                 >
-                  {/* Handle — swipe affordance (touch only) */}
+                  {/* Handle — swipe affordance; the sheet stays
+                      drag-dismissable on iPad, so only desktop web hides it */}
                   {isDesktopWeb ? null : (
                     <View
                       style={{

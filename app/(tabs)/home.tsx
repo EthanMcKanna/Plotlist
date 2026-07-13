@@ -60,6 +60,7 @@ import { useContactSync } from "../../lib/useContactSync";
 import {
   useContentWidth,
   useIsDesktopWeb,
+  useIsWideLayout,
   useWebPageStyle,
 } from "../../lib/webLayout";
 import {
@@ -194,6 +195,7 @@ export function HomeSurface({
 }: HomeSurfaceProps) {
   const width = useContentWidth();
   const isDesktopWeb = useIsDesktopWeb();
+  const isWideLayout = useIsWideLayout();
   const webPageStyle = useWebPageStyle();
   const insets = useSafeAreaInsets();
   const surfaceNow = data.generatedAt;
@@ -208,14 +210,15 @@ export function HomeSurface({
     [surfaceNow],
   );
   const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
-  // Desktop-web rails are roughly twice as wide as a phone screen, so the
-  // discovery rails aim for more items there (the limiters simply return
-  // fewer when the pools run dry). Native targets are unchanged.
-  const targetFeatureRailItems = isDesktopWeb ? 10 : TARGET_FEATURE_RAIL_ITEMS;
-  const targetFreshRailItems = isDesktopWeb ? 9 : TARGET_FRESH_RAIL_ITEMS;
-  const targetQuickRailItems = isDesktopWeb ? 8 : TARGET_QUICK_RAIL_ITEMS;
-  const targetCriticsRailItems = isDesktopWeb ? 10 : MIN_POSTER_RAIL_ITEMS;
-  const reserveRailLimit = isDesktopWeb ? 8 : MIN_DISTINCT_POSTER_RAIL_ITEMS;
+  // Wide layouts (desktop web, regular-width iPad) fit roughly twice as many
+  // rail cards as a phone screen, so the discovery rails aim for more items
+  // there (the limiters simply return fewer when the pools run dry). Phone
+  // targets are unchanged.
+  const targetFeatureRailItems = isWideLayout ? 10 : TARGET_FEATURE_RAIL_ITEMS;
+  const targetFreshRailItems = isWideLayout ? 9 : TARGET_FRESH_RAIL_ITEMS;
+  const targetQuickRailItems = isWideLayout ? 8 : TARGET_QUICK_RAIL_ITEMS;
+  const targetCriticsRailItems = isWideLayout ? 10 : MIN_POSTER_RAIL_ITEMS;
+  const reserveRailLimit = isWideLayout ? 8 : MIN_DISTINCT_POSTER_RAIL_ITEMS;
 
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler({

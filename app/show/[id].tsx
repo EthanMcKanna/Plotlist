@@ -35,6 +35,7 @@ import {
   SHOW_BACK_BUTTON,
   useContentWidth,
   useIsDesktopWeb,
+  useIsWideLayout,
   useWebPageStyle,
   useWebSheetStyle,
   WEB_READING_MAX_WIDTH,
@@ -402,11 +403,13 @@ export default function ShowScreen() {
   const contentWidth = useContentWidth();
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const isDesktopWeb = useIsDesktopWeb();
+  const isWideLayout = useIsWideLayout();
   const webPageStyle = useWebPageStyle(WEB_SHOW_DETAIL_MAX_WIDTH);
   const webSheetStyle = useWebSheetStyle(560);
   const webReadingStyle = useWebPageStyle(WEB_READING_MAX_WIDTH);
-  // Episode sheet width: full-bleed on phones, centered panel on desktop.
-  const episodeSheetSideInset = isDesktopWeb
+  // Episode sheet width: full-bleed on phones, centered panel on desktop
+  // web and wide iPad windows.
+  const episodeSheetSideInset = isWideLayout
     ? Math.max((contentWidth - 640) / 2, 0)
     : 0;
   const episodeSheetWidth = contentWidth - episodeSheetSideInset * 2;
@@ -1960,7 +1963,7 @@ export default function ShowScreen() {
                 justifyContent: "space-between",
                 paddingHorizontal: 16,
               },
-              isDesktopWeb && { maxWidth: WEB_SHOW_DETAIL_MAX_WIDTH },
+              isWideLayout && { maxWidth: WEB_SHOW_DETAIL_MAX_WIDTH },
             ]}
           >
           {SHOW_BACK_BUTTON ? (
@@ -2717,18 +2720,18 @@ export default function ShowScreen() {
             variant="sheet"
             style={[
               {
-                borderBottomLeftRadius: isDesktopWeb ? 28 : 0,
-                borderBottomRightRadius: isDesktopWeb ? 28 : 0,
+                borderBottomLeftRadius: isWideLayout ? 28 : 0,
+                borderBottomRightRadius: isWideLayout ? 28 : 0,
               },
               webSheetStyle,
-              isDesktopWeb && { marginBottom: 24 },
+              isWideLayout && { marginBottom: 24 },
             ]}
             contentStyle={{
               paddingTop: 16,
-              paddingBottom: isDesktopWeb ? 24 : insets.bottom + 24,
+              paddingBottom: isWideLayout ? 24 : insets.bottom + 24,
             }}
           >
-            {isDesktopWeb ? null : (
+            {isWideLayout ? null : (
               <View className="mb-4 items-center">
                 <View className="h-1 w-10 rounded-full bg-dark-border" />
               </View>
@@ -3054,7 +3057,7 @@ export default function ShowScreen() {
                     borderTopRightRadius: 20,
                     overflow: "hidden",
                   },
-                  isDesktopWeb && {
+                  isWideLayout && {
                     top: Math.max(insets.top, 12) + 30,
                     bottom: 32,
                     borderRadius: 20,
@@ -3068,8 +3071,8 @@ export default function ShowScreen() {
                   fallbackColor="rgba(13,15,20,0.94)"
                   style={{
                     flex: 1,
-                    borderBottomLeftRadius: isDesktopWeb ? 20 : 0,
-                    borderBottomRightRadius: isDesktopWeb ? 20 : 0,
+                    borderBottomLeftRadius: isWideLayout ? 20 : 0,
+                    borderBottomRightRadius: isWideLayout ? 20 : 0,
                   }}
                   contentStyle={{ flex: 1 }}
                 >
@@ -3100,7 +3103,9 @@ export default function ShowScreen() {
                   </View>
                 )}
 
-                {/* Drag grabber overlaid on image (touch affordance) */}
+                {/* Drag grabber overlaid on image (touch affordance — the
+                    sheet stays drag-dismissable on iPad, so only desktop
+                    web hides it) */}
                 <View
                   pointerEvents="none"
                   style={{

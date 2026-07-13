@@ -20,9 +20,16 @@
       "entitlements": {
         "aps-environment": "production"
       },
+      "requireFullScreen": false,
       "infoPlist": {
         "NSContactsUsageDescription": "Allow Plotlist to access your contacts so you can find friends already using the app.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
       },
       "bundleIdentifier": "com.emckanna.Plotlist"
     },
