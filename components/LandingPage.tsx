@@ -20,6 +20,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { CURATED_SHOWS } from "../lib/curatedShows";
+import { AppLogo } from "./AppLogo";
 
 // ─────────────────────────────────────────────────────────────────────────
 // The signed-out web front door. A cinematic, Apple-style product page built
@@ -126,22 +127,7 @@ function HeroPosterWall() {
 // ── Shared building blocks ───────────────────────────────────────────────
 
 function BrandMark({ size = 30 }: { size?: number }) {
-  return (
-    <View
-      style={[
-        styles.brandMark,
-        { width: size, height: size, borderRadius: size * 0.3 },
-      ]}
-    >
-      <Ionicons
-        name="film"
-        size={size * 0.56}
-        color="#0B0D12"
-        accessible={false}
-        aria-hidden={true}
-      />
-    </View>
-  );
+  return <AppLogo size={size} />;
 }
 
 function PrimaryCta({ label, large }: { label: string; large?: boolean }) {
@@ -957,11 +943,6 @@ const styles = StyleSheet.create({
     ...(typeof document !== "undefined"
       ? { backdropFilter: "blur(18px)" as unknown as undefined }
       : null),
-  },
-  brandMark: {
-    alignItems: "center",
-    backgroundColor: "#38BDF8",
-    justifyContent: "center",
   },
 
   // CTAs

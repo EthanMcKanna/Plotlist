@@ -9,6 +9,7 @@ import {
   WEB_SIDEBAR_WIDTH,
   type WebNavMode,
 } from "../lib/webLayout";
+import { AppLogo } from "./AppLogo";
 import { Avatar } from "./Avatar";
 
 type SidebarItem = {
@@ -158,15 +159,7 @@ export function WebSidebar({ mode }: { mode: WebNavMode }) {
         accessibilityLabel="Plotlist home"
         className={`mb-6 flex-row items-center ${compact ? "justify-center" : "gap-2.5 px-3"}`}
       >
-        <View style={styles.brandMark}>
-          <Ionicons
-            name="film"
-            size={17}
-            color="#0B0D12"
-            accessible={false}
-            aria-hidden={true}
-          />
-        </View>
+        <AppLogo size={30} />
         {compact ? null : (
           <Text className="text-[20px] font-black tracking-tight text-text-primary">
             Plotlist
@@ -238,14 +231,6 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingHorizontal: 12,
     paddingTop: 24,
-  },
-  brandMark: {
-    alignItems: "center",
-    backgroundColor: "#38BDF8",
-    borderRadius: 9,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
   },
   iconSlot: {
     alignItems: "center",
