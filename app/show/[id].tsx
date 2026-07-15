@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
 } from "react";
 import {
   ActivityIndicator,
@@ -84,8 +83,14 @@ import {
   ShowDetailSkeleton,
 } from "../../components/ShowDetailSkeleton";
 import { mapGenreIdsToNames } from "../../lib/plotlist/embeddingUtils";
-import { facetByKey } from "../../lib/plotlist/facets";
-import { getGenreExplorerGroup, withAlpha } from "../../lib/genreExplorer";
+import { facetByKey, type FacetDef } from "../../lib/plotlist/facets";
+import { getGenreExplorerGroup } from "../../lib/genreExplorer";
+import { FanPreviewCard } from "../../components/FanPreviewCard";
+import {
+  getCachedFacetPosters,
+  missingFacetPreviewKeys,
+  storeFacetPreviews,
+} from "../../lib/facetPreviewStore";
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import {
@@ -535,27 +540,40 @@ export default function ShowScreen() {
     api.embeddings.getShowFacets,
     !isShowPreview && showId ? { showId } : "skip",
   );
-  const facetChips = useMemo(() => {
+  const facetCards = useMemo(() => {
     if (!queriedShowFacets?.length) return [];
-    const chips: Array<{
-      key: string;
-      title: string;
-      icon: ComponentProps<typeof Ionicons>["name"];
-      accent: string;
-    }> = [];
+    const cards: Array<{ def: FacetDef; accent: string }> = [];
     for (const entry of queriedShowFacets) {
       const def = facetByKey(entry.key);
       if (!def) continue;
-      const group = getGenreExplorerGroup(def.group);
-      chips.push({
-        key: def.key,
-        title: def.title,
-        icon: group.icon,
-        accent: group.accent,
-      });
+      cards.push({ def, accent: getGenreExplorerGroup(def.group).accent });
     }
-    return chips;
+    return cards;
   }, [queriedShowFacets]);
+  const getFacetPreviews = useAction(api.embeddings.getFacetPreviews);
+  // Bumped whenever the shared preview cache gains entries so cards holding
+  // empty frames re-render with artwork.
+  const [facetPreviewEpoch, setFacetPreviewEpoch] = useState(0);
+  useEffect(() => {
+    const missing = missingFacetPreviewKeys(facetCards.map((card) => card.def));
+    if (missing.length === 0) return;
+    let cancelled = false;
+
+    getFacetPreviews({ facetKeys: missing })
+      .then((rows) => {
+        if (cancelled) return;
+        if (storeFacetPreviews(rows, missing)) {
+          setFacetPreviewEpoch((epoch) => epoch + 1);
+        }
+      })
+      .catch(() => {
+        // Cards degrade gracefully to gradient + title; retry on next mount.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [facetCards, getFacetPreviews]);
   const watchState = isShowPreview
     ? { _id: "watch_preview", showId, status: "watching", updatedAt: Date.now() }
     : queriedWatchState;
@@ -2400,52 +2418,39 @@ export default function ShowScreen() {
           )}
 
         {/* ─── Categories ─── */}
-        {facetChips.length > 0 && (
-            <View className="mt-8 px-6">
+        {facetCards.length > 0 && (
+            <View className="mt-8">
               <Text
-                className="mb-3 text-xs font-bold uppercase text-text-tertiary"
+                className="mb-4 px-6 text-xs font-bold uppercase text-text-tertiary"
                 style={{ letterSpacing: 1.5 }}
               >
                 Categories
               </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {facetChips.map((facet) => (
-                  <Pressable
-                    key={facet.key}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      guardedPush(`/facet/${facet.key}`);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Browse ${facet.title} shows`}
-                    className="active:opacity-75"
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      borderRadius: 999,
-                      borderWidth: 1,
-                      paddingHorizontal: 14,
-                      paddingVertical: 7,
-                      backgroundColor: withAlpha(facet.accent, 0.12),
-                      borderColor: withAlpha(facet.accent, 0.3),
-                    }}
-                  >
-                    <Ionicons
-                      name={facet.icon}
-                      size={12}
-                      color={facet.accent}
-                      accessible={false}
-                      accessibilityElementsHidden
-                      aria-hidden={true}
-                      importantForAccessibility="no"
+              <RailArrowsBox>
+                <FlashList
+                  data={facetCards}
+                  extraData={facetPreviewEpoch}
+                  renderItem={({ item }: { item: (typeof facetCards)[number] }) => (
+                    <FanPreviewCard
+                      title={item.def.title}
+                      accent={item.accent}
+                      posters={getCachedFacetPosters(item.def.key)}
+                      action="Browse"
+                      accessibilityLabel={`Browse ${item.def.title} shows`}
+                      style={{ marginRight: 12 }}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        guardedPush(`/facet/${item.def.key}`);
+                      }}
                     />
-                    <Text className="text-xs font-semibold text-text-secondary">
-                      {facet.title}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
+                  )}
+                  keyExtractor={(item: (typeof facetCards)[number]) => item.def.key}
+                  estimatedItemSize={160}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 4 }}
+                />
+              </RailArrowsBox>
             </View>
           )}
 
