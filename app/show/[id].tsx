@@ -323,6 +323,64 @@ function normalizeSeasonDetails(details: any) {
   };
 }
 
+// Mirrors the server-side credit normalization for cached extendedDetails
+// payloads that predate top-level cast/crew (raw TMDB credits only).
+function normalizeCastList(details: any) {
+  const raw = Array.isArray(details?.cast)
+    ? details.cast
+    : Array.isArray(details?.credits?.cast)
+      ? details.credits.cast
+      : [];
+  return raw
+    .filter((member: any) => member && member.id != null && member.name)
+    .slice(0, 20)
+    .map((member: any) => ({
+      id: member.id,
+      name: member.name,
+      character: member.character ?? "",
+      profilePath: member.profilePath ?? tmdbImageUrl(member.profile_path, "w185"),
+    }));
+}
+
+const NOTABLE_CREW_JOBS = new Set([
+  "Creator",
+  "Director",
+  "Writer",
+  "Executive Producer",
+  "Showrunner",
+  "Composer",
+  "Original Music Composer",
+]);
+
+function normalizeCrewList(details: any) {
+  const raw = Array.isArray(details?.crew)
+    ? details.crew
+    : Array.isArray(details?.credits?.crew)
+      ? details.credits.crew
+      : [];
+  const byPerson = new Map<number, any>();
+  for (const member of raw) {
+    if (!member || member.id == null || !member.name) continue;
+    const alreadyNormalized =
+      typeof member.job === "string" && member.profilePath !== undefined;
+    if (!alreadyNormalized && !NOTABLE_CREW_JOBS.has(member.job)) continue;
+    const existing = byPerson.get(member.id);
+    if (existing) {
+      if (member.job && !existing.job.includes(member.job)) {
+        existing.job = `${existing.job}, ${member.job}`;
+      }
+      continue;
+    }
+    byPerson.set(member.id, {
+      id: member.id,
+      name: member.name,
+      job: member.job ?? "",
+      profilePath: member.profilePath ?? tmdbImageUrl(member.profile_path, "w185"),
+    });
+  }
+  return Array.from(byPerson.values()).slice(0, 12);
+}
+
 function normalizeExtendedDetails(details: any) {
   if (!details) {
     return details;
@@ -341,6 +399,8 @@ function normalizeExtendedDetails(details: any) {
   return {
     ...details,
     backdropPath: tmdbImageUrl(details.backdrop_path, "w1280") ?? details.backdropPath,
+    cast: normalizeCastList(details),
+    crew: normalizeCrewList(details),
     contentRating: details.contentRating ?? details.content_rating,
     createdBy: details.createdBy ?? details.created_by ?? [],
     episodeRunTime:
@@ -2407,6 +2467,17 @@ export default function ShowScreen() {
                       name={item.name}
                       role={item.character}
                       profilePath={item.profilePath}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        guardedPush({
+                          pathname: "/person/[id]",
+                          params: {
+                            id: String(item.id),
+                            name: item.name,
+                            profilePath: item.profilePath ?? "",
+                          },
+                        });
+                      }}
                     />
                   )}
                   keyExtractor={(item: any) => String(item.id)}
@@ -2437,6 +2508,17 @@ export default function ShowScreen() {
                       name={item.name}
                       role={item.job}
                       profilePath={item.profilePath}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        guardedPush({
+                          pathname: "/person/[id]",
+                          params: {
+                            id: String(item.id),
+                            name: item.name,
+                            profilePath: item.profilePath ?? "",
+                          },
+                        });
+                      }}
                     />
                   )}
                   keyExtractor={(item: any) => String(item.id)}

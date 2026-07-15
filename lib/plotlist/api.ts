@@ -90,6 +90,9 @@ export const api = {
     getSeasonDetails: ref("action", "shows:getSeasonDetails"),
     getImdbRatings: ref("action", "shows:getImdbRatings"),
   },
+  people: {
+    getDetails: ref("action", "people:getDetails"),
+  },
   watchStates: {
     setStatus: ref("mutation", "watchStates:setStatus"),
     removeStatus: ref("mutation", "watchStates:removeStatus"),

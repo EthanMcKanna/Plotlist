@@ -1268,6 +1268,68 @@ function normalizeTmdbEpisode(episode: any) {
   };
 }
 
+const SHOW_CAST_LIMIT = 20;
+const SHOW_CREW_LIMIT = 12;
+// Header-worthy crew: the roles readers actually recognize on a show page.
+const NOTABLE_CREW_JOBS = new Set([
+  "Creator",
+  "Director",
+  "Writer",
+  "Executive Producer",
+  "Showrunner",
+  "Composer",
+  "Original Music Composer",
+]);
+
+// Top-billed cast for the show page rail, with click-through person ids and
+// ready-to-render headshot URLs. Idempotent: cached payloads that were
+// normalized before storage pass through unchanged.
+export function normalizeTmdbCast(payload: any) {
+  const raw = Array.isArray(payload?.cast)
+    ? payload.cast
+    : Array.isArray(payload?.credits?.cast)
+      ? payload.credits.cast
+      : [];
+  return raw
+    .filter((member: any) => member && member.id != null && member.name)
+    .slice(0, SHOW_CAST_LIMIT)
+    .map((member: any) => ({
+      id: member.id,
+      name: member.name,
+      character: member.character ?? "",
+      profilePath: member.profilePath ?? tmdbImageUrl(member.profile_path, "w185"),
+    }));
+}
+
+// Notable crew deduped by person, with their jobs merged ("Director, Writer").
+export function normalizeTmdbCrew(payload: any) {
+  const raw = Array.isArray(payload?.crew)
+    ? payload.crew
+    : Array.isArray(payload?.credits?.crew)
+      ? payload.credits.crew
+      : [];
+  const byPerson = new Map<number, any>();
+  for (const member of raw) {
+    if (!member || member.id == null || !member.name) continue;
+    const alreadyNormalized = typeof member.job === "string" && member.profilePath !== undefined;
+    if (!alreadyNormalized && !NOTABLE_CREW_JOBS.has(member.job)) continue;
+    const existing = byPerson.get(member.id);
+    if (existing) {
+      if (member.job && !existing.job.includes(member.job)) {
+        existing.job = `${existing.job}, ${member.job}`;
+      }
+      continue;
+    }
+    byPerson.set(member.id, {
+      id: member.id,
+      name: member.name,
+      job: member.job ?? "",
+      profilePath: member.profilePath ?? tmdbImageUrl(member.profile_path, "w185"),
+    });
+  }
+  return Array.from(byPerson.values()).slice(0, SHOW_CREW_LIMIT);
+}
+
 export function normalizeTmdbShowDetails(payload: any) {
   if (!payload) {
     return payload;
@@ -1280,6 +1342,8 @@ export function normalizeTmdbShowDetails(payload: any) {
   return {
     ...payload,
     backdropPath: tmdbImageUrl(payload.backdrop_path, "w1280") ?? payload.backdropPath,
+    cast: normalizeTmdbCast(payload),
+    crew: normalizeTmdbCrew(payload),
     episodeRunTime:
       payload.episodeRunTime ??
       (Array.isArray(payload.episode_run_time) ? payload.episode_run_time[0] : undefined),
@@ -1418,6 +1482,136 @@ async function fetchAndCacheShowDetails(
     await db.insert(tmdbDetailsCache).values({ id: createId("tmdbdetails"), externalSource: show.externalSource, externalId: show.externalId, payload, fetchedAt: now, expiresAt });
   }
   return payload;
+}
+
+// TMDB person payloads ride the same details-cache table under their own
+// source key so they never collide with show rows.
+const PERSON_CACHE_SOURCE = "tmdb-person";
+const PERSON_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function fetchPersonPayload(personId: number) {
+  const externalId = String(personId);
+  const cached = await db
+    .select()
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, PERSON_CACHE_SOURCE),
+        eq(tmdbDetailsCache.externalId, externalId),
+      ),
+    )
+    .limit(1);
+  if (cached[0] && cached[0].expiresAt > Date.now()) {
+    return cached[0].payload;
+  }
+  let payload: unknown;
+  try {
+    payload = await tmdb(`/person/${personId}`, { append_to_response: "tv_credits" });
+  } catch (error) {
+    // A stale filmography beats an error screen.
+    if (cached[0]) return cached[0].payload;
+    throw error;
+  }
+  const now = Date.now();
+  const expiresAt = now + PERSON_CACHE_TTL_MS;
+  if (cached[0]) {
+    await db
+      .update(tmdbDetailsCache)
+      .set({ payload, fetchedAt: now, expiresAt })
+      .where(eq(tmdbDetailsCache.id, cached[0].id));
+  } else {
+    await db.insert(tmdbDetailsCache).values({
+      id: createId("tmdbdetails"),
+      externalSource: PERSON_CACHE_SOURCE,
+      externalId,
+      payload,
+      fetchedAt: now,
+      expiresAt,
+    });
+  }
+  return payload;
+}
+
+type PersonCreditAccumulator = {
+  externalId: string;
+  title: string;
+  posterPath: string | null;
+  firstAirDate: string | null;
+  voteAverage: number | null;
+  popularity: number;
+  episodeCount: number;
+  roles: string[];
+};
+
+// Collapse TMDB tv credits (one row per role) into one entry per show, then
+// resolve each against the local catalog so the client can navigate directly.
+export function mergeTvCredits(rawCredits: unknown): PersonCreditAccumulator[] {
+  const credits = Array.isArray(rawCredits) ? rawCredits : [];
+  const byShow = new Map<string, PersonCreditAccumulator>();
+  for (const credit of credits) {
+    if (!credit || credit.id == null) continue;
+    const externalId = String(credit.id);
+    const role =
+      typeof credit.character === "string" && credit.character.length > 0
+        ? credit.character
+        : typeof credit.job === "string" && credit.job.length > 0
+          ? credit.job
+          : null;
+    const existing = byShow.get(externalId);
+    if (existing) {
+      existing.episodeCount += credit.episode_count ?? 0;
+      if (role && !existing.roles.includes(role)) {
+        existing.roles.push(role);
+      }
+      continue;
+    }
+    byShow.set(externalId, {
+      externalId,
+      title: credit.name ?? credit.original_name ?? "Untitled",
+      posterPath: tmdbImageUrl(credit.poster_path, "w342"),
+      firstAirDate: credit.first_air_date ?? null,
+      voteAverage: typeof credit.vote_average === "number" ? credit.vote_average : null,
+      popularity: typeof credit.popularity === "number" ? credit.popularity : 0,
+      episodeCount: credit.episode_count ?? 0,
+      roles: role ? [role] : [],
+    });
+  }
+  // Long-running roles first; popularity breaks ties among guest spots.
+  return Array.from(byShow.values()).sort(
+    (a, b) => b.episodeCount - a.episodeCount || b.popularity - a.popularity,
+  );
+}
+
+async function resolvePersonCredits(merged: PersonCreditAccumulator[]) {
+  const externalIds = merged.map((credit) => credit.externalId);
+  const localRows: (typeof shows.$inferSelect)[] = [];
+  for (const chunk of chunkForSqlParams(externalIds, 1)) {
+    if (chunk.length === 0) continue;
+    localRows.push(
+      ...(await db
+        .select()
+        .from(shows)
+        .where(and(eq(shows.externalSource, "tmdb"), inArray(shows.externalId, chunk)))),
+    );
+  }
+  const localByExternalId = new Map(localRows.map((row) => [row.externalId, row]));
+  return merged.map((credit) => {
+    const local = localByExternalId.get(credit.externalId);
+    return {
+      showId: local?.id ?? null,
+      externalId: credit.externalId,
+      title: local?.title ?? credit.title,
+      posterUrl: local?.posterUrl ?? credit.posterPath,
+      year:
+        local?.year ??
+        (typeof credit.firstAirDate === "string" && credit.firstAirDate.length >= 4
+          ? Number(credit.firstAirDate.slice(0, 4))
+          : null),
+      voteAverage: local?.tmdbVoteAverage ?? credit.voteAverage,
+      episodeCount: credit.episodeCount,
+      roles: credit.roles,
+    };
+  });
 }
 
 // Details payload for status changes: fresh cache wins, then a live fetch,
@@ -5176,6 +5370,27 @@ export const actionHandlers: Record<string, RpcHandler> = {
       return null;
     }
     return await fetchAndCacheShowDetails(show, cached[0]);
+  },
+  "people:getDetails": async ({ args }) => {
+    const parsed = z.object({ personId: z.number().int().positive() }).parse(args ?? {});
+    const payload = (await fetchPersonPayload(parsed.personId)) as any;
+    if (!payload?.id) return null;
+    const [castCredits, crewCredits] = await Promise.all([
+      resolvePersonCredits(mergeTvCredits(payload.tv_credits?.cast)),
+      resolvePersonCredits(mergeTvCredits(payload.tv_credits?.crew)),
+    ]);
+    return {
+      id: payload.id,
+      name: payload.name ?? "",
+      profilePath: tmdbImageUrl(payload.profile_path, "w342"),
+      biography: typeof payload.biography === "string" ? payload.biography : "",
+      birthday: payload.birthday ?? null,
+      deathday: payload.deathday ?? null,
+      placeOfBirth: payload.place_of_birth ?? null,
+      knownForDepartment: payload.known_for_department ?? null,
+      castCredits,
+      crewCredits,
+    };
   },
   "shows:getSeasonDetails": async ({ args }) => {
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});
