@@ -19,7 +19,7 @@ const MODERATABLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"
  * key here and calling moderateText/moderateImage from its handler — nothing
  * else.
  */
-export type ModerationSurface = "profile" | "avatar" | "comment" | "review" | "list";
+export type ModerationSurface = "profile" | "avatar" | "comment" | "review" | "list" | "log";
 
 type SurfaceConfig = {
   /**
@@ -55,6 +55,10 @@ const SURFACES: Record<ModerationSurface, SurfaceConfig> = {
   list: {
     ignoredCategories: SHOW_TALK_IGNORED,
     rejectionMessage: "That list text may violate Plotlist's community guidelines. Please revise it and try again.",
+  },
+  log: {
+    ignoredCategories: SHOW_TALK_IGNORED,
+    rejectionMessage: "That note may violate Plotlist's community guidelines. Please revise it and try again.",
   },
 };
 

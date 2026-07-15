@@ -29,7 +29,7 @@ type FriendActivityBase = FriendActivityCore & {
 
 export type FriendWatchedEntry = FriendActivityBase & {
   kind: "watched";
-  verb: "started" | "watched" | "finished";
+  verb: "started" | "watched" | "finished" | "rewatched";
   episodeCount: number;
   /** "S2 E4" for a single episode, "3 episodes" for a run, null when unknown. */
   episodeLabel: string | null;
@@ -86,6 +86,7 @@ export type RawFriendFeedItem = {
     id?: string;
     seasonNumber?: number | null;
     episodeNumber?: number | null;
+    isRewatch?: boolean | null;
   } | null;
   followedUser?: FriendActivityActor | null;
   list?: {
@@ -110,6 +111,7 @@ export function getFriendActivityActorName(actor: FriendActivityActor) {
 export function getFriendWatchedPhrase(entry: FriendWatchedEntry) {
   if (entry.verb === "finished") return "finished";
   if (entry.verb === "started") return "started";
+  if (entry.verb === "rewatched") return "rewatched";
   return "watched";
 }
 
@@ -213,10 +215,15 @@ export function buildFriendActivity(
 
     if (row.type === "log") {
       const groupKey = `watched:${actor._id}:${show._id}`;
-      const code = episodeCode(row.log?.seasonNumber, row.log?.episodeNumber);
+      // Season-only logs read "Season 2"; show-scope logs have no label and
+      // fall back to the plain "<name> rewatched <show>" headline.
+      const code =
+        episodeCode(row.log?.seasonNumber, row.log?.episodeNumber) ??
+        (typeof row.log?.seasonNumber === "number" ? `Season ${row.log.seasonNumber}` : null);
       const logId = row.log?._id ?? row.log?.id ?? null;
       const isPremiere =
         row.log?.seasonNumber === 1 && row.log?.episodeNumber === 1;
+      const isRewatch = Boolean(row.log?.isRewatch);
       const existing = watchedByGroup.get(groupKey);
       if (existing) {
         existing.episodeCount += 1;
@@ -226,7 +233,7 @@ export function buildFriendActivity(
           existing.avatarUrl = existing.avatarUrl ?? avatarUrl;
           existing.logId = logId ?? existing.logId;
         }
-        if (isPremiere) {
+        if (isPremiere && existing.verb !== "rewatched") {
           existing.verb = "started";
         }
       } else {
@@ -237,7 +244,7 @@ export function buildFriendActivity(
           actor,
           avatarUrl,
           show,
-          verb: isPremiere ? "started" : "watched",
+          verb: isRewatch ? "rewatched" : isPremiere ? "started" : "watched",
           episodeCount: 1,
           episodeLabel: code,
           logId,

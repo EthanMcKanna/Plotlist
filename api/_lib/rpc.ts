@@ -561,6 +561,7 @@ async function backfillReleasedEpisodesForCompletedShow(
         seasonNumber: episode.seasonNumber,
         episodeNumber: episode.episodeNumber,
         episodeTitle: titleFor(episode),
+        createdAt: now,
       })),
     );
   }
@@ -670,11 +671,27 @@ async function createEpisodeWatchLog(args: {
     seasonNumber: args.seasonNumber,
     episodeNumber: args.episodeNumber,
     episodeTitle: args.episodeTitle ?? null,
+    createdAt: args.watchedAt,
   });
   if (args.fanOutToFeeds) {
     await addFeedForFollowers(args.userId, "log", logId, args.showId, args.watchedAt);
   }
   return logId;
+}
+
+// Only plain auto-created logs are subject to the diary contract's
+// auto-delete. Anything the user invested in — a note, a per-viewing rating
+// or reaction, a rewatch entry, a backdated/approximate date — is their
+// history and must survive progress changes (unmark, re-mark, season
+// unmark). This is what lets one episode keep three logged viewings.
+function isAutoManagedWatchLogCondition() {
+  return [
+    isNull(watchLogs.note),
+    isNull(watchLogs.rating),
+    isNull(watchLogs.reaction),
+    eq(watchLogs.isRewatch, false),
+    eq(watchLogs.datePrecision, "exact"),
+  ];
 }
 
 async function deletePlainEpisodeWatchLogs(args: {
@@ -687,7 +704,7 @@ async function deletePlainEpisodeWatchLogs(args: {
     eq(watchLogs.userId, args.userId),
     eq(watchLogs.showId, args.showId),
     eq(watchLogs.seasonNumber, args.seasonNumber),
-    isNull(watchLogs.note),
+    ...isAutoManagedWatchLogCondition(),
   ];
   if (typeof args.episodeNumber === "number") {
     conditions.push(eq(watchLogs.episodeNumber, args.episodeNumber));
@@ -703,6 +720,86 @@ async function deletePlainEpisodeWatchLogs(args: {
       .delete(feedItems)
       .where(and(eq(feedItems.type, "log"), inArray(feedItems.targetId, chunk)));
   }
+}
+
+const WATCH_LOG_DATE_PRECISIONS = ["exact", "day", "month", "year", "unknown"] as const;
+type WatchLogDatePrecision = (typeof WATCH_LOG_DATE_PRECISIONS)[number];
+
+const WATCHED_ON_SHAPES: Record<string, WatchLogDatePrecision> = {
+  day: "day",
+  month: "month",
+  year: "year",
+};
+
+// Resolve a client-supplied viewing date into the stored triple:
+//   watchedAt (ms sort key) + watchedOn (calendar text) + datePrecision.
+// - exact: full timestamp, defaults to now, clamped out of the future
+// - day/month/year: watchedOn like "2019-07-04" / "2019-07" / "2019";
+//   watchedAt becomes UTC noon at the start of that period so ordering is
+//   stable and no timezone can shift the displayed calendar date
+// - unknown: the user can't place the viewing; watchedAt is just "now" so
+//   the entry sorts where it was logged
+function resolveWatchLogDate(
+  input: { watchedAt?: number; watchedOn?: string | null; datePrecision?: WatchLogDatePrecision },
+  now: number,
+): { watchedAt: number; watchedOn: string | null; datePrecision: WatchLogDatePrecision } {
+  const watchedOn = input.watchedOn?.trim() || null;
+
+  let precision = input.datePrecision;
+  if (!precision) {
+    if (!watchedOn) {
+      precision = "exact";
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(watchedOn)) {
+      precision = "day";
+    } else if (/^\d{4}-\d{2}$/.test(watchedOn)) {
+      precision = "month";
+    } else if (/^\d{4}$/.test(watchedOn)) {
+      precision = "year";
+    } else {
+      throw new ApiError(400, "invalid_watched_on", "Use YYYY-MM-DD, YYYY-MM, or YYYY");
+    }
+  }
+
+  if (precision === "exact" || precision === "unknown") {
+    if (watchedOn) {
+      throw new ApiError(400, "invalid_watched_on", `watchedOn doesn't apply to ${precision} dates`);
+    }
+    const watchedAt =
+      precision === "exact" && typeof input.watchedAt === "number"
+        ? Math.min(input.watchedAt, now)
+        : now;
+    return { watchedAt, watchedOn: null, datePrecision: precision };
+  }
+
+  if (!watchedOn) {
+    throw new ApiError(400, "invalid_watched_on", `A ${precision} date needs watchedOn`);
+  }
+  const match = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(watchedOn);
+  if (!match) {
+    throw new ApiError(400, "invalid_watched_on", "Use YYYY-MM-DD, YYYY-MM, or YYYY");
+  }
+  const year = Number(match[1]);
+  const month = match[2] ? Number(match[2]) : null;
+  const day = match[3] ? Number(match[3]) : null;
+  const shape = day != null ? "day" : month != null ? "month" : "year";
+  if (WATCHED_ON_SHAPES[shape] !== precision) {
+    throw new ApiError(400, "invalid_watched_on", `watchedOn "${watchedOn}" doesn't match ${precision} precision`);
+  }
+  if (year < 1900 || month === 0 || (month != null && month > 12)) {
+    throw new ApiError(400, "invalid_watched_on", "That date is out of range");
+  }
+  const watchedAt = Date.UTC(year, (month ?? 1) - 1, day ?? 1, 12, 0, 0, 0);
+  if (day != null) {
+    // Reject impossible days (e.g. Feb 30) — Date.UTC would roll them over.
+    const check = new Date(watchedAt);
+    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month! - 1 || check.getUTCDate() !== day) {
+      throw new ApiError(400, "invalid_watched_on", "That day doesn't exist");
+    }
+  }
+  if (watchedAt > now) {
+    throw new ApiError(400, "invalid_watched_on", "A viewing can't be in the future");
+  }
+  return { watchedAt, watchedOn, datePrecision: precision };
 }
 
 function getProfileVisibility(user: typeof users.$inferSelect) {
@@ -2359,6 +2456,10 @@ async function buildExportData(userId: string) {
       db.select().from(comments).where(eq(comments.authorId, userId)),
       db.select().from(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
     ]);
+  const [progressRows, watchStateRows] = await Promise.all([
+    db.select().from(episodeProgress).where(eq(episodeProgress.userId, userId)),
+    db.select().from(watchStates).where(eq(watchStates.userId, userId)),
+  ]);
 
   const listIds = listRows.map((item) => item.id);
   const listItemRows =
@@ -2370,7 +2471,11 @@ async function buildExportData(userId: string) {
     user: userRows[0] ? toClientUser(userRows[0]) : null,
     follows: followRows,
     reviews: reviewRows,
+    // Raw watch_logs rows: every logged viewing with its own watchedAt /
+    // watchedOn / datePrecision / rating / reaction / isRewatch, unmodified.
     logs: logRows,
+    episodeProgress: progressRows,
+    watchStates: watchStateRows,
     lists: listRows,
     listItems: listItemRows,
     likes: likeRows,
@@ -3466,6 +3571,21 @@ export const queryHandlers: Record<string, RpcHandler> = {
       throw new ApiError(403, "forbidden", "You can only view your own log activity");
     }
     return await buildWatchLogActivity(user.id, args);
+  },
+  // Every logged viewing of one show for the signed-in user, newest first.
+  // The show screen derives watch-count badges and per-episode viewing
+  // history from this; capped generously since even heavy rewatchers stay
+  // in the hundreds per show.
+  "watchLogs:listForShow": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ showId: z.string() }).parse(args ?? {});
+    const rows = await db
+      .select()
+      .from(watchLogs)
+      .where(and(eq(watchLogs.userId, user.id), eq(watchLogs.showId, parsed.showId)))
+      .orderBy(desc(watchLogs.watchedAt))
+      .limit(1000);
+    return rows.map(toDoc);
   },
   "watchStats:getInsights": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -4719,6 +4839,194 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const logId = z.object({ logId: z.string() }).parse(args ?? {}).logId;
     await db.delete(watchLogs).where(and(eq(watchLogs.id, logId), eq(watchLogs.userId, user.id)));
     await db.delete(feedItems).where(and(eq(feedItems.type, "log"), eq(feedItems.targetId, logId)));
+    return { success: true };
+  },
+  // The deliberate "log a viewing" action, at any scope: episode (season +
+  // episode set), whole season (season only), or whole show (neither).
+  // Append-only — logging an episode a third time is a third row — with an
+  // independent date (exact, backdated day/month/year, or unknown) and
+  // optional per-viewing rating/reaction/note.
+  "watchLogs:logWatch": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        showId: z.string(),
+        seasonNumber: z.number().int().min(0).optional(),
+        episodeNumber: z.number().int().min(0).optional(),
+        episodeTitle: z.string().optional(),
+        watchedAt: z.number().optional(),
+        watchedOn: z.string().optional(),
+        datePrecision: z.enum(WATCH_LOG_DATE_PRECISIONS).optional(),
+        note: z.string().max(2000).optional(),
+        rating: z.number().min(0.5).max(5).optional(),
+        reaction: z.string().min(1).max(16).optional(),
+        isRewatch: z.boolean().optional(),
+        // Whether the log should also mark unwatched episodes as watched
+        // (default yes — logging a viewing implies you've seen it).
+        markWatched: z.boolean().optional(),
+        // Season scope only: the episodes to mark watched alongside the log.
+        markEpisodes: z
+          .array(z.object({ episodeNumber: z.number().int().min(0), title: z.string().optional() }))
+          .max(500)
+          .optional(),
+      })
+      .parse(args ?? {});
+    if (parsed.episodeNumber != null && parsed.seasonNumber == null) {
+      throw new ApiError(400, "invalid_scope", "An episode log needs its season number");
+    }
+    const note = parsed.note?.trim() || null;
+    await moderateText("log", [note ?? undefined]);
+    const now = Date.now();
+    const resolved = resolveWatchLogDate(parsed, now);
+    const isEpisodeScope = parsed.seasonNumber != null && parsed.episodeNumber != null;
+
+    // For episode scope the progress table decides rewatch-ness (already
+    // watched = rewatch) unless the client overrides it.
+    let alreadyWatched = false;
+    if (isEpisodeScope) {
+      const existing = await db
+        .select({ id: episodeProgress.id })
+        .from(episodeProgress)
+        .where(
+          and(
+            eq(episodeProgress.userId, user.id),
+            eq(episodeProgress.showId, parsed.showId),
+            eq(episodeProgress.seasonNumber, parsed.seasonNumber!),
+            eq(episodeProgress.episodeNumber, parsed.episodeNumber!),
+          ),
+        )
+        .limit(1);
+      alreadyWatched = Boolean(existing[0]);
+    }
+    const isRewatch = parsed.isRewatch ?? alreadyWatched;
+
+    // Logging implies watched: fill progress idempotently (never duplicate,
+    // never create the plain auto-log — this log IS the diary entry).
+    if (parsed.markWatched !== false) {
+      if (isEpisodeScope && !alreadyWatched) {
+        await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber!, parsed.episodeNumber!);
+        const created = await insertEpisodeProgressOnce({
+          userId: user.id,
+          showId: parsed.showId,
+          seasonNumber: parsed.seasonNumber!,
+          episodeNumber: parsed.episodeNumber!,
+          watchedAt: resolved.watchedAt,
+        });
+        if (created) {
+          await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+        }
+      } else if (!isEpisodeScope && parsed.seasonNumber != null && parsed.markEpisodes?.length) {
+        const seasonSummaries = await readShowSeasonSummaries(parsed.showId);
+        const markable = seasonSummaries
+          ? parsed.markEpisodes.filter((episode) =>
+              isEpisodeVerified(
+                { seasonNumber: parsed.seasonNumber!, episodeNumber: episode.episodeNumber },
+                seasonSummaries,
+              ),
+            )
+          : parsed.markEpisodes;
+        let createdAny = false;
+        for (const episode of markable) {
+          const created = await insertEpisodeProgressOnce({
+            userId: user.id,
+            showId: parsed.showId,
+            seasonNumber: parsed.seasonNumber!,
+            episodeNumber: episode.episodeNumber,
+            watchedAt: resolved.watchedAt,
+          });
+          createdAny = createdAny || created;
+        }
+        if (createdAny) {
+          await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+        }
+      }
+    }
+
+    const logId = createId("log");
+    await db.insert(watchLogs).values({
+      id: logId,
+      userId: user.id,
+      showId: parsed.showId,
+      watchedAt: resolved.watchedAt,
+      note,
+      seasonNumber: parsed.seasonNumber ?? null,
+      episodeNumber: parsed.episodeNumber ?? null,
+      episodeTitle: parsed.episodeTitle ?? null,
+      datePrecision: resolved.datePrecision,
+      watchedOn: resolved.watchedOn,
+      createdAt: now,
+      rating: parsed.rating ?? null,
+      reaction: parsed.reaction?.trim() || null,
+      isRewatch,
+    });
+    // One feed item per logged viewing, stamped "now" so a backdated entry
+    // surfaces to followers when it was logged, not buried years deep.
+    await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
+    return logId;
+  },
+  // Every field of a logged viewing is editable independently — including
+  // its date — without touching any other viewing of the same episode.
+  "watchLogs:updateLog": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        logId: z.string(),
+        watchedAt: z.number().optional(),
+        watchedOn: z.string().nullable().optional(),
+        datePrecision: z.enum(WATCH_LOG_DATE_PRECISIONS).optional(),
+        note: z.string().max(2000).nullable().optional(),
+        rating: z.number().min(0.5).max(5).nullable().optional(),
+        reaction: z.string().max(16).nullable().optional(),
+        isRewatch: z.boolean().optional(),
+      })
+      .parse(args ?? {});
+    const rows = await db
+      .select()
+      .from(watchLogs)
+      .where(and(eq(watchLogs.id, parsed.logId), eq(watchLogs.userId, user.id)))
+      .limit(1);
+    const log = rows[0];
+    if (!log) {
+      throw new ApiError(404, "log_not_found", "That diary entry no longer exists");
+    }
+    const note = parsed.note === undefined ? undefined : parsed.note?.trim() || null;
+    if (note) {
+      await moderateText("log", [note]);
+    }
+
+    // Any date field present re-resolves the full date triple, so precision,
+    // calendar period, and sort key can never drift apart.
+    const hasDateChange =
+      parsed.datePrecision !== undefined ||
+      parsed.watchedOn !== undefined ||
+      parsed.watchedAt !== undefined;
+    const resolved = hasDateChange
+      ? resolveWatchLogDate(
+          {
+            watchedAt: parsed.watchedAt,
+            watchedOn: parsed.watchedOn ?? undefined,
+            datePrecision: parsed.datePrecision,
+          },
+          Date.now(),
+        )
+      : null;
+
+    await db
+      .update(watchLogs)
+      .set({
+        ...(resolved
+          ? {
+              watchedAt: resolved.watchedAt,
+              watchedOn: resolved.watchedOn,
+              datePrecision: resolved.datePrecision,
+            }
+          : {}),
+        ...(note !== undefined ? { note } : {}),
+        ...(parsed.rating !== undefined ? { rating: parsed.rating } : {}),
+        ...(parsed.reaction !== undefined ? { reaction: parsed.reaction?.trim() || null } : {}),
+        ...(parsed.isRewatch !== undefined ? { isRewatch: parsed.isRewatch } : {}),
+      })
+      .where(eq(watchLogs.id, log.id));
     return { success: true };
   },
   "reviews:create": async ({ args, req }) => {

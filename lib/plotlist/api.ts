@@ -103,8 +103,11 @@ export const api = {
     listPublicWatchlistDetailed: ref("query", "watchStates:listPublicWatchlistDetailed"),
   },
   watchLogs: {
+    logWatch: ref("mutation", "watchLogs:logWatch"),
+    updateLog: ref("mutation", "watchLogs:updateLog"),
     deleteLog: ref("mutation", "watchLogs:deleteLog"),
     listActivityForUser: ref("query", "watchLogs:listActivityForUser"),
+    listForShow: ref("query", "watchLogs:listForShow"),
   },
   watchStats: {
     getInsights: ref("query", "watchStats:getInsights"),

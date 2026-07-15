@@ -1,6 +1,12 @@
 import { format } from "date-fns";
 
 import type { Doc, Id } from "./plotlist/types";
+import {
+  getLogDatePrecision,
+  getLogDiaryTimestamp,
+  parseWatchedOnParts,
+  type WatchLogDatePrecision,
+} from "./watchLogDates";
 
 // The log tab is a diary: strictly reverse-chronological, grouped into
 // month + day sections, with same-day binge runs collapsed into one row.
@@ -79,6 +85,29 @@ export type DiaryPulse = {
 
 const DAY_MS = 86_400_000;
 
+// Re-anchor log items to their local calendar period (see
+// getLogDiaryTimestamp) so backdated and approximate viewings group under
+// the day/month the user picked in every timezone. Reviews keep their
+// server timestamps.
+export function withLocalDiaryTimestamps(items: DiaryItem[]): DiaryItem[] {
+  return items.map((item) =>
+    item.type === "log" ? { ...item, timestamp: getLogDiaryTimestamp(item.log) } : item,
+  );
+}
+
+export function getDiaryLogPrecision(item: DiaryItem): WatchLogDatePrecision | null {
+  return item.type === "log" ? getLogDatePrecision(item.log) : null;
+}
+
+// Right-edge label for a diary row: exact entries show nothing here (the
+// caller renders the clock time), approximate ones say how approximate.
+export function getDiaryApproxLabel(item: DiaryItem): string | null {
+  const precision = getDiaryLogPrecision(item);
+  if (!precision || precision === "exact" || precision === "day") return null;
+  if (precision === "unknown") return "date unknown";
+  return "approx";
+}
+
 export function getDiaryItemTitle(item: DiaryItem) {
   return item.show?.title ?? "Unknown show";
 }
@@ -98,9 +127,20 @@ export function getDiaryItemText(item: DiaryItem) {
 }
 
 export function getDiaryItemRating(item: DiaryItem) {
-  return item.type === "review" && typeof item.review.rating === "number"
-    ? item.review.rating
+  if (item.type === "review") {
+    return typeof item.review.rating === "number" ? item.review.rating : null;
+  }
+  return typeof item.log.rating === "number" ? item.log.rating : null;
+}
+
+export function getDiaryItemReaction(item: DiaryItem): string | null {
+  return item.type === "log" && typeof item.log.reaction === "string"
+    ? item.log.reaction
     : null;
+}
+
+export function isDiaryRewatch(item: DiaryItem) {
+  return item.type === "log" && Boolean(item.log.isRewatch);
 }
 
 function episodeCode(seasonNumber?: number | null, episodeNumber?: number | null) {
@@ -113,7 +153,16 @@ function episodeCode(seasonNumber?: number | null, episodeNumber?: number | null
 export function getDiaryEpisodeLabel(item: DiaryItem) {
   const source = item.type === "log" ? item.log : item.review;
   const code = episodeCode(source.seasonNumber, source.episodeNumber);
-  if (!code) return null;
+  if (!code) {
+    // Season- and show-scope viewings (bulk logs) have no episode code.
+    if (item.type === "log" && typeof source.seasonNumber === "number") {
+      return `Season ${source.seasonNumber}`;
+    }
+    if (item.type === "log" && isDiaryRewatch(item)) {
+      return "Whole show";
+    }
+    return null;
+  }
   return source.episodeTitle ? `${code} · ${source.episodeTitle}` : code;
 }
 
@@ -149,8 +198,16 @@ export function startOfLocalDay(value: number) {
   return date.getTime();
 }
 
+// Only plain same-day marks collapse into binge rows. A viewing the user
+// enriched (rating, reaction, rewatch, backdate, note) stays its own entry
+// so its chrome is visible and it can be edited independently.
 function isPlainEpisodeLog(item: DiaryItem): item is DiaryLogItem {
-  return item.type === "log" && !getDiaryItemText(item);
+  if (item.type !== "log" || getDiaryItemText(item)) return false;
+  if (getLogDatePrecision(item.log) !== "exact") return false;
+  if (isDiaryRewatch(item) || getDiaryItemRating(item) !== null || getDiaryItemReaction(item)) {
+    return false;
+  }
+  return true;
 }
 
 export function diaryItemMatchesFilter(item: DiaryItem, filter: DiaryFilter) {
@@ -253,9 +310,24 @@ export function buildDiaryFeed({
     .filter((item) => diaryItemMatchesFilter(item, filter));
   const units = buildFeedUnits(sorted);
 
+  // Year-precision entries get their own "2019"-style section instead of
+  // masquerading as January; month/unknown precision entries keep a "~" in
+  // the day rail since no specific day is known.
+  const unitPrecision = (unit: FeedUnit) =>
+    unit.kind === "entry" ? getDiaryLogPrecision(unit.item) : null;
+  const sectionKeyOf = (unit: FeedUnit) => {
+    if (unitPrecision(unit) === "year" && unit.kind === "entry" && unit.item.type === "log") {
+      const year =
+        parseWatchedOnParts(unit.item.log.watchedOn)?.year ??
+        new Date(unit.timestamp).getFullYear();
+      return `year:${year}`;
+    }
+    return monthKeyOf(unit.timestamp);
+  };
+
   const monthCounts = new Map<string, number>();
   for (const unit of units) {
-    const key = monthKeyOf(unit.timestamp);
+    const key = sectionKeyOf(unit);
     monthCounts.set(key, (monthCounts.get(key) ?? 0) + unitItemCount(unit));
   }
 
@@ -264,20 +336,33 @@ export function buildDiaryFeed({
   let currentDayKey = 0;
 
   units.forEach((unit, index) => {
-    const monthKey = monthKeyOf(unit.timestamp);
+    const precision = unitPrecision(unit);
+    const isYearOnly = precision === "year";
+    const yearOf =
+      unit.kind === "entry" && unit.item.type === "log"
+        ? parseWatchedOnParts(unit.item.log.watchedOn)?.year ??
+          new Date(unit.timestamp).getFullYear()
+        : new Date(unit.timestamp).getFullYear();
+    const monthKey = isYearOnly ? `year:${yearOf}` : monthKeyOf(unit.timestamp);
     if (monthKey !== currentMonthKey) {
       currentMonthKey = monthKey;
       currentDayKey = 0;
       rows.push({
         kind: "month",
         id: `month:${monthKey}`,
-        label: format(new Date(unit.timestamp), "MMMM yyyy"),
+        label: isYearOnly ? String(yearOf) : format(new Date(unit.timestamp), "MMMM yyyy"),
         entryCount: monthCounts.get(monthKey) ?? 0,
       });
     }
 
+    const hasSpecificDay = !precision || precision === "exact" || precision === "day";
     const dayKey = startOfLocalDay(unit.timestamp);
-    const dayLabel = dayKey !== currentDayKey ? makeDayLabel(unit.timestamp, now) : null;
+    const dayLabel =
+      dayKey !== currentDayKey
+        ? hasSpecificDay
+          ? makeDayLabel(unit.timestamp, now)
+          : { day: "~", weekday: "", isToday: false }
+        : null;
     currentDayKey = dayKey;
 
     const next = units[index + 1];
