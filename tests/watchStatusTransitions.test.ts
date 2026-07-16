@@ -1,82 +1,130 @@
 import { describe, expect, it } from "@jest/globals";
 
 import {
+  computeShowProgressFacts,
   listReleasedEpisodes,
+  normalizeWatchStatus,
   readLastAiredEpisode,
+  reconcileWatchStatus,
   resolveStatusAfterEpisodeChange,
-  type WatchStatus,
+  resolveWatchTier,
+  type LegacyWatchStatus,
+  type ShowProgressFacts,
 } from "../lib/watchStatusTransitions";
 
+function facts(overrides: Partial<ShowProgressFacts> = {}): ShowProgressFacts {
+  return {
+    hasWatchedAny: true,
+    hasReleasedAfterFrontier: false,
+    isEnded: false,
+    gapEpisodes: [],
+    releasedCount: 10,
+    ...overrides,
+  };
+}
+
+describe("resolveWatchTier", () => {
+  it("is watching while released episodes remain past the frontier", () => {
+    expect(resolveWatchTier(facts({ hasReleasedAfterFrontier: true }))).toBe("watching");
+  });
+
+  it("distinguishes a finished miniseries from a caught-up returning series", () => {
+    expect(resolveWatchTier(facts({ isEnded: true }))).toBe("finished");
+    expect(resolveWatchTier(facts({ isEnded: false }))).toBe("caught_up");
+  });
+
+  it("stays watching when metadata is too thin to judge", () => {
+    expect(resolveWatchTier(facts({ releasedCount: 0 }))).toBe("watching");
+  });
+
+  it("stays watching when nothing has been watched", () => {
+    expect(resolveWatchTier(facts({ hasWatchedAny: false }))).toBe("watching");
+  });
+
+  it("gaps behind the frontier don't hold a show out of caught_up", () => {
+    expect(
+      resolveWatchTier(
+        facts({ gapEpisodes: [{ seasonNumber: 1, episodeNumber: 3 }] }),
+      ),
+    ).toBe("caught_up");
+  });
+});
+
 describe("resolveStatusAfterEpisodeChange", () => {
-  const statuses: Array<WatchStatus | null> = [
+  const allStatuses: Array<LegacyWatchStatus | null> = [
     null,
     "watchlist",
     "watching",
-    "completed",
+    "caught_up",
+    "finished",
+    "paused",
     "dropped",
+    "completed",
   ];
 
-  it("marks that finish an ended show always complete it", () => {
-    for (const currentStatus of statuses) {
+  it("marks that reach the end of an ended show always finish it", () => {
+    for (const currentStatus of allStatuses) {
       expect(
         resolveStatusAfterEpisodeChange({
           direction: "marked",
           currentStatus,
-          completesShow: true,
+          facts: facts({ isEnded: true }),
         }),
-      ).toBe("completed");
+      ).toBe("finished");
     }
   });
 
-  it("marking an episode never downgrades an explicit completed", () => {
+  it("marks that reach the frontier of a returning show land on caught_up", () => {
     expect(
       resolveStatusAfterEpisodeChange({
         direction: "marked",
-        currentStatus: "completed",
-        completesShow: false,
+        currentStatus: "watching",
+        facts: facts(),
       }),
-    ).toBe("completed");
+    ).toBe("caught_up");
   });
 
-  it("marking an episode moves watchlist, dropped, and untracked shows into watching", () => {
-    for (const currentStatus of [null, "watchlist", "watching", "dropped"] as const) {
+  it("marking an episode resumes watchlist, paused, dropped, and untracked shows", () => {
+    for (const currentStatus of [null, "watchlist", "paused", "dropped"] as const) {
       expect(
         resolveStatusAfterEpisodeChange({
           direction: "marked",
           currentStatus,
-          completesShow: false,
+          facts: facts({ hasReleasedAfterFrontier: true }),
         }),
       ).toBe("watching");
     }
   });
 
-  it("unmarking on a completed show that is no longer finished demotes to watching", () => {
-    expect(
-      resolveStatusAfterEpisodeChange({
-        direction: "unmarked",
-        currentStatus: "completed",
-        completesShow: false,
-      }),
-    ).toBe("watching");
-  });
-
-  it("unmarking keeps completed when the show is still fully watched", () => {
-    expect(
-      resolveStatusAfterEpisodeChange({
-        direction: "unmarked",
-        currentStatus: "completed",
-        completesShow: true,
-      }),
-    ).toBe("completed");
-  });
-
-  it("unmarking never resurrects dropped or watchlist into watching", () => {
-    for (const currentStatus of ["watchlist", "watching", "dropped"] as const) {
+  it("unmarking demotes the watch tier when the show is no longer at the frontier", () => {
+    for (const currentStatus of ["caught_up", "finished", "completed"] as const) {
       expect(
         resolveStatusAfterEpisodeChange({
           direction: "unmarked",
           currentStatus,
-          completesShow: false,
+          facts: facts({ hasReleasedAfterFrontier: true }),
+        }),
+      ).toBe("watching");
+    }
+  });
+
+  it("unmarking keeps finished when the show is still fully watched", () => {
+    expect(
+      resolveStatusAfterEpisodeChange({
+        direction: "unmarked",
+        currentStatus: "finished",
+        facts: facts({ isEnded: true }),
+      }),
+    ).toBe("finished");
+  });
+
+  it("unmarking never resurrects watchlist, paused, or dropped", () => {
+    for (const currentStatus of ["watchlist", "paused", "dropped"] as const) {
+      expect(
+        resolveStatusAfterEpisodeChange({
+          direction: "unmarked",
+          currentStatus,
+          facts: facts({ hasReleasedAfterFrontier: true }),
         }),
       ).toBe(currentStatus);
     }
@@ -87,9 +135,134 @@ describe("resolveStatusAfterEpisodeChange", () => {
       resolveStatusAfterEpisodeChange({
         direction: "unmarked",
         currentStatus: null,
-        completesShow: false,
+        facts: facts(),
       }),
     ).toBeNull();
+  });
+});
+
+describe("reconcileWatchStatus", () => {
+  it("never auto-changes user-intent statuses", () => {
+    for (const currentStatus of ["watchlist", "paused", "dropped"] as const) {
+      expect(
+        reconcileWatchStatus({
+          currentStatus,
+          facts: facts({ isEnded: true }),
+        }),
+      ).toBe(currentStatus);
+    }
+  });
+
+  it("flips caught_up to finished when the show ends", () => {
+    expect(
+      reconcileWatchStatus({ currentStatus: "caught_up", facts: facts({ isEnded: true }) }),
+    ).toBe("finished");
+  });
+
+  it("flips caught_up back to watching when a new episode releases", () => {
+    expect(
+      reconcileWatchStatus({
+        currentStatus: "caught_up",
+        facts: facts({ hasReleasedAfterFrontier: true }),
+      }),
+    ).toBe("watching");
+  });
+
+  it("reopens finished to caught_up on a revival", () => {
+    expect(
+      reconcileWatchStatus({ currentStatus: "finished", facts: facts({ isEnded: false }) }),
+    ).toBe("caught_up");
+  });
+
+  it("promotes watching to the caught-up tier once the frontier is reached", () => {
+    expect(
+      reconcileWatchStatus({ currentStatus: "watching", facts: facts() }),
+    ).toBe("caught_up");
+  });
+
+  it("resolves legacy completed against real show state", () => {
+    expect(
+      reconcileWatchStatus({ currentStatus: "completed", facts: facts({ isEnded: true }) }),
+    ).toBe("finished");
+    expect(
+      reconcileWatchStatus({ currentStatus: "completed", facts: facts({ isEnded: false }) }),
+    ).toBe("caught_up");
+  });
+
+  it("legacy completed with no usable metadata reads as finished", () => {
+    expect(
+      reconcileWatchStatus({
+        currentStatus: "completed",
+        facts: facts({ releasedCount: 0 }),
+      }),
+    ).toBe("finished");
+  });
+
+  it("holds the stored tier when metadata is too thin to judge", () => {
+    expect(
+      reconcileWatchStatus({
+        currentStatus: "caught_up",
+        facts: facts({ releasedCount: 0 }),
+      }),
+    ).toBe("caught_up");
+  });
+});
+
+describe("computeShowProgressFacts", () => {
+  const seasons = [
+    { seasonNumber: 1, episodeCount: 3 },
+    { seasonNumber: 2, episodeCount: 2 },
+  ];
+
+  it("detects gaps behind the frontier and releases past it", () => {
+    const result = computeShowProgressFacts({
+      watchedEpisodes: [
+        { seasonNumber: 1, episodeNumber: 1 },
+        { seasonNumber: 1, episodeNumber: 3 },
+      ],
+      seasons,
+      isEnded: false,
+      lastAiredEpisode: { seasonNumber: 2, episodeNumber: 1 },
+    });
+    expect(result.hasWatchedAny).toBe(true);
+    expect(result.hasReleasedAfterFrontier).toBe(true); // S2E1 is out
+    expect(result.gapEpisodes).toEqual([{ seasonNumber: 1, episodeNumber: 2 }]);
+    expect(result.releasedCount).toBe(4);
+  });
+
+  it("reports caught up at the released frontier even mid-season", () => {
+    const result = computeShowProgressFacts({
+      watchedEpisodes: [
+        { seasonNumber: 1, episodeNumber: 1 },
+        { seasonNumber: 1, episodeNumber: 2 },
+      ],
+      seasons,
+      isEnded: false,
+      lastAiredEpisode: { seasonNumber: 1, episodeNumber: 2 },
+    });
+    expect(result.hasReleasedAfterFrontier).toBe(false);
+    expect(resolveWatchTier(result)).toBe("caught_up");
+  });
+
+  it("counts every known episode for ended shows", () => {
+    const result = computeShowProgressFacts({
+      watchedEpisodes: [{ seasonNumber: 2, episodeNumber: 2 }],
+      seasons,
+      isEnded: true,
+      lastAiredEpisode: null,
+    });
+    expect(result.releasedCount).toBe(5);
+    expect(result.hasReleasedAfterFrontier).toBe(false);
+    expect(result.gapEpisodes).toHaveLength(4);
+  });
+});
+
+describe("normalizeWatchStatus", () => {
+  it("maps legacy completed to finished and rejects junk", () => {
+    expect(normalizeWatchStatus("completed")).toBe("finished");
+    expect(normalizeWatchStatus("paused")).toBe("paused");
+    expect(normalizeWatchStatus("banana")).toBeNull();
+    expect(normalizeWatchStatus(null)).toBeNull();
   });
 });
 

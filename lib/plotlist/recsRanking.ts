@@ -38,11 +38,17 @@ export function decayWeight(weight: number, at: number, now: number) {
 export function signalWeightForWatchStatus(status: string): number {
   switch (status) {
     case "watching":
+    case "caught_up":
       return 1.2;
     case "completed":
+    case "finished":
       return 1.0;
     case "watchlist":
       return 0.35;
+    // Paused reads as lukewarm: they cared enough to start, not enough to
+    // keep going right now.
+    case "paused":
+      return 0.15;
     case "dropped":
       return -0.8;
     default:

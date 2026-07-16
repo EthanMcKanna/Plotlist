@@ -506,6 +506,10 @@ export function ContinueWatchingRail({
         accessibilityTitle="Continue watching"
         accent={ACCENT}
         icon="play"
+        actionLabel="All shows"
+        onAction={() => {
+          guardedPush("/continue");
+        }}
       />
       <HorizontalRail
         accessibilityLabel="Continue watching rail"
@@ -528,7 +532,7 @@ export function ContinueWatchingRail({
   );
 }
 
-function ContinueWatchingCard({
+export function ContinueWatchingCard({
   item,
   index,
   cardWidth,

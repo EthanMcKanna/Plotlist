@@ -17,7 +17,14 @@ import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 
 const GAP = 12;
 
-type StatusFilter = "all" | "watchlist" | "watching" | "completed" | "dropped";
+type StatusFilter =
+  | "all"
+  | "watchlist"
+  | "watching"
+  | "caught_up"
+  | "finished"
+  | "paused"
+  | "dropped";
 type SortOption = "date" | "title" | "year";
 type WatchlistItem = {
   state: {
@@ -32,10 +39,24 @@ type WatchlistItem = {
   };
 };
 
-const VALID_FILTERS = new Set<string>(["all", "watchlist", "watching", "completed", "dropped"]);
+const VALID_FILTERS = new Set<string>([
+  "all",
+  "watchlist",
+  "watching",
+  "caught_up",
+  "finished",
+  "paused",
+  "dropped",
+  // Old deep links may still carry the pre-split filter; show finished.
+  "completed",
+]);
+
+function normalizeFilter(raw: string): StatusFilter {
+  return raw === "completed" ? "finished" : (raw as StatusFilter);
+}
 
 function parseFilter(raw?: string): StatusFilter {
-  return raw && VALID_FILTERS.has(raw) ? (raw as StatusFilter) : "all";
+  return raw && VALID_FILTERS.has(raw) ? normalizeFilter(raw) : "all";
 }
 
 const sortOptions: { value: SortOption; label: string }[] = [
@@ -47,7 +68,10 @@ const sortOptions: { value: SortOption; label: string }[] = [
 const statusLabels: Record<string, string> = {
   watchlist: "Want to watch",
   watching: "Currently watching",
-  completed: "Completed",
+  caught_up: "Caught up",
+  finished: "Finished",
+  completed: "Finished",
+  paused: "Paused",
   dropped: "Dropped",
 };
 
@@ -100,7 +124,9 @@ export default function WatchlistScreen() {
       return {
         watchlist: counts?.watchlist ?? 0,
         watching: counts?.watching ?? 0,
-        completed: counts?.completed ?? 0,
+        caught_up: counts?.caughtUp ?? 0,
+        finished: counts?.finished ?? 0,
+        paused: counts?.paused ?? 0,
         dropped: counts?.dropped ?? 0,
         total: counts?.total ?? 0,
       };
@@ -108,14 +134,15 @@ export default function WatchlistScreen() {
 
     return watchStateItems.reduce(
       (acc, item: any) => {
-        const status = item.status as keyof typeof acc;
+        // Unmigrated rows can still say "completed" — count them as finished.
+        const status = (item.status === "completed" ? "finished" : item.status) as keyof typeof acc;
         if (status in acc) {
           acc[status] += 1;
         }
         acc.total += 1;
         return acc;
       },
-      { watchlist: 0, watching: 0, completed: 0, dropped: 0, total: 0 },
+      { watchlist: 0, watching: 0, caught_up: 0, finished: 0, paused: 0, dropped: 0, total: 0 },
     );
   }, [counts, watchStateItems]);
 
@@ -124,7 +151,9 @@ export default function WatchlistScreen() {
       { value: "all", label: "All", count: effectiveCounts.total },
       { value: "watchlist", label: "Watchlist", count: effectiveCounts.watchlist },
       { value: "watching", label: "Watching", count: effectiveCounts.watching },
-      { value: "completed", label: "Completed", count: effectiveCounts.completed },
+      { value: "caught_up", label: "Caught Up", count: effectiveCounts.caught_up },
+      { value: "finished", label: "Finished", count: effectiveCounts.finished },
+      { value: "paused", label: "Paused", count: effectiveCounts.paused },
       { value: "dropped", label: "Dropped", count: effectiveCounts.dropped },
     ],
     [effectiveCounts],
@@ -219,10 +248,20 @@ export default function WatchlistScreen() {
           title: "Not watching anything",
           description: "Start watching a show to see it here.",
         };
-      case "completed":
+      case "caught_up":
         return {
-          title: "No completed shows",
-          description: "Mark shows as completed when you finish them.",
+          title: "Nothing caught up",
+          description: "Shows you've watched everything released for land here.",
+        };
+      case "finished":
+        return {
+          title: "No finished shows",
+          description: "Shows you've watched to the end will appear here.",
+        };
+      case "paused":
+        return {
+          title: "Nothing on hold",
+          description: "Pause a show from its page to park it here for later.",
         };
       case "dropped":
         return {

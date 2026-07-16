@@ -730,7 +730,10 @@ export async function runEpisodeAirNotifications(now = new Date()) {
         .from(watchStates)
         .where(
           and(
-            eq(watchStates.status, "watching"),
+            // Caught-up users are exactly who "new episode tonight" is for;
+            // watching users may still be mid-backlog but were the historical
+            // audience, so they stay.
+            inArray(watchStates.status, ["watching", "caught_up"] as any),
             inArray(watchStates.showId, showChunk),
             inArray(watchStates.userId, userChunk),
           ),

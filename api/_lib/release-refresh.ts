@@ -114,6 +114,37 @@ async function setReleaseSyncState(
   });
 }
 
+function isEndedAirStatus(payload: unknown) {
+  const status = (payload as { status?: unknown } | null)?.status;
+  return typeof status === "string" && /^(ended|canceled|cancelled)$/i.test(status.trim());
+}
+
+// A show crossing the returning↔ended line moves every affected user's watch
+// tier in one statement: caught-up users on a show that just ended have, by
+// definition, watched everything, so they're finished; a revival reopens
+// finished shows back to caught_up (and the release-driven read paths flip
+// them on to "watching" once new episodes actually drop).
+async function reconcileWatchTiersForAirStatusChange(
+  showId: string,
+  wasEnded: boolean,
+  isEnded: boolean,
+) {
+  if (wasEnded === isEnded) {
+    return;
+  }
+  if (isEnded) {
+    await db
+      .update(watchStates)
+      .set({ status: "finished" })
+      .where(and(eq(watchStates.showId, showId), eq(watchStates.status, "caught_up")));
+    return;
+  }
+  await db
+    .update(watchStates)
+    .set({ status: "caught_up" })
+    .where(and(eq(watchStates.showId, showId), inArray(watchStates.status, ["finished", "completed"] as any)));
+}
+
 async function cacheReleaseDetails(show: ShowRow, details: any, now: number) {
   if (show.externalSource !== "tmdb") {
     return;
@@ -138,6 +169,16 @@ async function cacheReleaseDetails(show: ShowRow, details: any, now: number) {
       ? { ...existingPayload, ...details }
       : existingPayload;
   const expiresAt = now + RELEASE_DETAILS_CACHE_TTL_MS;
+
+  // Only a change observed against a previously cached payload counts — a
+  // first-ever cache write says nothing about a transition.
+  if (existing[0] && details && typeof details === "object") {
+    await reconcileWatchTiersForAirStatusChange(
+      show.id,
+      isEndedAirStatus(existingPayload),
+      isEndedAirStatus(nextPayload),
+    ).catch(() => {});
+  }
 
   if (existing[0]) {
     await db
@@ -272,7 +313,7 @@ export async function refreshTrackedReleaseCalendarForUser(
     db
       .select()
       .from(watchStates)
-      .where(and(eq(watchStates.userId, userId), inArray(watchStates.status, ["watchlist", "watching"])))
+      .where(and(eq(watchStates.userId, userId), inArray(watchStates.status, ["watchlist", "watching", "caught_up"])))
       .orderBy(desc(watchStates.updatedAt))
       .limit(Math.max(limit * 2, limit)),
     db.select().from(users).where(eq(users.id, userId)).limit(1),
@@ -298,7 +339,7 @@ export async function refreshStaleTrackedReleases(limit = 40) {
   const states = await db
     .select()
     .from(watchStates)
-    .where(inArray(watchStates.status, ["watchlist", "watching"]))
+    .where(inArray(watchStates.status, ["watchlist", "watching", "caught_up"]))
     .orderBy(desc(watchStates.updatedAt))
     .limit(limit * 4);
   const candidateIds = Array.from(new Set(states.map((state) => state.showId))).slice(0, limit * 2);

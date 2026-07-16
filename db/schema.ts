@@ -25,7 +25,9 @@ export const onboardingStepValues = [
 export const watchStatusValues = [
   "watchlist",
   "watching",
-  "completed",
+  "caught_up",
+  "finished",
+  "paused",
   "dropped",
 ] as const;
 

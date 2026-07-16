@@ -111,8 +111,10 @@ export const api = {
   },
   episodeProgress: {
     getUpNext: ref("query", "episodeProgress:getUpNext"),
+    getContinue: ref("query", "episodeProgress:getContinue"),
     getProgressForShow: ref("query", "episodeProgress:getProgressForShow"),
     markEpisodeWatched: ref("mutation", "episodeProgress:markEpisodeWatched"),
+    markWatchedUpTo: ref("mutation", "episodeProgress:markWatchedUpTo"),
     toggleEpisode: ref("mutation", "episodeProgress:toggleEpisode"),
     markSeasonWatched: ref("mutation", "episodeProgress:markSeasonWatched"),
     unmarkSeasonWatched: ref("mutation", "episodeProgress:unmarkSeasonWatched"),

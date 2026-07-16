@@ -140,7 +140,9 @@ export function normalizeReleaseCalendarView(
 }
 
 export function isTrackedReleaseStatus(status: string) {
-  return status === "watchlist" || status === "watching";
+  // Caught-up shows are the ones users are actively waiting on — their
+  // upcoming episodes belong on release surfaces just as much.
+  return status === "watchlist" || status === "watching" || status === "caught_up";
 }
 
 export function getTrackedShowIdsFromStates(states: ReleaseCalendarTrackedState[]) {

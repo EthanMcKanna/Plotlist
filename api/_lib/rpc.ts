@@ -98,7 +98,10 @@ import {
   type ReleaseCalendarShowSource,
 } from "../../lib/releaseCalendar";
 import { getReleaseAwareUpNextEpisode } from "../../lib/upNextReleaseMerge";
-import { rankContinueWatchingItems } from "../../lib/continueWatchingOrder";
+import {
+  isContinueWatchingFutureRelease,
+  rankContinueWatchingItems,
+} from "../../lib/continueWatchingOrder";
 import {
   fetchAndCacheSeason,
   findCachedSeasonEpisode,
@@ -140,9 +143,15 @@ import {
   normalizeEpisodeSeasonSummaries,
 } from "../../lib/episodeProgressState";
 import {
+  computeShowProgressFacts,
+  isWatchTierStatus,
   listReleasedEpisodes,
   readLastAiredEpisode,
+  reconcileWatchStatus,
   resolveStatusAfterEpisodeChange,
+  resolveWatchTier,
+  type LegacyWatchStatus,
+  type ShowProgressFacts,
   type WatchStatus,
 } from "../../lib/watchStatusTransitions";
 
@@ -305,6 +314,8 @@ type UpNextEnrichableEntry = {
   nextAirDate: number | null;
   nextReleaseDate: number | null;
   nextEpisodeReleasedToday: boolean;
+  /** When the next episode aired (or airs), even if already in the past. */
+  nextEpisodeAirDateTs?: number | null;
   sortTimestamp: number;
 };
 
@@ -373,6 +384,11 @@ async function enrichUpNextEntriesWithSeasonMetadata(
     entry.nextEpisodeStillUrl = episode.stillUrl ?? entry.nextEpisodeStillUrl;
     entry.nextEpisodeOverview = episode.overview;
     entry.nextEpisodeRuntime = episode.runtime;
+    if (episode.airDate && isDateOnlyString(episode.airDate)) {
+      // Recorded even for past dates: the Continue surface uses this to tell
+      // a just-dropped episode from an old backlog.
+      entry.nextEpisodeAirDateTs = getDateOnlyStartTimestamp(episode.airDate);
+    }
 
     // Air-date refinement only applies when release events had nothing to
     // say — they are the fresher source when present.
@@ -397,66 +413,56 @@ function isShowEnded(payload: unknown): boolean {
   return typeof status === "string" && /^(ended|canceled|cancelled)$/i.test(status.trim());
 }
 
-// After any episode-progress change, recompute the show's watch status via
-// the shared state machine in lib/watchStatusTransitions: marking episodes
-// moves watchlist/dropped/untracked shows into "watching" (or "completed"
-// once every episode of an ended show is watched) but never downgrades an
-// explicit "completed"; unmarking only demotes "completed" back to
-// "watching" and leaves every other explicit status alone.
-async function syncWatchStateAfterEpisodeChange(
+// Where the user actually stands on a show, derived from their progress rows
+// plus the cached TMDB details. Shows without usable metadata report
+// releasedCount 0 so the state machine knows not to judge.
+async function loadShowProgressFacts(
   userId: string,
   showId: string,
-  updatedAt: number,
-  direction: "marked" | "unmarked",
-) {
-  const existingRows = await db
-    .select()
-    .from(watchStates)
-    .where(and(eq(watchStates.userId, userId), eq(watchStates.showId, showId)))
-    .limit(1);
-  const currentStatus = (existingRows[0]?.status ?? null) as WatchStatus | null;
-
-  let completesShow = false;
-  try {
-    const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
-    const show = showRows[0];
-    if (show && show.externalSource === "tmdb") {
-      const [progressRows, detailRows] = await Promise.all([
-        db
-          .select()
-          .from(episodeProgress)
-          .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId))),
-        db
-          .select()
-          .from(tmdbDetailsCache)
-          .where(
-            and(
-              eq(tmdbDetailsCache.externalSource, show.externalSource),
-              eq(tmdbDetailsCache.externalId, show.externalId),
-            ),
-          )
-          .limit(1),
-      ]);
-      const payload = detailRows[0]?.payload;
-      const progressState = getEpisodeProgressState({
-        watchedEpisodes: progressRows,
-        seasons: readSeasonSummaries(payload),
-      });
-      completesShow = progressState.isCaughtUp && isShowEnded(payload);
-    }
-  } catch {
-    // Status refinement is best-effort; the progress write already succeeded.
+): Promise<ShowProgressFacts> {
+  const fallback: ShowProgressFacts = {
+    hasWatchedAny: false,
+    hasReleasedAfterFrontier: false,
+    isEnded: false,
+    gapEpisodes: [],
+    releasedCount: 0,
+  };
+  const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
+  const show = showRows[0];
+  if (!show || show.externalSource !== "tmdb") {
+    return fallback;
   }
-
-  const status = resolveStatusAfterEpisodeChange({
-    direction,
-    currentStatus,
-    completesShow,
+  const [progressRows, detailRows] = await Promise.all([
+    db
+      .select()
+      .from(episodeProgress)
+      .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId))),
+    db
+      .select()
+      .from(tmdbDetailsCache)
+      .where(
+        and(
+          eq(tmdbDetailsCache.externalSource, show.externalSource),
+          eq(tmdbDetailsCache.externalId, show.externalId),
+        ),
+      )
+      .limit(1),
+  ]);
+  const payload = detailRows[0]?.payload;
+  return computeShowProgressFacts({
+    watchedEpisodes: progressRows,
+    seasons: readSeasonSummaries(payload),
+    isEnded: isShowEnded(payload),
+    lastAiredEpisode: readLastAiredEpisode(payload),
   });
-  if (!status) {
-    return;
-  }
+}
 
+async function upsertWatchStatus(
+  userId: string,
+  showId: string,
+  status: WatchStatus,
+  updatedAt: number,
+) {
   await db
     .insert(watchStates)
     .values({
@@ -475,34 +481,92 @@ async function syncWatchStateAfterEpisodeChange(
     });
 }
 
-// Marking a show "completed" is a statement about the whole show, so the
-// server backfills every released-but-unwatched episode into progress and
-// the diary in the same request. This used to live in the client, where it
-// needed one season-details round trip per season and silently died on any
-// failure — the reason completed shows kept showing up with no watched
-// episodes, empty diaries, and missing watch stats.
-async function backfillReleasedEpisodesForCompletedShow(
+// After any episode-progress change, recompute the show's watch status via
+// the shared state machine in lib/watchStatusTransitions: marking episodes
+// resumes watchlist/paused/dropped/untracked shows into the watch tier, and
+// the tier itself (watching / caught_up / finished) always re-resolves from
+// the release frontier; unmarking re-resolves the tier but never resurrects
+// watchlist/paused/dropped and never creates a status where none existed.
+async function syncWatchStateAfterEpisodeChange(
+  userId: string,
+  showId: string,
+  updatedAt: number,
+  direction: "marked" | "unmarked",
+) {
+  const existingRows = await db
+    .select()
+    .from(watchStates)
+    .where(and(eq(watchStates.userId, userId), eq(watchStates.showId, showId)))
+    .limit(1);
+  const currentStatus = (existingRows[0]?.status ?? null) as LegacyWatchStatus | null;
+
+  let facts: ShowProgressFacts = {
+    hasWatchedAny: direction === "marked",
+    hasReleasedAfterFrontier: true,
+    isEnded: false,
+    gapEpisodes: [],
+    releasedCount: 0,
+  };
+  try {
+    facts = await loadShowProgressFacts(userId, showId);
+    if (direction === "marked" && !facts.hasWatchedAny) {
+      // The progress write can outrun replication of the read above; a mark
+      // always implies at least one watched episode.
+      facts = { ...facts, hasWatchedAny: true };
+    }
+  } catch {
+    // Status refinement is best-effort; the progress write already succeeded.
+  }
+
+  const status = resolveStatusAfterEpisodeChange({
+    direction,
+    currentStatus,
+    facts,
+  });
+  if (!status || status === currentStatus) {
+    return;
+  }
+
+  await upsertWatchStatus(userId, showId, status, updatedAt);
+}
+
+// Marking a show finished (or catching up "to here") is a statement about a
+// whole stretch of the show, so the server backfills every released-but-
+// unwatched episode into progress and the diary in the same request. This
+// used to live in the client, where it needed one season-details round trip
+// per season and silently died on any failure — the reason completed shows
+// kept showing up with no watched episodes, empty diaries, and missing watch
+// stats. `upTo` caps the backfill at an episode (inclusive) for the
+// "mark watched up to here" flow; omitted, it covers every released episode.
+async function backfillReleasedEpisodes(
   userId: string,
   showId: string,
   now: number,
+  upTo?: { seasonNumber: number; episodeNumber: number },
 ) {
   const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
   const show = showRows[0];
   if (!show || show.externalSource !== "tmdb") {
-    return;
+    return { marked: 0 };
   }
   const payload = await readShowDetailsPayloadForStatusChange(show);
   const seasons = readSeasonSummaries(payload);
   if (seasons.length === 0) {
-    return;
+    return { marked: 0 };
   }
   const released = listReleasedEpisodes({
     seasons,
     isEnded: isShowEnded(payload),
     lastAiredEpisode: readLastAiredEpisode(payload),
-  });
+  }).filter(
+    (episode) =>
+      !upTo ||
+      episode.seasonNumber < upTo.seasonNumber ||
+      (episode.seasonNumber === upTo.seasonNumber &&
+        episode.episodeNumber <= upTo.episodeNumber),
+  );
   if (released.length === 0) {
-    return;
+    return { marked: 0 };
   }
 
   const existing = await db
@@ -519,7 +583,7 @@ async function backfillReleasedEpisodesForCompletedShow(
     (episode) => !watchedKeys.has(`${episode.seasonNumber}:${episode.episodeNumber}`),
   );
   if (missing.length === 0) {
-    return;
+    return { marked: 0 };
   }
 
   // Episode titles come from whatever season cache is already warm; a cold
@@ -573,6 +637,7 @@ async function backfillReleasedEpisodesForCompletedShow(
       })),
     );
   }
+  return { marked: missing.length };
 }
 
 async function readShowSeasonSummaries(showId: string) {
@@ -728,10 +793,19 @@ function toShowPreview(show: typeof shows.$inferSelect) {
 }
 
 async function getWatchStateShowPreviews(userId: string, status: "watching" | "watchlist") {
+  // "Currently watching" spans the active tier: shows mid-backlog and shows
+  // the user is caught up on both count as being watched.
+  const statuses: string[] =
+    status === "watching" ? ["watching", "caught_up"] : [status];
   const stateRows = await db
     .select()
     .from(watchStates)
-    .where(and(eq(watchStates.userId, userId), eq(watchStates.status, status)))
+    .where(
+      and(
+        eq(watchStates.userId, userId),
+        inArray(watchStates.status, statuses as Array<typeof watchStates.$inferSelect.status>),
+      ),
+    )
     .orderBy(desc(watchStates.updatedAt))
     .limit(12);
 
@@ -768,16 +842,24 @@ async function getUserLibraryCounts(userId: string) {
       .where(eq(lists.ownerId, userId)),
   ]);
 
-  const watchCounts = new Map(
-    watchStateRows.map((row) => [row.status, Number(row.value ?? 0)] as const),
+  const watchCounts = new Map<string, number>(
+    watchStateRows.map((row) => [row.status as string, Number(row.value ?? 0)] as const),
   );
 
+  const caughtUp = watchCounts.get("caught_up") ?? 0;
+  // Unmigrated legacy rows count toward finished until a read reconciles them.
+  const finished = (watchCounts.get("finished") ?? 0) + (watchCounts.get("completed") ?? 0);
   return {
     reviews: Number(reviewCountRows[0]?.value ?? 0),
     lists: Number(listCountRows[0]?.value ?? 0),
     watchlist: watchCounts.get("watchlist") ?? 0,
     watching: watchCounts.get("watching") ?? 0,
-    completed: watchCounts.get("completed") ?? 0,
+    caughtUp,
+    finished,
+    paused: watchCounts.get("paused") ?? 0,
+    // Old clients read "completed"; the closest equivalent is everything the
+    // user has watched through (caught up or finished).
+    completed: caughtUp + finished,
     dropped: watchCounts.get("dropped") ?? 0,
     total: watchStateRows.reduce((sum, row) => sum + Number(row.value ?? 0), 0),
   };
@@ -998,6 +1080,9 @@ async function buildUserProfile(
       lists: libraryCounts.lists,
       shows: libraryCounts.total,
       completed: libraryCounts.completed,
+      caughtUp: libraryCounts.caughtUp,
+      finished: libraryCounts.finished,
+      paused: libraryCounts.paused,
       watching: permissions.currentlyWatching ? libraryCounts.watching : null,
       watchlist: permissions.watchlist ? libraryCounts.watchlist : null,
     },
@@ -2215,7 +2300,11 @@ async function buildHomeTasteProfile(userId: string | null | undefined) {
   };
 
   states.forEach((row) => {
-    addGenres(row.showId, row.status === "completed" ? 0.9 : 0.55, row.status === "watchlist");
+    // Unmigrated rows can still hold legacy "completed", hence the loose type.
+    const watchedThrough = ["completed", "finished", "caught_up"].includes(
+      row.status as string,
+    );
+    addGenres(row.showId, watchedThrough ? 0.9 : 0.55, row.status === "watchlist");
   });
   logs.forEach((row) => addGenres(row.showId, 0.7));
   reviewRows.forEach((row) => addGenres(row.showId, Math.max(0.25, row.rating / 5)));
@@ -2974,6 +3063,15 @@ async function getShowsByIds(showIds: string[]) {
   return showIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
+// Old clients filter on "completed"; that now spans the whole watched-through
+// tier plus any unmigrated legacy rows. A "finished" filter picks those
+// legacy rows up too, since they read as finished everywhere else.
+function watchStatusFilterValues(status: string) {
+  if (status === "completed") return ["completed", "finished", "caught_up"];
+  if (status === "finished") return ["finished", "completed"];
+  return [status];
+}
+
 async function detailedWatchStates(userId: string, args: any, publicOnly = false) {
   const status = typeof args?.status === "string" ? args.status : undefined;
   const rows = await db
@@ -2981,7 +3079,10 @@ async function detailedWatchStates(userId: string, args: any, publicOnly = false
     .from(watchStates)
     .where(
       status
-        ? and(eq(watchStates.userId, userId), eq(watchStates.status, status as any))
+        ? and(
+            eq(watchStates.userId, userId),
+            inArray(watchStates.status, watchStatusFilterValues(status) as any),
+          )
         : eq(watchStates.userId, userId),
     )
     .orderBy(desc(watchStates.updatedAt));
@@ -3395,6 +3496,351 @@ async function deleteReportedContent(targetType: string, targetId: string) {
   // deliberate, separate action.
 }
 
+// One continue-surface candidate: the same card payload getUpNext has always
+// returned, plus the reconciled watch status and gap facts the sectioned
+// Continue page groups by.
+type ContinueCandidate = {
+  showId: string;
+  show: ReturnType<typeof showToDoc>;
+  externalSource: string | null;
+  externalId: string | null;
+  status: WatchStatus;
+  totalWatched: number;
+  totalEpisodes: number;
+  progressPct: number;
+  nextSeasonNumber: number;
+  nextEpisodeNumber: number;
+  nextEpisodeName: string | null;
+  nextEpisodeStillUrl: string | null;
+  nextEpisodeOverview: string | null;
+  nextEpisodeRuntime: number | null;
+  nextAirDate: number | null;
+  nextReleaseDate: number | null;
+  nextEpisodeReleasedToday: boolean;
+  nextEpisodeAirDateTs: number | null;
+  isUpcoming: boolean;
+  isCaughtUp: boolean;
+  lastWatchedAt: number | null;
+  seasons: SeasonSummary[];
+  sortTimestamp: number;
+  stateUpdatedAt: number;
+  gapCount: number;
+  firstGapSeasonNumber: number | null;
+  firstGapEpisodeNumber: number | null;
+};
+
+// Load and reconcile every show that can appear on a continue surface. This
+// is where stored statuses lazily catch up with reality: a caught-up show
+// whose next episode released flips back to watching, a caught-up show that
+// got canceled flips to finished, a finished show with a revival flips back
+// to caught_up/watching, and unmigrated legacy "completed" rows resolve —
+// each divergence is written back (best-effort, original updatedAt kept so
+// metadata flips don't fake user activity).
+async function loadContinueCandidates(
+  userId: string,
+  utcOffsetMinutes: number | null,
+  { includePausedDropped }: { includePausedDropped: boolean },
+) {
+  const statusGroups: Array<{ statuses: string[]; limit: number }> = [
+    { statuses: ["watching"], limit: 50 },
+    { statuses: ["caught_up"], limit: 30 },
+    { statuses: ["finished", "completed"], limit: 30 },
+    ...(includePausedDropped
+      ? [
+          { statuses: ["paused"], limit: 25 },
+          { statuses: ["dropped"], limit: 25 },
+        ]
+      : []),
+  ];
+  const groupRows = await Promise.all(
+    statusGroups.map((group) =>
+      db
+        .select()
+        .from(watchStates)
+        .where(
+          and(
+            eq(watchStates.userId, userId),
+            inArray(
+              watchStates.status,
+              group.statuses as Array<typeof watchStates.$inferSelect.status>,
+            ),
+          ),
+        )
+        .orderBy(desc(watchStates.updatedAt))
+        .limit(group.limit),
+    ),
+  );
+  const rows = groupRows.flat();
+  const now = Date.now();
+  // Release days resolve in the user's timezone; the worker clock runs UTC,
+  // which would surface tomorrow's episodes as "tonight" for US evenings.
+  const { today, todayStartTs } = getUserLocalDayContext(now, utcOffsetMinutes);
+  if (rows.length === 0) {
+    return { candidates: [] as ContinueCandidate[], now, today };
+  }
+
+  const showIds = rows.map((row) => row.showId);
+  const [showRows, progressRows, releaseRows] = await Promise.all([
+    db.select().from(shows).where(inArray(shows.id, showIds)),
+    db
+      .select()
+      .from(episodeProgress)
+      .where(
+        and(
+          eq(episodeProgress.userId, userId),
+          inArray(episodeProgress.showId, showIds),
+        ),
+      ),
+    db
+      .select()
+      .from(releaseEvents)
+      .where(
+        and(
+          inArray(releaseEvents.showId, showIds),
+          gte(releaseEvents.airDateTs, todayStartTs),
+        ),
+      )
+      .orderBy(asc(releaseEvents.airDateTs)),
+  ]);
+  const showById = new Map(showRows.map((show) => [show.id, show] as const));
+  const releaseRowsByShowId = new Map<
+    string,
+    Array<typeof releaseEvents.$inferSelect>
+  >();
+  for (const event of releaseRows) {
+    const existing = releaseRowsByShowId.get(event.showId) ?? [];
+    existing.push(event);
+    releaseRowsByShowId.set(event.showId, existing);
+  }
+
+  const tmdbExternalIds = showRows
+    .filter((show) => show.externalSource === "tmdb")
+    .map((show) => show.externalId);
+  const detailRows =
+    tmdbExternalIds.length > 0
+      ? await db
+          .select()
+          .from(tmdbDetailsCache)
+          .where(
+            and(
+              eq(tmdbDetailsCache.externalSource, "tmdb"),
+              inArray(tmdbDetailsCache.externalId, tmdbExternalIds),
+            ),
+          )
+      : [];
+  const detailsByExternalId = new Map(
+    detailRows.map((row) => [row.externalId, row.payload] as const),
+  );
+
+  const progressByShow = new Map<
+    string,
+    {
+      episodes: Array<{
+        seasonNumber: number;
+        episodeNumber: number;
+        watchedAt: number;
+      }>;
+      latestWatchedAt: number | null;
+    }
+  >();
+  for (const entry of progressRows) {
+    const current =
+      progressByShow.get(entry.showId) ??
+      ({ episodes: [], latestWatchedAt: null } as {
+        episodes: Array<{
+          seasonNumber: number;
+          episodeNumber: number;
+          watchedAt: number;
+        }>;
+        latestWatchedAt: number | null;
+      });
+    current.episodes.push({
+      seasonNumber: entry.seasonNumber,
+      episodeNumber: entry.episodeNumber,
+      watchedAt: entry.watchedAt,
+    });
+    current.latestWatchedAt = Math.max(current.latestWatchedAt ?? 0, entry.watchedAt);
+    progressByShow.set(entry.showId, current);
+  }
+
+  const statusWriteBacks: Array<{ id: string; status: WatchStatus; updatedAt: number }> = [];
+  const candidates: ContinueCandidate[] = [];
+  for (const row of rows) {
+    const show = showById.get(row.showId);
+    if (!show) continue;
+    const detailPayload =
+      show.externalSource === "tmdb"
+        ? detailsByExternalId.get(show.externalId)
+        : undefined;
+    const seasons = readSeasonSummaries(detailPayload);
+    const progress = progressByShow.get(show.id) ?? {
+      episodes: [],
+      latestWatchedAt: null,
+    };
+    const progressState = getEpisodeProgressState({
+      watchedEpisodes: progress.episodes,
+      seasons,
+    });
+    const nextEpisode =
+      progressState.nextEpisode ?? progressState.latestWatched ?? {
+        seasonNumber: seasons[0]?.seasonNumber ?? 1,
+        episodeNumber: 1,
+      };
+
+    const seasonRecord = seasons.find(
+      (season) => season.seasonNumber === nextEpisode.seasonNumber,
+    );
+    const seasonAirMs = seasonRecord?.airDate
+      ? Date.parse(seasonRecord.airDate)
+      : Number.NaN;
+    const isUpcoming =
+      progressState.totalWatched === 0 &&
+      Number.isFinite(seasonAirMs) &&
+      seasonAirMs > now;
+    const progressPct =
+      progressState.totalEpisodes > 0
+        ? Math.min(1, Math.max(0, progressState.totalWatched / progressState.totalEpisodes))
+        : 0;
+    const fallbackSortTimestamp = Math.max(
+      progress.latestWatchedAt ?? 0,
+      row.updatedAt,
+    );
+    const releaseAware = getReleaseAwareUpNextEpisode({
+      fallback: {
+        nextSeasonNumber: nextEpisode.seasonNumber,
+        nextEpisodeNumber: nextEpisode.episodeNumber,
+        nextEpisodeName: null,
+        nextEpisodeStillUrl: null,
+        nextAirDate:
+          isUpcoming && Number.isFinite(seasonAirMs) ? seasonAirMs : null,
+        nextReleaseDate: null,
+        nextEpisodeReleasedToday: false,
+        isUpcoming,
+        isCaughtUp: progressState.isCaughtUp,
+        totalEpisodes: progressState.totalEpisodes,
+        sortTimestamp: fallbackSortTimestamp,
+      },
+      latestWatched: progressState.latestWatched
+        ? {
+            season: progressState.latestWatched.seasonNumber,
+            episode: progressState.latestWatched.episodeNumber,
+          }
+        : null,
+      watchedEpisodeCount: progressState.totalWatched,
+      releaseEvents: releaseRowsByShowId.get(show.id) ?? [],
+      today,
+    });
+    const releaseProgressPct =
+      releaseAware.totalEpisodes > 0
+        ? Math.min(1, Math.max(0, progressState.totalWatched / releaseAware.totalEpisodes))
+        : progressPct;
+
+    // Reconcile the stored status against reality. Release events prove a
+    // fresh episode exists even when cached season counts lag behind it.
+    const facts = computeShowProgressFacts({
+      watchedEpisodes: progress.episodes,
+      seasons,
+      isEnded: isShowEnded(detailPayload),
+      lastAiredEpisode: readLastAiredEpisode(detailPayload),
+    });
+    const releasedNewEvidence =
+      releaseAware.nextEpisodeReleasedToday === true ||
+      (typeof releaseAware.nextReleaseDate === "number" &&
+        releaseAware.nextReleaseDate <= now);
+    const effectiveFacts: ShowProgressFacts = releasedNewEvidence
+      ? {
+          ...facts,
+          hasReleasedAfterFrontier: true,
+          releasedCount: Math.max(1, facts.releasedCount),
+        }
+      : facts;
+    const storedStatus = row.status as LegacyWatchStatus;
+    const status =
+      reconcileWatchStatus({ currentStatus: storedStatus, facts: effectiveFacts }) ??
+      "watching";
+    if (status !== storedStatus) {
+      statusWriteBacks.push({ id: row.id, status, updatedAt: row.updatedAt });
+    }
+
+    const isCaughtUp = releaseAware.isCaughtUp ?? progressState.isCaughtUp;
+    // When season metadata exists but can't confirm the pointed-at episode
+    // exists (announced-but-empty next season, stale counts) and no release
+    // event backs it either, present the card as upcoming so the surface
+    // never offers to play or mark an episode that isn't real.
+    const nextEpisodeVerified = isEpisodeVerified(
+      {
+        seasonNumber: releaseAware.nextSeasonNumber,
+        episodeNumber: releaseAware.nextEpisodeNumber,
+      },
+      progressState.seasons,
+    );
+    const presentAsUpcoming =
+      Boolean(releaseAware.isUpcoming) ||
+      (!isCaughtUp &&
+        !releaseAware.nextEpisodeReleasedToday &&
+        !releaseAware.nextReleaseDate &&
+        progressState.seasons.length > 0 &&
+        !nextEpisodeVerified);
+
+    const firstGap = effectiveFacts.gapEpisodes[0] ?? null;
+    candidates.push({
+      showId: show.id,
+      show: showToDoc(show),
+      externalSource: show.externalSource,
+      externalId: show.externalId,
+      status,
+      totalWatched: progressState.totalWatched,
+      totalEpisodes: releaseAware.totalEpisodes,
+      progressPct: releaseProgressPct,
+      nextSeasonNumber: releaseAware.nextSeasonNumber,
+      nextEpisodeNumber: releaseAware.nextEpisodeNumber,
+      nextEpisodeName: releaseAware.nextEpisodeName ?? null,
+      nextEpisodeStillUrl: releaseAware.nextEpisodeStillUrl ?? null,
+      nextEpisodeOverview: null,
+      nextEpisodeRuntime: null,
+      nextAirDate: releaseAware.nextAirDate ?? null,
+      nextReleaseDate: releaseAware.nextReleaseDate ?? null,
+      nextEpisodeReleasedToday: releaseAware.nextEpisodeReleasedToday ?? false,
+      nextEpisodeAirDateTs: null,
+      isUpcoming: presentAsUpcoming,
+      isCaughtUp,
+      lastWatchedAt: progress.latestWatchedAt,
+      seasons: progressState.seasons,
+      sortTimestamp: releaseAware.sortTimestamp,
+      stateUpdatedAt: row.updatedAt,
+      gapCount: effectiveFacts.gapEpisodes.length,
+      firstGapSeasonNumber: firstGap?.seasonNumber ?? null,
+      firstGapEpisodeNumber: firstGap?.episodeNumber ?? null,
+    });
+  }
+
+  if (statusWriteBacks.length > 0) {
+    // Bounded and best-effort: the read already computed the truth, the
+    // write-back just persists it for the next surface that trusts the row.
+    await Promise.all(
+      statusWriteBacks.slice(0, 25).map((write) =>
+        db
+          .update(watchStates)
+          .set({ status: write.status, updatedAt: write.updatedAt })
+          .where(eq(watchStates.id, write.id))
+          .catch(() => {}),
+      ),
+    );
+  }
+
+  return { candidates, now, today };
+}
+
+function stripContinueCandidate({
+  sortTimestamp: _sortTimestamp,
+  externalSource: _externalSource,
+  externalId: _externalId,
+  stateUpdatedAt: _stateUpdatedAt,
+  ...entry
+}: ContinueCandidate) {
+  return entry;
+}
+
 export const queryHandlers: Record<string, RpcHandler> = {
   "auth:isAuthenticated": async ({ req }) => {
     const user = await getOptionalAuthUser(req);
@@ -3413,6 +3859,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
       countsLists: libraryCounts.lists,
       countsWatchlist: libraryCounts.watchlist,
       countsWatching: libraryCounts.watching,
+      countsCaughtUp: libraryCounts.caughtUp,
+      countsFinished: libraryCounts.finished,
+      countsPaused: libraryCounts.paused,
       countsCompleted: libraryCounts.completed,
       countsDropped: libraryCounts.dropped,
       countsTotalShows: libraryCounts.total,
@@ -3799,6 +4248,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return {
       watchlist: libraryCounts.watchlist,
       watching: libraryCounts.watching,
+      caughtUp: libraryCounts.caughtUp,
+      finished: libraryCounts.finished,
+      paused: libraryCounts.paused,
       completed: libraryCounts.completed,
       dropped: libraryCounts.dropped,
       total: libraryCounts.total,
@@ -3820,7 +4272,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const rows = await db
       .select()
       .from(watchStates)
-      .where(parsed.status ? and(eq(watchStates.userId, user.id), eq(watchStates.status, parsed.status as any)) : eq(watchStates.userId, user.id))
+      .where(parsed.status ? and(eq(watchStates.userId, user.id), inArray(watchStates.status, watchStatusFilterValues(parsed.status) as any)) : eq(watchStates.userId, user.id))
       .orderBy(desc(watchStates.updatedAt));
     return rows.map(toDoc);
   },
@@ -3872,268 +4324,127 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsedArgs = z
       .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
       .parse(args ?? {});
-    const [watchingRows, completedRows] = await Promise.all([
-      db
-        .select()
-        .from(watchStates)
-        .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "watching")))
-        .orderBy(desc(watchStates.updatedAt))
-        .limit(50),
-      // Completed shows come back to the rail when a new episode airs; they
-      // are filtered below to only those with a release after the user's
-      // progress frontier.
-      db
-        .select()
-        .from(watchStates)
-        .where(and(eq(watchStates.userId, user.id), eq(watchStates.status, "completed")))
-        .orderBy(desc(watchStates.updatedAt))
-        .limit(25),
-    ]);
-    const completedShowIds = new Set(completedRows.map((row) => row.showId));
-    const rows = [...watchingRows, ...completedRows];
-    if (rows.length === 0) {
-      return [];
-    }
-
-    const showIds = rows.map((row) => row.showId);
-    const now = Date.now();
-    // Release days resolve in the user's timezone; the worker clock runs UTC,
-    // which would surface tomorrow's episodes as "tonight" for US evenings.
-    const { today, todayStartTs } = getUserLocalDayContext(
-      now,
+    const { candidates, now, today } = await loadContinueCandidates(
+      user.id,
       parsedArgs.utcOffsetMinutes ?? null,
-    );
-    const [showRows, progressRows, releaseRows] = await Promise.all([
-      db.select().from(shows).where(inArray(shows.id, showIds)),
-      db
-        .select()
-        .from(episodeProgress)
-        .where(
-          and(
-            eq(episodeProgress.userId, user.id),
-            inArray(episodeProgress.showId, showIds),
-          ),
-        ),
-      db
-        .select()
-        .from(releaseEvents)
-        .where(
-          and(
-            inArray(releaseEvents.showId, showIds),
-            gte(releaseEvents.airDateTs, todayStartTs),
-          ),
-        )
-        .orderBy(asc(releaseEvents.airDateTs)),
-    ]);
-    const showById = new Map(showRows.map((show) => [show.id, show] as const));
-    const releaseRowsByShowId = new Map<
-      string,
-      Array<typeof releaseEvents.$inferSelect>
-    >();
-    for (const event of releaseRows) {
-      const existing = releaseRowsByShowId.get(event.showId) ?? [];
-      existing.push(event);
-      releaseRowsByShowId.set(event.showId, existing);
-    }
-
-    const tmdbExternalIds = showRows
-      .filter((show) => show.externalSource === "tmdb")
-      .map((show) => show.externalId);
-    const detailRows =
-      tmdbExternalIds.length > 0
-        ? await db
-            .select()
-            .from(tmdbDetailsCache)
-            .where(
-              and(
-                eq(tmdbDetailsCache.externalSource, "tmdb"),
-                inArray(tmdbDetailsCache.externalId, tmdbExternalIds),
-              ),
-            )
-        : [];
-    const detailsByExternalId = new Map(
-      detailRows.map((row) => [row.externalId, row.payload] as const),
+      { includePausedDropped: false },
     );
 
-    type ProgressByShow = Map<
-      string,
-      {
-        episodes: Array<{
-          seasonNumber: number;
-          episodeNumber: number;
-          watchedAt: number;
-        }>;
-        latestWatchedAt: number | null;
-      }
-    >;
-    const progressByShow: ProgressByShow = new Map();
-    for (const entry of progressRows) {
-      const current =
-        progressByShow.get(entry.showId) ??
-        ({
-          episodes: [],
-          latestWatchedAt: null,
-        } as {
-          episodes: Array<{
-            seasonNumber: number;
-            episodeNumber: number;
-            watchedAt: number;
-          }>;
-          latestWatchedAt: number | null;
-        });
-      current.episodes.push({
-        seasonNumber: entry.seasonNumber,
-        episodeNumber: entry.episodeNumber,
-        watchedAt: entry.watchedAt,
-      });
-      current.latestWatchedAt = Math.max(current.latestWatchedAt ?? 0, entry.watchedAt);
-      progressByShow.set(entry.showId, current);
-    }
-
-    const candidateEntries = rows
-      .map((row) => {
-        const show = showById.get(row.showId);
-        if (!show) return null;
-        const detailPayload =
-          show.externalSource === "tmdb"
-            ? detailsByExternalId.get(show.externalId)
-            : undefined;
-        const seasons = readSeasonSummaries(detailPayload);
-        const progress = progressByShow.get(show.id) ?? {
-          episodes: [],
-          latestWatchedAt: null,
-        };
-        const progressState = getEpisodeProgressState({
-          watchedEpisodes: progress.episodes,
-          seasons,
-        });
-        const nextEpisode =
-          progressState.nextEpisode ?? progressState.latestWatched ?? {
-            seasonNumber: seasons[0]?.seasonNumber ?? 1,
-            episodeNumber: 1,
-          };
-        const nextSeasonNumber = nextEpisode.seasonNumber;
-        const nextEpisodeNumber = nextEpisode.episodeNumber;
-
-        const seasonRecord = seasons.find(
-          (season) => season.seasonNumber === nextSeasonNumber,
-        );
-        const seasonAirMs = seasonRecord?.airDate
-          ? Date.parse(seasonRecord.airDate)
-          : Number.NaN;
-        const isUpcoming =
-          progressState.totalWatched === 0 &&
-          Number.isFinite(seasonAirMs) &&
-          seasonAirMs > now;
-        const progressPct =
-          progressState.totalEpisodes > 0
-            ? Math.min(1, Math.max(0, progressState.totalWatched / progressState.totalEpisodes))
-            : 0;
-        const fallbackSortTimestamp = Math.max(
-          progress.latestWatchedAt ?? 0,
-          row.updatedAt,
-        );
-        const releaseAware = getReleaseAwareUpNextEpisode({
-          fallback: {
-            nextSeasonNumber,
-            nextEpisodeNumber,
-            nextEpisodeName: null,
-            nextEpisodeStillUrl: null,
-            nextAirDate:
-              isUpcoming && Number.isFinite(seasonAirMs) ? seasonAirMs : null,
-            nextReleaseDate: null,
-            nextEpisodeReleasedToday: false,
-            isUpcoming,
-            isCaughtUp: progressState.isCaughtUp,
-            totalEpisodes: progressState.totalEpisodes,
-            sortTimestamp: fallbackSortTimestamp,
-          },
-          latestWatched: progressState.latestWatched
-            ? {
-                season: progressState.latestWatched.seasonNumber,
-                episode: progressState.latestWatched.episodeNumber,
-              }
-            : null,
-          watchedEpisodeCount: progressState.totalWatched,
-          releaseEvents: releaseRowsByShowId.get(show.id) ?? [],
-          today,
-        });
-        const releaseProgressPct =
-          releaseAware.totalEpisodes > 0
-            ? Math.min(1, Math.max(0, progressState.totalWatched / releaseAware.totalEpisodes))
-            : progressPct;
-
-        // Completed shows only resurface when a release event confirms a new
-        // episode aired today beyond the user's progress frontier.
-        if (
-          completedShowIds.has(show.id) &&
-          !releaseAware.nextEpisodeReleasedToday
-        ) {
-          return null;
-        }
-
-        const isCaughtUp = releaseAware.isCaughtUp ?? progressState.isCaughtUp;
-        // When season metadata exists but can't confirm the pointed-at
-        // episode exists (announced-but-empty next season, stale counts) and
-        // no release event backs it either, present the card as upcoming so
-        // the rail never offers to play or mark an episode that isn't real.
-        const nextEpisodeVerified = isEpisodeVerified(
-          {
-            seasonNumber: releaseAware.nextSeasonNumber,
-            episodeNumber: releaseAware.nextEpisodeNumber,
-          },
-          progressState.seasons,
-        );
-        const presentAsUpcoming =
-          Boolean(releaseAware.isUpcoming) ||
-          (!isCaughtUp &&
-            !releaseAware.nextEpisodeReleasedToday &&
-            !releaseAware.nextReleaseDate &&
-            progressState.seasons.length > 0 &&
-            !nextEpisodeVerified);
-
-        return {
-          showId: show.id,
-          show: showToDoc(show),
-          externalSource: show.externalSource,
-          externalId: show.externalId,
-          totalWatched: progressState.totalWatched,
-          totalEpisodes: releaseAware.totalEpisodes,
-          progressPct: releaseProgressPct,
-          nextSeasonNumber: releaseAware.nextSeasonNumber,
-          nextEpisodeNumber: releaseAware.nextEpisodeNumber,
-          nextEpisodeName: releaseAware.nextEpisodeName ?? null,
-          nextEpisodeStillUrl: releaseAware.nextEpisodeStillUrl ?? null,
-          nextEpisodeOverview: null as string | null,
-          nextEpisodeRuntime: null as number | null,
-          nextAirDate: releaseAware.nextAirDate ?? null,
-          nextReleaseDate: releaseAware.nextReleaseDate ?? null,
-          nextEpisodeReleasedToday: releaseAware.nextEpisodeReleasedToday ?? false,
-          isUpcoming: presentAsUpcoming,
-          isCaughtUp,
-          lastWatchedAt: progress.latestWatchedAt,
-          seasons: progressState.seasons,
-          sortTimestamp: releaseAware.sortTimestamp,
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    // Finished shows are done-done: they only re-enter the rail once
+    // reconciliation sees something new released (which flips them back to
+    // watching above). Caught-up entries ride along so the client can keep
+    // its tier-3 handling.
+    const entries = candidates.filter((candidate) => candidate.status !== "finished");
 
     // Rank before slicing so shows with a watchable episode always claim the
     // top-10 ahead of upcoming and caught-up entries.
-    const rankedEntries = rankContinueWatchingItems(candidateEntries, now).slice(0, 10);
+    const rankedEntries = rankContinueWatchingItems(entries, now).slice(0, 10);
 
     await enrichUpNextEntriesWithSeasonMetadata(rankedEntries, { now, today });
 
     // Enrichment can flip an entry to upcoming once season air dates load, so
     // the final order is settled after it runs.
-    return rankContinueWatchingItems(rankedEntries, now).map(
-      ({
-        sortTimestamp: _sortTimestamp,
-        externalSource: _externalSource,
-        externalId: _externalId,
-        ...entry
-      }) => entry,
+    return rankContinueWatchingItems(rankedEntries, now).map(stripContinueCandidate);
+  },
+  "episodeProgress:getContinue": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsedArgs = z
+      .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
+      .parse(args ?? {});
+    const { candidates, now, today } = await loadContinueCandidates(
+      user.id,
+      parsedArgs.utcOffsetMinutes ?? null,
+      { includePausedDropped: true },
     );
+
+    const active = candidates.filter((candidate) => isWatchTierStatus(candidate.status));
+    // Ready cards get next-episode metadata (and, crucially, air dates — the
+    // "new episode" vs "old backlog" split keys off them).
+    const readyForEnrichment = rankContinueWatchingItems(
+      active.filter(
+        (candidate) => candidate.status === "watching" && !candidate.isCaughtUp,
+      ),
+      now,
+    );
+    await enrichUpNextEntriesWithSeasonMetadata(readyForEnrichment, { now, today });
+
+    const isUpcomingNow = (candidate: ContinueCandidate) =>
+      candidate.isUpcoming ||
+      (typeof candidate.nextAirDate === "number" && candidate.nextAirDate > now) ||
+      isContinueWatchingFutureRelease(candidate, now);
+    // "New episode": the next unwatched episode dropped within the window —
+    // the user was (near) caught up when it aired. An old backlog keeps an
+    // old air date and stays in resume.
+    const NEW_EPISODE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+    const isNewEpisode = (candidate: ContinueCandidate) => {
+      if (candidate.nextEpisodeReleasedToday) return true;
+      const airTs =
+        candidate.nextEpisodeAirDateTs ??
+        (typeof candidate.nextReleaseDate === "number" &&
+        candidate.nextReleaseDate <= now
+          ? candidate.nextReleaseDate
+          : null);
+      return airTs !== null && airTs <= now && now - airTs <= NEW_EPISODE_WINDOW_MS;
+    };
+
+    const ready = active.filter(
+      (candidate) =>
+        candidate.status === "watching" &&
+        !candidate.isCaughtUp &&
+        !isUpcomingNow(candidate),
+    );
+    const newEpisodes = rankContinueWatchingItems(ready.filter(isNewEpisode), now).slice(0, 20);
+    const resume = rankContinueWatchingItems(
+      ready.filter((candidate) => !isNewEpisode(candidate)),
+      now,
+    ).slice(0, 30);
+
+    // Returning: caught-up shows waiting on new episodes, plus not-yet-started
+    // shows whose premiere is scheduled. Dated entries lead, soonest first.
+    const returningPool = active.filter(
+      (candidate) =>
+        !ready.includes(candidate) &&
+        (candidate.status === "caught_up" ||
+          (candidate.status === "watching" && isUpcomingNow(candidate))),
+    );
+    const returningDated = returningPool
+      .filter((candidate) => typeof candidate.nextAirDate === "number")
+      .sort((left, right) => (left.nextAirDate ?? 0) - (right.nextAirDate ?? 0));
+    const returningUndated = returningPool
+      .filter((candidate) => typeof candidate.nextAirDate !== "number")
+      .sort(
+        (left, right) =>
+          (right.lastWatchedAt ?? right.stateUpdatedAt) -
+          (left.lastWatchedAt ?? left.stateUpdatedAt),
+      );
+    const returning = [...returningDated, ...returningUndated].slice(0, 30);
+
+    // Gaps: episodes skipped behind the frontier, on any active-tier show.
+    // Paused and dropped shows don't nag.
+    const gaps = active
+      .filter((candidate) => candidate.gapCount > 0)
+      .sort(
+        (left, right) =>
+          (right.lastWatchedAt ?? right.stateUpdatedAt) -
+          (left.lastWatchedAt ?? left.stateUpdatedAt),
+      )
+      .slice(0, 20);
+
+    const byStateRecency = (status: WatchStatus) =>
+      candidates
+        .filter((candidate) => candidate.status === status)
+        .sort((left, right) => right.stateUpdatedAt - left.stateUpdatedAt)
+        .slice(0, 25);
+
+    return {
+      resume: resume.map(stripContinueCandidate),
+      newEpisodes: newEpisodes.map(stripContinueCandidate),
+      returning: returning.map(stripContinueCandidate),
+      gaps: gaps.map(stripContinueCandidate),
+      paused: byStateRecency("paused").map(stripContinueCandidate),
+      dropped: byStateRecency("dropped").map(stripContinueCandidate),
+      generatedAt: now,
+    };
   },
   "reviews:getDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
@@ -5114,26 +5425,59 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "watchStates:setStatus": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = z.object({ showId: z.string(), status: z.enum(["watchlist", "watching", "completed", "dropped"]) }).parse(args ?? {});
-    const existing = await db.select().from(watchStates).where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, parsed.showId))).limit(1);
+    const parsed = z
+      .object({
+        showId: z.string(),
+        // "completed" still arrives from old clients; it means "I watched it
+        // all" and resolves to finished/caught_up below, same as "finished".
+        status: z.enum([
+          "watchlist",
+          "watching",
+          "caught_up",
+          "finished",
+          "paused",
+          "dropped",
+          "completed",
+        ]),
+      })
+      .parse(args ?? {});
     const now = Date.now();
+    const isWatchedAll =
+      parsed.status === "completed" ||
+      parsed.status === "finished" ||
+      parsed.status === "caught_up";
+
+    let status: WatchStatus = isWatchedAll
+      ? "finished"
+      : (parsed.status as WatchStatus);
+    if (isWatchedAll) {
+      // "Watched it all" writes every released episode into progress first,
+      // then lands on the tier the show's air status supports: finished for
+      // ended shows, caught_up for returning ones. A backfill hiccup falls
+      // back to the user's literal choice — a retap retries it (idempotent).
+      try {
+        await backfillReleasedEpisodes(user.id, parsed.showId, now);
+        const facts = await loadShowProgressFacts(user.id, parsed.showId);
+        status = resolveWatchTier(facts);
+        if (status === "watching" && facts.releasedCount === 0) {
+          // Metadata too thin to judge: honor the user's statement instead
+          // of downgrading it to watching.
+          status = parsed.status === "caught_up" ? "caught_up" : "finished";
+        }
+      } catch (error) {
+        console.error("Watched-status episode backfill failed:", error);
+        status = parsed.status === "caught_up" ? "caught_up" : "finished";
+      }
+    }
+
+    const existing = await db.select().from(watchStates).where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, parsed.showId))).limit(1);
     let stateId: string;
     if (existing[0]) {
-      await db.update(watchStates).set({ status: parsed.status, updatedAt: now }).where(eq(watchStates.id, existing[0].id));
+      await db.update(watchStates).set({ status, updatedAt: now }).where(eq(watchStates.id, existing[0].id));
       stateId = existing[0].id;
     } else {
       stateId = createId("state");
-      await db.insert(watchStates).values({ id: stateId, userId: user.id, showId: parsed.showId, status: parsed.status, updatedAt: now });
-    }
-    if (parsed.status === "completed") {
-      // The status write above already landed, so a backfill hiccup must not
-      // fail the request (and a retap retries it — the backfill is
-      // idempotent). Only the episode marks are best-effort.
-      try {
-        await backfillReleasedEpisodesForCompletedShow(user.id, parsed.showId, now);
-      } catch (error) {
-        console.error("Completed-status episode backfill failed:", error);
-      }
+      await db.insert(watchStates).values({ id: stateId, userId: user.id, showId: parsed.showId, status, updatedAt: now });
     }
     return stateId;
   },
@@ -5507,6 +5851,48 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
     return true;
+  },
+  "episodeProgress:markWatchedUpTo": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        showId: z.string(),
+        seasonNumber: z.number().int().min(1),
+        episodeNumber: z.number().int().min(1),
+        episodeTitle: z.string().optional(),
+      })
+      .parse(args ?? {});
+    const now = Date.now();
+    await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
+    // Everything released up to and including the target: logged like other
+    // bulk catch-ups (diary yes, feed fan-out no).
+    const backfill = await backfillReleasedEpisodes(user.id, parsed.showId, now, {
+      seasonNumber: parsed.seasonNumber,
+      episodeNumber: parsed.episodeNumber,
+    });
+    // A just-aired target can sit past a stale released frontier (the release
+    // event proved it exists above) — make sure the tapped episode itself
+    // always lands.
+    const createdTarget = await insertEpisodeProgressOnce({
+      userId: user.id,
+      showId: parsed.showId,
+      seasonNumber: parsed.seasonNumber,
+      episodeNumber: parsed.episodeNumber,
+      watchedAt: now,
+    });
+    if (createdTarget) {
+      await createEpisodeWatchLog({
+        userId: user.id,
+        showId: parsed.showId,
+        seasonNumber: parsed.seasonNumber,
+        episodeNumber: parsed.episodeNumber,
+        episodeTitle: parsed.episodeTitle,
+        watchedAt: now,
+        fanOutToFeeds: false,
+      });
+    }
+    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+    return { marked: backfill.marked + (createdTarget ? 1 : 0) };
   },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
     const user = await requireAuthUser(req);

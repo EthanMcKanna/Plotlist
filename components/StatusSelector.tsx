@@ -19,14 +19,22 @@ import {
 } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
 
-type WatchStatus = "watchlist" | "watching" | "completed" | "dropped";
+type WatchStatus =
+  | "watchlist"
+  | "watching"
+  | "caught_up"
+  | "finished"
+  | "paused"
+  | "dropped";
 
 type StatusSelectorProps = {
-  currentStatus: WatchStatus | undefined | null;
+  currentStatus: WatchStatus | "completed" | undefined | null;
   onSelect: (status: WatchStatus) => void;
   onRemove?: () => void;
 };
 
+// Every displayable status, including the auto-managed tiers the server sets
+// (caught_up/finished) — the button surface renders whichever the show holds.
 const STATUS_CONFIG = {
   watchlist: {
     label: "Watchlist",
@@ -46,14 +54,32 @@ const STATUS_CONFIG = {
     borderColor: "rgba(167, 139, 250, 0.25)",
     description: "Currently watching",
   },
-  completed: {
-    label: "Completed",
+  caught_up: {
+    label: "Caught Up",
+    icon: "checkmark-done-circle" as const,
+    iconOutline: "checkmark-done-circle-outline" as const,
+    color: "#34D399",
+    bg: "rgba(52, 211, 153, 0.13)",
+    borderColor: "rgba(52, 211, 153, 0.25)",
+    description: "Watched everything out so far",
+  },
+  finished: {
+    label: "Finished",
     icon: "checkmark-circle" as const,
     iconOutline: "checkmark-circle-outline" as const,
     color: "#22C55E",
     bg: "rgba(34, 197, 94, 0.13)",
     borderColor: "rgba(34, 197, 94, 0.25)",
-    description: "Finished watching",
+    description: "Watched the whole series",
+  },
+  paused: {
+    label: "Paused",
+    icon: "pause-circle" as const,
+    iconOutline: "pause-circle-outline" as const,
+    color: "#FBBF24",
+    bg: "rgba(251, 191, 36, 0.13)",
+    borderColor: "rgba(251, 191, 36, 0.25)",
+    description: "Taking a break — pick it up later",
   },
   dropped: {
     label: "Dropped",
@@ -66,12 +92,27 @@ const STATUS_CONFIG = {
   },
 } as const;
 
+// The sheet offers one "Watched" choice instead of caught-up vs finished —
+// the server marks every released episode watched and lands on the right
+// tier for the show's air status (caught_up while it's returning, finished
+// once it has ended). Which option reads as active is mapped below.
 const STATUSES: WatchStatus[] = [
   "watchlist",
   "watching",
-  "completed",
+  "finished",
+  "paused",
   "dropped",
 ];
+
+// currentStatus → the sheet option that should light up. Legacy "completed"
+// rows may still be cached client-side pre-migration.
+function toSheetStatus(
+  status: WatchStatus | "completed" | null | undefined,
+): WatchStatus | null {
+  if (!status) return null;
+  if (status === "completed" || status === "caught_up") return "finished";
+  return status;
+}
 
 const DISMISS_THRESHOLD = 80;
 const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -84,9 +125,9 @@ export function StatusSelector({
   onRemove,
 }: StatusSelectorProps) {
   const [sheetVisible, setSheetVisible] = useState(false);
-  const [selectedStatus, setSelectedStatus] = useState<WatchStatus | null | undefined>(
-    currentStatus
-  );
+  const [selectedStatus, setSelectedStatus] = useState<
+    WatchStatus | "completed" | null | undefined
+  >(currentStatus);
   const buttonScale = useSharedValue(1);
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
   const backdropOpacity = useSharedValue(0);
@@ -99,8 +140,11 @@ export function StatusSelector({
     setSelectedStatus(currentStatus);
   }, [currentStatus]);
 
-  const hasStatus = selectedStatus != null;
-  const config = hasStatus ? STATUS_CONFIG[selectedStatus] : null;
+  const displayStatus =
+    selectedStatus === "completed" ? "finished" : selectedStatus;
+  const hasStatus = displayStatus != null;
+  const config = hasStatus ? STATUS_CONFIG[displayStatus] : null;
+  const activeSheetStatus = toSheetStatus(selectedStatus);
 
   const openSheet = useCallback(() => {
     setSheetVisible(true);
@@ -160,12 +204,12 @@ export function StatusSelector({
 
   const handleSelectStatus = useCallback(
     (status: WatchStatus) => {
-      const nextStatus = status === selectedStatus ? null : status;
-      setSelectedStatus(nextStatus);
+      const isReselect = status === toSheetStatus(selectedStatus);
+      setSelectedStatus(isReselect ? null : status);
       sheetTranslateY.value = SCREEN_HEIGHT;
       backdropOpacity.value = 0;
       setSheetVisible(false);
-      if (status === selectedStatus) {
+      if (isReselect) {
         onRemove?.();
       } else {
         onSelect(status);
@@ -323,8 +367,14 @@ export function StatusSelector({
                   {/* Status Options */}
                   <View style={{ paddingHorizontal: 16 }}>
                     {STATUSES.map((status) => {
-                      const cfg = STATUS_CONFIG[status];
-                      const isActive = status === selectedStatus;
+                      // The "finished" slot renders whatever tier the show
+                      // actually holds (Caught Up for returning series), so
+                      // the sheet mirrors the button.
+                      const cfg =
+                        status === "finished" && displayStatus === "caught_up"
+                          ? STATUS_CONFIG.caught_up
+                          : STATUS_CONFIG[status];
+                      const isActive = status === activeSheetStatus;
                       return (
                         <Pressable
                           key={status}

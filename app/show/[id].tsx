@@ -94,6 +94,7 @@ import {
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import {
+  optimisticMarkEpisodeWatched,
   optimisticMarkSeasonWatched,
   optimisticToggleEpisode,
   optimisticUnmarkSeasonWatched,
@@ -117,7 +118,13 @@ const DISMISS_THRESHOLD = 120;
 const DISMISS_VELOCITY = 500;
 const POSTER_HEIGHT = SHOW_POSTER_HEIGHT;
 const POSTER_WIDTH = SHOW_POSTER_WIDTH;
-type WatchStatus = "watchlist" | "watching" | "completed" | "dropped";
+type WatchStatus =
+  | "watchlist"
+  | "watching"
+  | "caught_up"
+  | "finished"
+  | "paused"
+  | "dropped";
 type ExtendedDetailsLoadState = "idle" | "loading" | "ready";
 
 const PREVIEW_SHOW_ID = "show_preview_pluribus" as Id<"shows">;
@@ -836,6 +843,11 @@ export default function ShowScreen() {
   const toggleEpisode = useMutation(
     api.episodeProgress.toggleEpisode,
   ).withOptimisticUpdate(optimisticToggleEpisode);
+  // Optimistically checks just the tapped episode; the server backfills the
+  // rest and the post-mutation invalidation fills them in.
+  const markWatchedUpTo = useMutation(
+    api.episodeProgress.markWatchedUpTo,
+  ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
   const markSeasonWatched = useMutation(
     api.episodeProgress.markSeasonWatched,
   ).withOptimisticUpdate(optimisticMarkSeasonWatched);
@@ -1614,6 +1626,83 @@ export default function ShowScreen() {
     visibleSeasonNumbers,
   ]);
 
+  // Earlier episodes (strictly before the target) the user hasn't checked
+  // off, from season episode counts — the data the guide already renders
+  // with. Specials never count.
+  const countEarlierUnwatched = useCallback(
+    (seasonNumber: number, episodeNumber: number) => {
+      let unwatched = 0;
+      for (const season of seasonOptions as Array<{
+        season_number: number;
+        episode_count?: number;
+      }>) {
+        if (season.season_number > seasonNumber) continue;
+        const inSeason =
+          season.season_number === seasonNumber
+            ? episodeNumber - 1
+            : Math.max(0, season.episode_count ?? 0);
+        for (let episode = 1; episode <= inSeason; episode += 1) {
+          if (!watchedEpisodeSet.has(`S${season.season_number}E${episode}`)) {
+            unwatched += 1;
+          }
+        }
+      }
+      return unwatched;
+    },
+    [seasonOptions, watchedEpisodeSet],
+  );
+
+  // Checking an episode midway through the show offers to catch the record up
+  // to that point. Alert is a no-op on web, so the web build uses confirm().
+  const confirmMarkWatchedUpTo = useCallback(
+    (args: {
+      seasonNumber: number;
+      episodeNumber: number;
+      episodeTitle?: string;
+      earlierCount: number;
+      onJustThis: () => void;
+    }) => {
+      const { seasonNumber, episodeNumber, episodeTitle, earlierCount, onJustThis } = args;
+      const runMarkUpTo = () => {
+        void markWatchedUpTo({
+          showId,
+          seasonNumber,
+          episodeNumber,
+          episodeTitle,
+        }).catch((error) => {
+          Alert.alert(
+            "Couldn't mark episodes",
+            getUserFacingApiErrorMessage(error) ?? String(error),
+          );
+        });
+      };
+      if (Platform.OS === "web") {
+        const catchUp = window.confirm(
+          `Mark the ${earlierCount} earlier episode${earlierCount === 1 ? "" : "s"} watched too?\n\nOK marks everything up to S${seasonNumber}E${episodeNumber}. Cancel checks just this episode.`,
+        );
+        if (catchUp) {
+          runMarkUpTo();
+        } else {
+          onJustThis();
+        }
+        return;
+      }
+      Alert.alert(
+        "Catch up to here?",
+        `You have ${earlierCount} earlier episode${earlierCount === 1 ? "" : "s"} unwatched. Mark everything up to S${seasonNumber}E${episodeNumber} as watched?`,
+        [
+          { text: "Just this episode", onPress: onJustThis },
+          {
+            text: `Mark ${earlierCount + 1} watched`,
+            onPress: runMarkUpTo,
+          },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+    },
+    [markWatchedUpTo, showId],
+  );
+
   const handleStatus = useCallback(
     (value: WatchStatus) => {
       if (isShowPreview) {
@@ -1625,16 +1714,24 @@ export default function ShowScreen() {
         Alert.alert("Sign in required", "Set your watch status after signing in.");
         return;
       }
-      setOptimisticStatus(value);
-      // Choosing "completed" also marks every released episode as watched —
-      // the server backfills progress and diary rows in the same mutation, so
-      // there's no client-side season syncing left to do here.
+      // Choosing "finished" also marks every released episode as watched —
+      // the server backfills progress and diary rows in the same mutation and
+      // lands on caught_up instead when the show is still returning. Mirror
+      // that resolution optimistically so the button doesn't flash "Finished"
+      // on a returning series.
+      const optimisticValue =
+        value === "finished" &&
+        activeDetails?.status &&
+        !/^(ended|canceled|cancelled)$/i.test(String(activeDetails.status).trim())
+          ? "caught_up"
+          : value;
+      setOptimisticStatus(optimisticValue);
       void setStatus({ showId, status: value }).catch((error) => {
         setOptimisticStatus(undefined);
         Alert.alert("Couldn't update status", String(error));
       });
     },
-    [isAuthenticated, isShowPreview, setStatus, showId]
+    [activeDetails?.status, isAuthenticated, isShowPreview, setStatus, showId]
   );
 
   const handleRemoveStatus = useCallback(() => {
@@ -2580,12 +2677,30 @@ export default function ShowScreen() {
             }}
             onToggleEpisode={(seasonNumber, episode) => {
               if (isShowPreview) return;
-              void toggleEpisode({
-                showId,
-                seasonNumber,
-                episodeNumber: episode.episodeNumber,
-                episodeTitle: episode.name,
-              });
+              const runToggle = () =>
+                void toggleEpisode({
+                  showId,
+                  seasonNumber,
+                  episodeNumber: episode.episodeNumber,
+                  episodeTitle: episode.name,
+                });
+              const isMarking = !watchedEpisodeSet.has(
+                `S${seasonNumber}E${episode.episodeNumber}`,
+              );
+              const earlierCount = isMarking
+                ? countEarlierUnwatched(seasonNumber, episode.episodeNumber)
+                : 0;
+              if (earlierCount > 0) {
+                confirmMarkWatchedUpTo({
+                  seasonNumber,
+                  episodeNumber: episode.episodeNumber,
+                  episodeTitle: episode.name,
+                  earlierCount,
+                  onJustThis: runToggle,
+                });
+                return;
+              }
+              runToggle();
             }}
             onSelectEpisode={(seasonName, seasonNumber, episode) => {
               setSelectedEpisode({

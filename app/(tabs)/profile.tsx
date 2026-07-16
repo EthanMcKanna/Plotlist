@@ -128,6 +128,8 @@ export default function ProfileTab() {
     lists: me?.countsLists ?? 0,
     watchlist: me?.countsWatchlist ?? 0,
     watching: me?.countsWatching ?? 0,
+    caughtUp: me?.countsCaughtUp ?? 0,
+    finished: me?.countsFinished ?? 0,
     completed: me?.countsCompleted ?? 0,
   };
 
@@ -140,7 +142,7 @@ export default function ProfileTab() {
       iconBg: "bg-green-500/15",
       iconColor: "#22C55E",
       label: "My Shows",
-      sublabel: `${counts.watching.toLocaleString()} watching · ${counts.completed.toLocaleString()} completed`,
+      sublabel: `${(counts.watching + counts.caughtUp).toLocaleString()} watching · ${counts.finished.toLocaleString()} finished`,
       route: "/me/watchlist",
       count: counts.shows,
     },
