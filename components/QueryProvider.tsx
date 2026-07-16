@@ -8,6 +8,7 @@ import {
   recordHomeWarmQuery,
 } from "../lib/homeWarmCache";
 import { getLocalDateString } from "../lib/releaseCalendar";
+import { recordUpNextForWidget } from "../lib/upNextWidget";
 
 // This provider wraps the root layout, so it must only import leaf libs —
 // pulling component modules in here re-enters the router's module graph
@@ -35,6 +36,9 @@ export function QueryProvider({ children }: PropsWithChildren) {
       }
       const name = key[2];
       const args = key[3];
+      if (name === "episodeProgress:getUpNext") {
+        recordUpNextForWidget(event.query.state.data);
+      }
       if (!isHomeWarmQueryPersistable(name)) return;
       if (args !== undefined && (typeof args !== "object" || args === null)) {
         return;

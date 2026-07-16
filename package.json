@@ -30,6 +30,7 @@
     "check:release": "npm run check && npm run audit:prod && npm run check:homepage"
   },
   "dependencies": {
+    "@bacons/apple-targets": "^4.0.7",
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-menu/menu": "^1.2.2",

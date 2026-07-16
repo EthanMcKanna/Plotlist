@@ -18,7 +18,8 @@
       "usesAppleSignIn": true,
       "associatedDomains": ["applinks:plotlist.app", "applinks:www.plotlist.app"],
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.security.application-groups": ["group.com.emckanna.Plotlist"]
       },
       "requireFullScreen": false,
       "infoPlist": {
@@ -50,6 +51,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      ["@bacons/apple-targets", { "appleTeamId": "697K7CH7J6" }],
       "expo-router",
       "expo-apple-authentication",
       "expo-secure-store",
