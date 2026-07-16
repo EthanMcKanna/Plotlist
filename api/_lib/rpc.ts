@@ -33,6 +33,7 @@ import {
   users,
   watchLogs,
   watchStates,
+  watchStatusValues,
 } from "../../db/schema";
 import { db } from "./db";
 import { ApiError } from "./errors";
@@ -2355,46 +2356,356 @@ async function ensureUniqueUsername(username: string, currentUserId: string) {
   }
 }
 
-async function buildExportData(userId: string) {
-  const [userRows, followRows, reviewRows, logRows, listRows, likeRows, commentRows, contactRows] =
-    await Promise.all([
-      db.select().from(users).where(eq(users.id, userId)).limit(1),
-      db.select().from(follows).where(eq(follows.followerId, userId)),
-      db.select().from(reviews).where(eq(reviews.authorId, userId)),
-      db.select().from(watchLogs).where(eq(watchLogs.userId, userId)),
-      db.select().from(lists).where(eq(lists.ownerId, userId)),
-      db.select().from(likes).where(eq(likes.userId, userId)),
-      db.select().from(comments).where(eq(comments.authorId, userId)),
-      db.select().from(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
-    ]);
+// ─── User data export ───
+// The export is a self-service snapshot of everything the user has put into
+// Plotlist, organized by what people actually want out of it (their library,
+// diary, reviews, lists, social graph) rather than by internal table. Row ids
+// and foreign keys are resolved to titles and usernames, timestamps become
+// ISO 8601 strings, and shows carry TMDB/IMDb ids so the file is portable to
+// other services.
 
-  const listIds = listRows.map((item) => item.id);
-  const listItemRows =
-    listIds.length > 0
-      ? await db.select().from(listItems).where(inArray(listItems.listId, listIds))
-      : [];
+function exportDate(ms: number | null | undefined) {
+  return typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function exportEpisodeCode(seasonNumber: number, episodeNumber: number) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `S${pad(seasonNumber)}E${pad(episodeNumber)}`;
+}
+
+async function getShowRowsByIdsChunked(showIds: Iterable<string>) {
+  const uniqueIds = Array.from(new Set(showIds));
+  const rows: Array<typeof shows.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(uniqueIds, 1, 80)) {
+    rows.push(...(await db.select().from(shows).where(inArray(shows.id, chunk))));
+  }
+  return rows;
+}
+
+async function buildExportData(userId: string) {
+  const [
+    userRows,
+    stateRows,
+    logRows,
+    progressRows,
+    reviewRows,
+    listRows,
+    listFollowRows,
+    likeRows,
+    commentRows,
+    followingRows,
+    followerRows,
+    followRequestRows,
+    blockRows,
+    contactRows,
+    tasteRows,
+  ] = await Promise.all([
+    db.select().from(users).where(eq(users.id, userId)).limit(1),
+    db.select().from(watchStates).where(eq(watchStates.userId, userId)),
+    db
+      .select()
+      .from(watchLogs)
+      .where(eq(watchLogs.userId, userId))
+      .orderBy(desc(watchLogs.watchedAt)),
+    db.select().from(episodeProgress).where(eq(episodeProgress.userId, userId)),
+    db
+      .select()
+      .from(reviews)
+      .where(eq(reviews.authorId, userId))
+      .orderBy(desc(reviews.createdAt)),
+    db.select().from(lists).where(eq(lists.ownerId, userId)).orderBy(desc(lists.updatedAt)),
+    db.select().from(listFollows).where(eq(listFollows.userId, userId)),
+    db.select().from(likes).where(eq(likes.userId, userId)).orderBy(desc(likes.createdAt)),
+    db
+      .select()
+      .from(comments)
+      .where(eq(comments.authorId, userId))
+      .orderBy(desc(comments.createdAt)),
+    db.select().from(follows).where(eq(follows.followerId, userId)),
+    db.select().from(follows).where(eq(follows.followeeId, userId)),
+    db.select().from(followRequests).where(eq(followRequests.requesterId, userId)),
+    db.select().from(blocks).where(eq(blocks.blockerId, userId)),
+    db.select().from(contactSyncEntries).where(eq(contactSyncEntries.ownerId, userId)),
+    db
+      .select()
+      .from(userTastePreferences)
+      .where(eq(userTastePreferences.userId, userId))
+      .limit(1),
+  ]);
+
+  const user = userRows[0] ?? null;
+  const taste = tasteRows[0] ?? null;
+
+  const ownedListItemRows: Array<typeof listItems.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(listRows.map((row) => row.id), 1, 80)) {
+    ownedListItemRows.push(
+      ...(await db.select().from(listItems).where(inArray(listItems.listId, chunk))),
+    );
+  }
+
+  const followedListRows: Array<typeof lists.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(listFollowRows.map((row) => row.listId), 1, 80)) {
+    followedListRows.push(...(await db.select().from(lists).where(inArray(lists.id, chunk))));
+  }
+
+  // Likes and comments point at reviews, logs, lists, and comments — often
+  // other people's — so resolve those targets into something readable
+  // ("a review of X by @y") instead of exporting opaque ids.
+  const likedOrCommentedRows = [...likeRows, ...commentRows];
+  const targetIdsOfType = (targetType: string) =>
+    likedOrCommentedRows
+      .filter((row) => row.targetType === targetType)
+      .map((row) => row.targetId);
+
+  const targetReviewRows: Array<typeof reviews.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(targetIdsOfType("review"), 1, 80)) {
+    targetReviewRows.push(...(await db.select().from(reviews).where(inArray(reviews.id, chunk))));
+  }
+  const targetLogRows: Array<typeof watchLogs.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(targetIdsOfType("log"), 1, 80)) {
+    targetLogRows.push(...(await db.select().from(watchLogs).where(inArray(watchLogs.id, chunk))));
+  }
+  const targetListRows: Array<typeof lists.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(targetIdsOfType("list"), 1, 80)) {
+    targetListRows.push(...(await db.select().from(lists).where(inArray(lists.id, chunk))));
+  }
+  const targetCommentRows: Array<typeof comments.$inferSelect> = [];
+  for (const chunk of chunkForSqlParams(targetIdsOfType("comment"), 1, 80)) {
+    targetCommentRows.push(
+      ...(await db.select().from(comments).where(inArray(comments.id, chunk))),
+    );
+  }
+
+  const favoriteShowIds = user?.favoriteShowIds ?? taste?.favoriteShowIds ?? [];
+
+  const showRows = await getShowRowsByIdsChunked([
+    ...stateRows.map((row) => row.showId),
+    ...logRows.map((row) => row.showId),
+    ...progressRows.map((row) => row.showId),
+    ...reviewRows.map((row) => row.showId),
+    ...ownedListItemRows.map((row) => row.showId),
+    ...targetReviewRows.map((row) => row.showId),
+    ...targetLogRows.map((row) => row.showId),
+    ...favoriteShowIds,
+  ]);
+  const showById = new Map(showRows.map((row) => [row.id, row]));
+  const showRef = (showId: string) => {
+    const show = showById.get(showId);
+    if (!show) return null;
+    return {
+      title: show.title,
+      year: show.year ?? null,
+      tmdbId: show.externalSource === "tmdb" ? show.externalId : null,
+      imdbId: show.imdbId || null,
+    };
+  };
+
+  const referencedUsers = await getUsersByIdsChunked([
+    ...followingRows.map((row) => row.followeeId),
+    ...followerRows.map((row) => row.followerId),
+    ...followRequestRows.map((row) => row.targetId),
+    ...blockRows.map((row) => row.blockedId),
+    ...followedListRows.map((row) => row.ownerId),
+    ...targetReviewRows.map((row) => row.authorId),
+    ...targetLogRows.map((row) => row.userId),
+    ...targetListRows.map((row) => row.ownerId),
+    ...targetCommentRows.map((row) => row.authorId),
+    ...contactRows.flatMap((row) => (row.matchedUserId ? [row.matchedUserId] : [])),
+  ]);
+  const userById = new Map(referencedUsers.map((row) => [row.id, row]));
+  const userRef = (referencedUserId: string | null | undefined) => {
+    const referenced = referencedUserId ? userById.get(referencedUserId) : null;
+    if (!referenced) return null;
+    return {
+      username: referenced.username ?? null,
+      displayName: referenced.displayName ?? referenced.name ?? null,
+    };
+  };
+
+  const targetReviewById = new Map(targetReviewRows.map((row) => [row.id, row]));
+  const targetLogById = new Map(targetLogRows.map((row) => [row.id, row]));
+  const targetListById = new Map(targetListRows.map((row) => [row.id, row]));
+  const targetCommentById = new Map(targetCommentRows.map((row) => [row.id, row]));
+  const describeTarget = (targetType: string, targetId: string) => {
+    if (targetType === "review") {
+      const review = targetReviewById.get(targetId);
+      return review
+        ? { type: "review", show: showRef(review.showId), by: userRef(review.authorId) }
+        : { type: "review", deleted: true };
+    }
+    if (targetType === "log") {
+      const log = targetLogById.get(targetId);
+      return log
+        ? { type: "watch log", show: showRef(log.showId), by: userRef(log.userId) }
+        : { type: "watch log", deleted: true };
+    }
+    if (targetType === "list") {
+      const list = targetListById.get(targetId);
+      return list
+        ? { type: "list", title: list.title, by: userRef(list.ownerId) }
+        : { type: "list", deleted: true };
+    }
+    const comment = targetCommentById.get(targetId);
+    return comment
+      ? { type: "comment", by: userRef(comment.authorId) }
+      : { type: "comment", deleted: true };
+  };
+
+  // Keyed off the schema enum so the export tracks status renames; rows
+  // holding a not-yet-migrated legacy status still land in their own bucket.
+  const library: Record<string, unknown[]> = Object.fromEntries(
+    watchStatusValues.map((status) => [status, []]),
+  );
+  for (const row of [...stateRows].sort((left, right) => right.updatedAt - left.updatedAt)) {
+    (library[row.status] ??= []).push({
+      ...showRef(row.showId),
+      statusChangedAt: exportDate(row.updatedAt),
+    });
+  }
+
+  const progressByShow = new Map<string, Array<typeof episodeProgress.$inferSelect>>();
+  for (const row of progressRows) {
+    const rows = progressByShow.get(row.showId) ?? [];
+    rows.push(row);
+    progressByShow.set(row.showId, rows);
+  }
+  const episodesWatched = Array.from(progressByShow.entries(), ([showId, rows]) => ({
+    show: showRef(showId),
+    episodeCount: rows.length,
+    episodes: rows
+      .sort(
+        (left, right) =>
+          left.seasonNumber - right.seasonNumber || left.episodeNumber - right.episodeNumber,
+      )
+      .map((row) => ({
+        episode: exportEpisodeCode(row.seasonNumber, row.episodeNumber),
+        watchedAt: exportDate(row.watchedAt),
+      })),
+  })).sort((left, right) => right.episodeCount - left.episodeCount);
+
+  const itemsByList = new Map<string, Array<typeof listItems.$inferSelect>>();
+  for (const row of ownedListItemRows) {
+    const rows = itemsByList.get(row.listId) ?? [];
+    rows.push(row);
+    itemsByList.set(row.listId, rows);
+  }
 
   return {
-    user: userRows[0] ? toClientUser(userRows[0]) : null,
-    follows: followRows,
-    reviews: reviewRows,
-    logs: logRows,
-    lists: listRows,
-    listItems: listItemRows,
-    likes: likeRows,
-    comments: commentRows,
-    contacts: contactRows,
-    exportLimit: 1000,
-    truncated: {
-      follows: false,
-      reviews: false,
-      logs: false,
-      lists: false,
-      likes: false,
-      comments: false,
-      contacts: false,
-      listItems: [],
+    export: {
+      app: "Plotlist",
+      format: "plotlist-export/2",
+      generatedAt: new Date().toISOString(),
+      notes:
+        "All dates are ISO 8601 (UTC). Shows include TMDB and IMDb ids where known so they can be matched on other services.",
     },
+    profile: user
+      ? {
+          username: user.username ?? null,
+          displayName: user.displayName ?? user.name ?? null,
+          bio: user.bio ?? null,
+          email: user.email ?? null,
+          avatarUrl: user.avatarUrl ?? null,
+          joinedAt: exportDate(user.createdAt),
+          privateAccount: Boolean(user.isPrivate),
+          profileVisibility: user.profileVisibility ?? null,
+          notificationPreferences: user.notificationPreferences ?? null,
+        }
+      : null,
+    preferences: {
+      favoriteShows: favoriteShowIds.map(showRef).filter(Boolean),
+      favoriteGenres: user?.favoriteGenres ?? [],
+      favoriteThemes: taste?.favoriteThemes ?? [],
+      streamingServices: user?.streamingProviders ?? [],
+      releaseCalendarProviders: user?.releaseCalendarPreferences?.selectedProviders ?? [],
+    },
+    summary: {
+      showsTracked: stateRows.length,
+      episodesWatched: progressRows.length,
+      diaryEntries: logRows.length,
+      reviews: reviewRows.length,
+      lists: listRows.length,
+      following: followingRows.length,
+      followers: followerRows.length,
+    },
+    library,
+    episodesWatched,
+    diary: logRows.map((row) => ({
+      watchedAt: exportDate(row.watchedAt),
+      show: showRef(row.showId),
+      episode:
+        row.seasonNumber != null && row.episodeNumber != null
+          ? exportEpisodeCode(row.seasonNumber, row.episodeNumber)
+          : null,
+      episodeTitle: row.episodeTitle ?? null,
+      note: row.note ?? null,
+    })),
+    reviews: reviewRows.map((row) => ({
+      show: showRef(row.showId),
+      rating: row.rating,
+      review: row.reviewText ?? null,
+      containsSpoilers: row.spoiler,
+      episode:
+        row.seasonNumber != null && row.episodeNumber != null
+          ? exportEpisodeCode(row.seasonNumber, row.episodeNumber)
+          : null,
+      episodeTitle: row.episodeTitle ?? null,
+      writtenAt: exportDate(row.createdAt),
+      editedAt: exportDate(row.updatedAt),
+    })),
+    lists: listRows.map((list) => ({
+      title: list.title,
+      description: list.description ?? null,
+      visibility: list.isPublic ? "public" : "private",
+      createdAt: exportDate(list.createdAt),
+      updatedAt: exportDate(list.updatedAt),
+      items: (itemsByList.get(list.id) ?? [])
+        .sort((left, right) => left.position - right.position)
+        .map((item) => ({
+          position: item.position,
+          ...showRef(item.showId),
+          addedAt: exportDate(item.addedAt),
+        })),
+    })),
+    likes: likeRows.map((row) => ({
+      likedAt: exportDate(row.createdAt),
+      target: describeTarget(row.targetType, row.targetId),
+    })),
+    comments: commentRows.map((row) => ({
+      postedAt: exportDate(row.createdAt),
+      comment: row.text,
+      on: describeTarget(row.targetType, row.targetId),
+    })),
+    social: {
+      following: [...followingRows]
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .map((row) => ({ ...userRef(row.followeeId), since: exportDate(row.createdAt) })),
+      followers: [...followerRows]
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .map((row) => ({ ...userRef(row.followerId), since: exportDate(row.createdAt) })),
+      pendingFollowRequests: followRequestRows.map((row) => ({
+        ...userRef(row.targetId),
+        requestedAt: exportDate(row.createdAt),
+      })),
+      blockedUsers: blockRows.map((row) => ({
+        ...userRef(row.blockedId),
+        blockedAt: exportDate(row.createdAt),
+      })),
+      followedLists: listFollowRows.map((row) => {
+        const list = followedListRows.find((candidate) => candidate.id === row.listId);
+        return {
+          title: list?.title ?? null,
+          owner: userRef(list?.ownerId),
+          followedAt: exportDate(row.createdAt),
+        };
+      }),
+    },
+    // Only what the user synced themselves — contact names and invite state.
+    // The hashes used internally for matching are omitted.
+    contacts: contactRows.map((row) => ({
+      name: row.displayName,
+      onPlotlist: userRef(row.matchedUserId),
+      invitedAt: exportDate(row.invitedAt),
+    })),
   };
 }
 

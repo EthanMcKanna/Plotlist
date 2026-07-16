@@ -180,6 +180,7 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [syncingContacts, setSyncingContacts] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [cropImage, setCropImage] = useState<{
     uri: string;
     width: number;
@@ -250,10 +251,13 @@ export default function SettingsScreen() {
   };
 
   const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
     try {
       const data = await callQuery(api.users.exportData, {});
       const payload = JSON.stringify(data, null, 2);
-      const filename = `plotlist-export-${new Date().toISOString().slice(0, 10)}.json`;
+      const who = me?.username ? `${me.username}-` : "";
+      const filename = `plotlist-${who}${new Date().toISOString().slice(0, 10)}.json`;
 
       if (Platform.OS === "web") {
         await downloadExportOnWeb(filename, payload);
@@ -286,6 +290,8 @@ export default function SettingsScreen() {
       });
     } catch (error) {
       Alert.alert("Export failed", String(error));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -673,6 +679,7 @@ export default function SettingsScreen() {
               icon="download-outline"
               label="Export my data"
               onPress={handleExport}
+              loading={exporting}
             />
             <View className="mx-4 h-px bg-dark-border" />
             <SettingsRow
