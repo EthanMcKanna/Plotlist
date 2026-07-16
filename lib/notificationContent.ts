@@ -213,6 +213,7 @@ const TARGET_NOUNS: Record<string, string> = {
   review: "review",
   log: "watch log",
   list: "list",
+  comment: "comment",
 };
 
 export function buildLikeNotificationContent(actorName: string, targetType: string) {
@@ -234,6 +235,20 @@ export function buildCommentNotificationContent(
   return {
     title: "New comment",
     body: `${actorName} commented on your ${noun}: “${preview}”`,
+  };
+}
+
+// For the author of the comment being replied to — more direct than the
+// generic "commented on your …" wording.
+export function buildCommentReplyNotificationContent(
+  actorName: string,
+  commentText: string,
+) {
+  const trimmed = commentText.trim().replace(/\s+/g, " ");
+  const preview = trimmed.length > 80 ? `${trimmed.slice(0, 79)}…` : trimmed;
+  return {
+    title: "New reply",
+    body: `${actorName} replied to your comment: “${preview}”`,
   };
 }
 

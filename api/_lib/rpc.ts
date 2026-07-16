@@ -215,6 +215,14 @@ const targetArgs = z.object({
   targetId: z.string().min(1),
 });
 
+// Likes reach one level deeper than comments: individual comments are
+// likeable, but comments can't be commented on via targetType (replies use
+// parentId instead).
+const likeTargetArgs = z.object({
+  targetType: z.enum(["review", "log", "list", "comment"]),
+  targetId: z.string().min(1),
+});
+
 const paginationArgs = z
   .object({
     paginationOpts: z
@@ -3352,7 +3360,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
   },
   "likes:getForUserTarget": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = targetArgs.parse(args ?? {});
+    const parsed = likeTargetArgs.parse(args ?? {});
     const rows = await db
       .select()
       .from(likes)
@@ -3361,7 +3369,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return Boolean(rows[0]);
   },
   "likes:listForTarget": async ({ args }) => {
-    const parsed = targetArgs.extend({ limit: z.number().optional() }).parse(args ?? {});
+    const parsed = likeTargetArgs.extend({ limit: z.number().optional() }).parse(args ?? {});
     const rows = await db
       .select()
       .from(likes)
@@ -3383,7 +3391,72 @@ export const queryHandlers: Record<string, RpcHandler> = {
       ? await db.select().from(users).where(inArray(users.id, rows.map((row) => row.authorId)))
       : [];
     const authors = new Map(authorRows.map((user) => [user.id, toClientUser(user)]));
-    return pageRows(rows.map((row) => ({ comment: toDoc(row), author: authors.get(row.authorId) ?? null })), args);
+
+    const likeCounts = new Map<string, number>();
+    const viewerLikedIds = new Set<string>();
+    for (const chunk of chunkForSqlParams(rows.map((row) => row.id), 1)) {
+      const countRows = await db
+        .select({ targetId: likes.targetId, value: count() })
+        .from(likes)
+        .where(and(eq(likes.targetType, "comment"), inArray(likes.targetId, chunk)))
+        .groupBy(likes.targetId);
+      for (const row of countRows) {
+        likeCounts.set(row.targetId, row.value);
+      }
+      if (viewer) {
+        const likedRows = await db
+          .select({ targetId: likes.targetId })
+          .from(likes)
+          .where(
+            and(
+              eq(likes.userId, viewer.id),
+              eq(likes.targetType, "comment"),
+              inArray(likes.targetId, chunk),
+            ),
+          );
+        for (const row of likedRows) {
+          viewerLikedIds.add(row.targetId);
+        }
+      }
+    }
+
+    type ThreadEntry = { comment: any; author: unknown; replies: ThreadEntry[] };
+    const entryById = new Map<string, ThreadEntry>(
+      rows.map((row) => [
+        row.id,
+        {
+          comment: {
+            ...toDoc(row),
+            likeCount: likeCounts.get(row.id) ?? 0,
+            viewerLiked: viewerLikedIds.has(row.id),
+          },
+          author: authors.get(row.authorId) ?? null,
+          replies: [],
+        },
+      ]),
+    );
+    // Reddit-style "top": most-liked first at every level, ties in posting
+    // order. Replies whose parent is hidden (blocked author) drop with it.
+    const topLevel: ThreadEntry[] = [];
+    for (const row of rows) {
+      const entry = entryById.get(row.id)!;
+      if (row.parentId) {
+        entryById.get(row.parentId)?.replies.push(entry);
+      } else {
+        topLevel.push(entry);
+      }
+    }
+    const byLikesThenOldest = (a: ThreadEntry, b: ThreadEntry) =>
+      b.comment.likeCount - a.comment.likeCount || a.comment.createdAt - b.comment.createdAt;
+    const sortThread = (entries: ThreadEntry[]) => {
+      entries.sort(byLikesThenOldest);
+      for (const entry of entries) {
+        sortThread(entry.replies);
+      }
+    };
+    sortThread(topLevel);
+    // Pagination is by top-level comment; each entry carries its full subtree.
+    return pageRows(topLevel, args);
   },
   "shows:get": async ({ args }) => {
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
@@ -4636,7 +4709,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "likes:toggle": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = targetArgs.parse(args ?? {});
+    const parsed = likeTargetArgs.parse(args ?? {});
     const existing = await db
       .select()
       .from(likes)
@@ -4654,7 +4727,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "comments:add": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = targetArgs.extend({ text: z.string().min(1) }).parse(args ?? {});
+    const parsed = targetArgs
+      .extend({ text: z.string().min(1), parentId: z.string().optional() })
+      .parse(args ?? {});
     if (parsed.targetType === "list") {
       // Owners can switch comments off per list; enforce it server-side so a
       // stale client can't post through a disabled thread.
@@ -4666,20 +4741,63 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         throw new ApiError(403, "comments_disabled", "Comments are turned off for this list.");
       }
     }
+    let parentAuthorId: string | null = null;
+    if (parsed.parentId) {
+      const parentRows = await db
+        .select()
+        .from(comments)
+        .where(eq(comments.id, parsed.parentId))
+        .limit(1);
+      const parent = parentRows[0];
+      // A reply must land in the thread it claims to be part of; a stale or
+      // forged parentId otherwise attaches it to an unrelated conversation.
+      if (!parent || parent.targetType !== parsed.targetType || parent.targetId !== parsed.targetId) {
+        throw new ApiError(404, "comment_not_found", "That comment is no longer available");
+      }
+      const block = await getBlockStatus(user.id, parent.authorId);
+      if (isBlockedEitherWay(block)) {
+        throw new ApiError(404, "comment_not_found", "That comment is no longer available");
+      }
+      parentAuthorId = parent.authorId;
+    }
     await moderateText("comment", [parsed.text]);
     await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("comment");
-    await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, text: parsed.text, createdAt: Date.now() });
-    await notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text);
+    await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, parentId: parsed.parentId ?? null, text: parsed.text, createdAt: Date.now() });
+    await notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text, parentAuthorId);
     const rows = await db.select().from(comments).where(eq(comments.id, id)).limit(1);
-    return rows[0] ? { comment: toDoc(rows[0]), author: toClientUser(user) } : null;
+    return rows[0]
+      ? { comment: { ...toDoc(rows[0]), likeCount: 0, viewerLiked: false }, author: toClientUser(user), replies: [] }
+      : null;
   },
   "comments:deleteComment": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const commentId = z.object({ commentId: z.string() }).parse(args ?? {}).commentId;
     const rows = await db.select().from(comments).where(eq(comments.id, commentId)).limit(1);
     if (rows[0] && (rows[0].authorId === user.id || user.isAdmin)) {
-      await db.delete(comments).where(eq(comments.id, commentId));
+      // Removing a comment takes its whole reply subtree with it (the ALTER
+      // that added parent_id couldn't carry ON DELETE CASCADE, so walk it
+      // here) and clears the likes that pointed at any removed comment.
+      const doomedIds = [rows[0].id];
+      let frontier = [rows[0].id];
+      while (frontier.length > 0) {
+        const childIds: string[] = [];
+        for (const chunk of chunkForSqlParams(frontier, 1)) {
+          const childRows = await db
+            .select({ id: comments.id })
+            .from(comments)
+            .where(inArray(comments.parentId, chunk));
+          childIds.push(...childRows.map((row) => row.id));
+        }
+        doomedIds.push(...childIds);
+        frontier = childIds;
+      }
+      for (const chunk of chunkForSqlParams(doomedIds, 1)) {
+        await db.delete(comments).where(inArray(comments.id, chunk));
+        await db
+          .delete(likes)
+          .where(and(eq(likes.targetType, "comment"), inArray(likes.targetId, chunk)));
+      }
     }
     return { success: true };
   },

@@ -5,6 +5,8 @@ const mockAdd = jest.fn(async () => ({})) as any;
 mockAdd.withOptimisticUpdate = jest.fn(() => mockAdd);
 const mockRemove = jest.fn(async () => ({ success: true })) as any;
 mockRemove.withOptimisticUpdate = jest.fn(() => mockRemove);
+const mockToggleLike = jest.fn(async () => true) as any;
+mockToggleLike.withOptimisticUpdate = jest.fn(() => mockToggleLike);
 
 let mockPaginated: {
   results: unknown[];
@@ -30,8 +32,12 @@ jest.mock("../../lib/navigation", () => ({
 jest.mock("../../lib/plotlist/react", () => ({
   useAuth: () => ({ isAuthenticated: true }),
   useQuery: () => mockMe,
-  useMutation: (ref: { __name?: string }) =>
-    String(ref?.__name ?? "").includes("delete") ? mockRemove : mockAdd,
+  useMutation: (ref: { __name?: string }) => {
+    const name = String(ref?.__name ?? "");
+    if (name.includes("delete")) return mockRemove;
+    if (name.includes("likes")) return mockToggleLike;
+    return mockAdd;
+  },
   usePaginatedQuery: () => mockPaginated,
 }));
 
@@ -45,6 +51,7 @@ import {
   CommentThreadList,
   useCommentThread,
 } from "../../components/Comments";
+import { commentAuthorLabel } from "../../lib/comments";
 
 // Mirrors how app/comments.tsx composes the thread (list + composer).
 function ThreadHarness() {
@@ -56,26 +63,39 @@ function ThreadHarness() {
         viewer={thread.me as any}
         isAuthenticated={thread.isAuthenticated}
         onSubmit={thread.submit}
+        replyingToLabel={thread.replyTo ? commentAuthorLabel(thread.replyTo.author) : null}
+        onCancelReply={() => thread.setReplyTo(null)}
       />
     </>
   );
 }
 
-const entry = (id: string, text: string, authorName: string, authorId = `user_${id}`) => ({
+const entry = (
+  id: string,
+  text: string,
+  authorName: string,
+  overrides: Record<string, unknown> = {},
+  replies: unknown[] = [],
+) => ({
   comment: {
     _id: id,
-    authorId,
+    authorId: `user_${id}`,
     targetType: "review",
     targetId: "review_1",
+    parentId: null,
     text,
     createdAt: Date.now() - 60_000,
+    likeCount: 0,
+    viewerLiked: false,
+    ...overrides,
   },
   author: {
-    _id: authorId,
+    _id: `user_${id}`,
     displayName: authorName,
     username: authorName.toLowerCase(),
     avatarUrl: null,
   },
+  replies,
 });
 
 describe("comment thread", () => {
@@ -87,6 +107,7 @@ describe("comment thread", () => {
       loadMore: jest.fn(),
     };
     mockAdd.mockClear();
+    mockToggleLike.mockClear();
     mockGuardedPush.mockClear();
   });
 
@@ -97,6 +118,38 @@ describe("comment thread", () => {
     expect(screen.getByText("Same!")).toBeTruthy();
     expect(screen.getByText("Avery")).toBeTruthy();
     expect(screen.getByText("Sam")).toBeTruthy();
+  });
+
+  it("renders nested replies beneath their parent", () => {
+    mockPaginated = {
+      results: [
+        entry("c1", "Top comment", "Avery", {}, [
+          entry("c2", "First reply", "Sam", { parentId: "c1" }),
+        ]),
+      ],
+      status: "Exhausted",
+      loadMore: jest.fn(),
+    };
+    render(<ThreadHarness />);
+
+    expect(screen.getByText("Top comment")).toBeTruthy();
+    expect(screen.getByText("First reply")).toBeTruthy();
+  });
+
+  it("shows like counts and toggles a comment like", () => {
+    mockPaginated = {
+      results: [entry("c1", "Hot take", "Avery", { likeCount: 4, viewerLiked: false })],
+      status: "Exhausted",
+      loadMore: jest.fn(),
+    };
+    render(<ThreadHarness />);
+
+    const likeButton = screen.getByLabelText("Like comment. 4 likes");
+    fireEvent.press(likeButton);
+    expect(mockToggleLike).toHaveBeenCalledWith({
+      targetType: "comment",
+      targetId: "c1",
+    });
   });
 
   it("shows a friendly empty state instead of blank rows", () => {
@@ -129,6 +182,43 @@ describe("comment thread", () => {
       targetType: "review",
       targetId: "review_1",
       text: "So good",
+    });
+  });
+
+  it("replies through the composer with the parent id attached", async () => {
+    render(<ThreadHarness />);
+
+    fireEvent.press(screen.getByLabelText("Reply to Avery"));
+    expect(screen.getByLabelText("Cancel reply")).toBeTruthy();
+
+    fireEvent.changeText(screen.getByPlaceholderText("Add a reply…"), "Totally agree");
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText("Post comment"));
+    });
+
+    expect(mockAdd).toHaveBeenCalledWith({
+      targetType: "review",
+      targetId: "review_1",
+      text: "Totally agree",
+      parentId: "c1",
+    });
+  });
+
+  it("cancels a pending reply back to a top-level comment", async () => {
+    render(<ThreadHarness />);
+
+    fireEvent.press(screen.getByLabelText("Reply to Avery"));
+    fireEvent.press(screen.getByLabelText("Cancel reply"));
+
+    fireEvent.changeText(screen.getByPlaceholderText("Add a comment…"), "Standalone");
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText("Post comment"));
+    });
+
+    expect(mockAdd).toHaveBeenCalledWith({
+      targetType: "review",
+      targetId: "review_1",
+      text: "Standalone",
     });
   });
 
@@ -167,27 +257,46 @@ function SectionHarness({ enabled = true, isOwner = false }: { enabled?: boolean
 describe("CommentsSection", () => {
   beforeEach(() => {
     mockMe = { _id: "user_me", displayName: "Me" };
+    // Server order is best-first (most likes at the top).
     mockPaginated = {
       results: [
-        entry("c1", "Oldest comment", "Avery"),
-        entry("c2", "Second comment", "Sam"),
-        entry("c3", "Third comment", "Kai"),
-        entry("c4", "Newest comment", "Rue"),
+        entry("c1", "Top comment", "Avery", { likeCount: 9 }),
+        entry("c2", "Second comment", "Sam", { likeCount: 4 }),
+        entry("c3", "Third comment", "Kai", { likeCount: 1 }),
+        entry("c4", "Bottom comment", "Rue"),
       ],
       status: "Exhausted",
       loadMore: jest.fn(),
     };
     mockAdd.mockClear();
+    mockToggleLike.mockClear();
     mockGuardedPush.mockClear();
   });
 
-  it("collapses to the most recent comments with a view-all affordance", () => {
+  it("collapses to the top-ranked comments with a view-all affordance", () => {
     render(<SectionHarness />);
 
-    expect(screen.queryByText("Oldest comment")).toBeNull();
-    expect(screen.getByText("Second comment")).toBeTruthy();
-    expect(screen.getByText("Newest comment")).toBeTruthy();
+    expect(screen.getByText("Top comment")).toBeTruthy();
+    expect(screen.getByText("Third comment")).toBeTruthy();
+    expect(screen.queryByText("Bottom comment")).toBeNull();
     expect(screen.getByText("View all 4 comments")).toBeTruthy();
+  });
+
+  it("hides replies until expanded but counts them in the label", () => {
+    mockPaginated = {
+      results: [
+        entry("c1", "Top comment", "Avery", { likeCount: 9 }, [
+          entry("c5", "Buried reply", "Sam", { parentId: "c1" }),
+        ]),
+      ],
+      status: "Exhausted",
+      loadMore: jest.fn(),
+    };
+    render(<SectionHarness />);
+
+    expect(screen.queryByText("Buried reply")).toBeNull();
+    fireEvent.press(screen.getByText("View all 2 comments"));
+    expect(screen.getByText("Buried reply")).toBeTruthy();
   });
 
   it("expands the full thread inline instead of navigating away", () => {
@@ -195,7 +304,7 @@ describe("CommentsSection", () => {
 
     fireEvent.press(screen.getByText("View all 4 comments"));
 
-    expect(screen.getByText("Oldest comment")).toBeTruthy();
+    expect(screen.getByText("Bottom comment")).toBeTruthy();
     expect(screen.queryByText("View all 4 comments")).toBeNull();
     expect(mockGuardedPush).not.toHaveBeenCalled();
   });

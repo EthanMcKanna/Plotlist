@@ -5,6 +5,7 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 import { vector } from "./vector";
@@ -29,6 +30,8 @@ export const watchStatusValues = [
 ] as const;
 
 export const targetTypeValues = ["review", "log", "list"] as const;
+// Likes additionally target individual comments (Reddit-style threads).
+export const likeTargetTypeValues = ["review", "log", "list", "comment"] as const;
 export const reportTargetTypeValues = ["review", "log", "list", "user", "comment"] as const;
 export const notificationTypeValues = [
   "follow",
@@ -404,7 +407,7 @@ export const likes = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    targetType: text("target_type", { enum: targetTypeValues }).notNull(),
+    targetType: text("target_type", { enum: likeTargetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },
@@ -432,6 +435,11 @@ export const comments = sqliteTable(
       .references(() => users.id, { onDelete: "cascade" }),
     targetType: text("target_type", { enum: targetTypeValues }).notNull(),
     targetId: text("target_id").notNull(),
+    // Reply threading: null for top-level comments, otherwise the immediate
+    // parent comment. Deleting a parent cascades through its subtree.
+    parentId: text("parent_id").references((): AnySQLiteColumn => comments.id, {
+      onDelete: "cascade",
+    }),
     text: text("text").notNull(),
     createdAt: timestampMs("created_at").notNull(),
   },
@@ -442,6 +450,7 @@ export const comments = sqliteTable(
       table.createdAt,
     ),
     authorCreatedIdx: index("comments_author_created_idx").on(table.authorId, table.createdAt),
+    parentIdx: index("comments_parent_idx").on(table.parentId),
   }),
 );
 

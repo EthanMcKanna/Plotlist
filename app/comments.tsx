@@ -24,7 +24,7 @@ import { ReportModal } from "../components/ReportModal";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation } from "../lib/plotlist/react";
-import type { CommentTargetType } from "../lib/comments";
+import { commentAuthorLabel, type CommentTargetType } from "../lib/comments";
 import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 function CommentsThread({
@@ -71,6 +71,8 @@ function CommentsThread({
           isAuthenticated={thread.isAuthenticated}
           onSubmit={thread.submit}
           autoFocus={autoFocusComposer}
+          replyingToLabel={thread.replyTo ? commentAuthorLabel(thread.replyTo.author) : null}
+          onCancelReply={() => thread.setReplyTo(null)}
         />
       </View>
 

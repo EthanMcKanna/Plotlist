@@ -16,6 +16,7 @@ import {
 } from "../../db/schema";
 import {
   buildCommentNotificationContent,
+  buildCommentReplyNotificationContent,
   buildThreadCommentNotificationContent,
   buildContactJoinedNotificationContent,
   buildEpisodeNotificationContent,
@@ -365,6 +366,14 @@ export async function resolveTargetOwner(targetType: string, targetId: string) {
       .limit(1);
     return rows[0] ? { ownerId: rows[0].ownerId, showId: null } : null;
   }
+  if (targetType === "comment") {
+    const rows = await db
+      .select({ ownerId: comments.authorId })
+      .from(comments)
+      .where(eq(comments.id, targetId))
+      .limit(1);
+    return rows[0] ? { ownerId: rows[0].ownerId, showId: null } : null;
+  }
   return null;
 }
 
@@ -536,6 +545,19 @@ export async function notifyLike(
       return;
     }
     const content = buildLikeNotificationContent(actorDisplayName(actor), targetType);
+    // A liked comment has no screen of its own; the notification opens the
+    // conversation the comment lives in.
+    let url = targetUrl(targetType, targetId);
+    if (targetType === "comment") {
+      const commentRows = await db
+        .select({ targetType: comments.targetType, targetId: comments.targetId })
+        .from(comments)
+        .where(eq(comments.id, targetId))
+        .limit(1);
+      if (commentRows[0]) {
+        url = commentTargetUrl(commentRows[0].targetType, commentRows[0].targetId);
+      }
+    }
     await createNotificationsAndPush([
       {
         userId: target.ownerId,
@@ -546,7 +568,7 @@ export async function notifyLike(
         targetId,
         title: content.title,
         body: content.body,
-        data: { url: targetUrl(targetType, targetId), targetType, targetId, actorId: actor.id },
+        data: { url, targetType, targetId, actorId: actor.id },
         dedupeKey: `like:${actor.id}:${targetType}:${targetId}`,
       },
     ]);
@@ -565,6 +587,7 @@ export async function notifyComment(
   targetId: string,
   commentId: string,
   commentText: string,
+  replyToUserId?: string | null,
 ) {
   try {
     const target = await resolveTargetOwner(targetType, targetId);
@@ -582,7 +605,23 @@ export async function notifyComment(
       dedupeKey: `comment:${commentId}`,
     };
     const inputs: NotificationInput[] = [];
-    if (target.ownerId !== actor.id) {
+    // The parent comment's author hears "replied to your comment" and is
+    // excluded from the owner/participant wording below — one notification
+    // per person per comment.
+    if (replyToUserId && replyToUserId !== actor.id) {
+      const replyContent = buildCommentReplyNotificationContent(
+        actorDisplayName(actor),
+        commentText,
+      );
+      inputs.push({
+        userId: replyToUserId,
+        type: "comment",
+        title: replyContent.title,
+        body: replyContent.body,
+        ...shared,
+      });
+    }
+    if (target.ownerId !== actor.id && target.ownerId !== replyToUserId) {
       const content = buildCommentNotificationContent(
         actorDisplayName(actor),
         targetType,
@@ -610,7 +649,7 @@ export async function notifyComment(
       );
     const participantIds = priorCommenterRows
       .map((row) => row.authorId)
-      .filter((id) => id !== actor.id && id !== target.ownerId)
+      .filter((id) => id !== actor.id && id !== target.ownerId && id !== replyToUserId)
       .slice(0, THREAD_NOTIFY_MAX_PARTICIPANTS);
     if (participantIds.length > 0) {
       const blockedIds = await getBlockedEitherWayIdSet(actor.id, participantIds);
