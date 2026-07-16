@@ -227,6 +227,40 @@ export default function WatchStatsScreen() {
             </View>
           ) : (
             <>
+              {/* Shareable year-so-far cards. Optional-chained: a client can
+                  briefly run against a worker that predates yearToDate. */}
+              {(insights.yearToDate?.episodes ?? 0) > 0 ? (
+                <GlassPressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    guardedPush("/me/stats-share");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share your year so far"
+                  radius={12}
+                  variant="prominent"
+                  style={{ marginTop: 12 }}
+                  contentStyle={{
+                    alignItems: "center",
+                    flexDirection: "row",
+                    gap: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
+                  }}
+                >
+                  <Ionicons name="sparkles" size={18} color="#7DD3FC" />
+                  <View className="flex-1">
+                    <Text className="text-sm font-bold text-sky-100">
+                      Share your {insights.yearToDate.year} so far
+                    </Text>
+                    <Text className="mt-0.5 text-xs text-sky-100/60">
+                      {insights.yearToDate.episodes.toLocaleString()} episodes, ready to post
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color="#7DD3FC" />
+                </GlassPressable>
+              ) : null}
+
               {/* Pace + streaks */}
               <GlassSurface radius={12} variant="surface" style={{ marginTop: 12 }}>
                 <View className="flex-row">

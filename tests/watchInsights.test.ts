@@ -201,6 +201,116 @@ describe("buildWatchInsights", () => {
     expect(insights.reviews.topRated[0]).toMatchObject({ reviewId: "r1", title: SHOW.title });
   });
 
+  it("scopes yearToDate to the current local year", () => {
+    const insights = buildWatchInsights({
+      now: NOW, // 2026-07-03 UTC
+      shows: [SHOW],
+      episodes: [
+        episode({ episodeNumber: 1, watchedAt: NOW - DAY }),
+        episode({ episodeNumber: 2, watchedAt: Date.parse("2026-01-05T20:00:00.000Z") }),
+        episode({ episodeNumber: 3, watchedAt: Date.parse("2025-12-30T20:00:00.000Z") }),
+      ],
+      showRuntimes: [{ externalId: SHOW.externalId, runtimeMinutes: 40 }],
+    });
+    expect(insights.yearToDate.year).toBe(2026);
+    expect(insights.yearToDate.episodes).toBe(2);
+    expect(insights.yearToDate.minutes).toBe(80);
+    expect(insights.yearToDate.shows).toBe(1);
+    expect(insights.yearToDate.activeDays).toBe(2);
+    expect(insights.yearToDate.topShows[0]).toMatchObject({
+      showId: SHOW.id,
+      episodes: 2,
+      posterUrl: SHOW.posterUrl,
+    });
+    expect(insights.yearToDate.topGenres[0]).toMatchObject({
+      label: "Drama",
+      episodes: 2,
+      posterUrls: [SHOW.posterUrl],
+    });
+  });
+
+  it("assigns year boundaries in the user's timezone", () => {
+    // 2025-12-31 23:30 UTC is already 2026 in UTC+2, still 2025 in UTC-8.
+    const watchedAt = Date.parse("2025-12-31T23:30:00.000Z");
+    const eastOfUtc = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW],
+      episodes: [episode({ watchedAt })],
+      utcOffsetMinutes: 120,
+    });
+    const westOfUtc = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW],
+      episodes: [episode({ watchedAt })],
+      utcOffsetMinutes: -480,
+    });
+    expect(eastOfUtc.yearToDate.episodes).toBe(1);
+    expect(westOfUtc.yearToDate.episodes).toBe(0);
+  });
+
+  it("finds the biggest binge as a consecutive-day run on one show", () => {
+    const insights = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW, { ...SHOW, id: "show_2", title: "Other", externalId: "222" }],
+      episodes: [
+        // Severance: 6 episodes across 3 consecutive days.
+        episode({ episodeNumber: 1, watchedAt: NOW - 3 * DAY }),
+        episode({ episodeNumber: 2, watchedAt: NOW - 3 * DAY + 1000 }),
+        episode({ episodeNumber: 3, watchedAt: NOW - 2 * DAY }),
+        episode({ episodeNumber: 4, watchedAt: NOW - 2 * DAY + 1000 }),
+        episode({ episodeNumber: 5, watchedAt: NOW - DAY }),
+        episode({ episodeNumber: 6, watchedAt: NOW - DAY + 1000 }),
+        // Other show: 5 episodes but split by a gap day — runs of 3 and 2.
+        episode({ showId: "show_2", episodeNumber: 1, watchedAt: NOW - 10 * DAY }),
+        episode({ showId: "show_2", episodeNumber: 2, watchedAt: NOW - 10 * DAY + 1000 }),
+        episode({ showId: "show_2", episodeNumber: 3, watchedAt: NOW - 10 * DAY + 2000 }),
+        episode({ showId: "show_2", episodeNumber: 4, watchedAt: NOW - 8 * DAY }),
+        episode({ showId: "show_2", episodeNumber: 5, watchedAt: NOW - 8 * DAY + 1000 }),
+      ],
+    });
+    expect(insights.yearToDate.biggestBinge).toMatchObject({
+      showId: SHOW.id,
+      title: SHOW.title,
+      episodes: 6,
+      days: 3,
+    });
+  });
+
+  it("returns no binge below the episode threshold and prefers denser runs", () => {
+    const sparse = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW],
+      episodes: [
+        episode({ episodeNumber: 1, watchedAt: NOW - 2 * DAY }),
+        episode({ episodeNumber: 2, watchedAt: NOW - DAY }),
+        episode({ episodeNumber: 3, watchedAt: NOW - 10 * DAY }),
+      ],
+    });
+    expect(sparse.yearToDate.biggestBinge).toBeNull();
+
+    const dense = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW, { ...SHOW, id: "show_2", title: "Other", externalId: "222" }],
+      episodes: [
+        // 4 episodes in one day…
+        episode({ episodeNumber: 1, watchedAt: NOW - DAY }),
+        episode({ episodeNumber: 2, watchedAt: NOW - DAY + 1000 }),
+        episode({ episodeNumber: 3, watchedAt: NOW - DAY + 2000 }),
+        episode({ episodeNumber: 4, watchedAt: NOW - DAY + 3000 }),
+        // …beats 4 episodes across 2 days.
+        episode({ showId: "show_2", episodeNumber: 1, watchedAt: NOW - 10 * DAY }),
+        episode({ showId: "show_2", episodeNumber: 2, watchedAt: NOW - 10 * DAY + 1000 }),
+        episode({ showId: "show_2", episodeNumber: 3, watchedAt: NOW - 9 * DAY }),
+        episode({ showId: "show_2", episodeNumber: 4, watchedAt: NOW - 9 * DAY + 1000 }),
+      ],
+    });
+    expect(dense.yearToDate.biggestBinge).toMatchObject({
+      showId: SHOW.id,
+      episodes: 4,
+      days: 1,
+    });
+  });
+
   it("tracks the busiest day and 30-day window", () => {
     const insights = buildWatchInsights({
       now: NOW,
