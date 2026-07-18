@@ -75,6 +75,12 @@ import { formatDate } from "../../lib/format";
 import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
+import {
+  LogWatchSheet,
+  type EditableWatchLog,
+  type LogWatchScope,
+} from "../../components/LogWatchSheet";
+import { formatWatchedDateLabel } from "../../lib/watchLogDates";
 import { ImdbLogo } from "../../components/ImdbBadge";
 import {
   SHOW_BACKDROP_HEIGHT,
@@ -843,6 +849,36 @@ export default function ShowScreen() {
     }
     return set;
   }, [episodeProgress]);
+  // Every logged viewing of this show (rewatches included) — powers the ×N
+  // badges in the episode guide and the per-episode viewing history.
+  const queriedShowLogs = useQuery(
+    api.watchLogs.listForShow,
+    !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
+  );
+  const showLogs = isShowPreview ? [] : queriedShowLogs;
+  const episodeLogsByKey = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const log of (showLogs as any[]) ?? []) {
+      if (typeof log?.seasonNumber !== "number" || typeof log?.episodeNumber !== "number") {
+        continue;
+      }
+      const key = `S${log.seasonNumber}E${log.episodeNumber}`;
+      const list = map.get(key);
+      if (list) {
+        list.push(log);
+      } else {
+        map.set(key, [log]);
+      }
+    }
+    return map;
+  }, [showLogs]);
+  const episodeLogCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const [key, logs] of episodeLogsByKey) {
+      counts.set(key, logs.length);
+    }
+    return counts;
+  }, [episodeLogsByKey]);
   const toggleEpisode = useMutation(
     api.episodeProgress.toggleEpisode,
   ).withOptimisticUpdate(optimisticToggleEpisode);
@@ -906,6 +942,11 @@ export default function ShowScreen() {
   const [newListTitle, setNewListTitle] = useState("");
   const [creatingList, setCreatingList] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
+  const [logSheetState, setLogSheetState] = useState<{
+    scopes?: LogWatchScope[];
+    initialScopeKey?: string;
+    editLog?: EditableWatchLog;
+  } | null>(null);
   const [episodeReviewExpanded, setEpisodeReviewExpanded] = useState(false);
   const [episodeReviewText, setEpisodeReviewText] = useState("");
   const [optimisticMemberSet, setOptimisticMemberSet] = useState<Set<string> | null>(
@@ -1392,6 +1433,71 @@ export default function ShowScreen() {
         return details ? episodes.length > 0 : episodeCount > 0;
       }),
     [seasonDetailsByNumber, seasonOptions],
+  );
+
+  // Scope entries for the log-a-watch sheet. Seasons with loaded details
+  // know which released episodes are unwatched (so a first-watch season log
+  // can mark them); unloaded seasons still log, just without marking.
+  const buildSeasonLogScope = useCallback(
+    (season: any): LogWatchScope => {
+      const seasonNumber = season.season_number as number;
+      const details = seasonDetailsByNumber[seasonNumber];
+      const episodes = (details?.episodes ?? [])
+        .map((episode: any) => ({
+          episodeNumber: episode.episodeNumber ?? episode.episode_number,
+          title: episode.name,
+          airDate: episode.airDate ?? episode.air_date ?? null,
+        }))
+        .filter((episode: any) => isEpisodeAvailable(episode.airDate));
+      const unwatched = episodes.filter(
+        (episode: any) => !watchedEpisodeSet.has(`S${seasonNumber}E${episode.episodeNumber}`),
+      );
+      return {
+        key: `season:${seasonNumber}`,
+        label: season.name ?? `Season ${seasonNumber}`,
+        seasonNumber,
+        alreadyWatched: episodes.length > 0 && unwatched.length === 0,
+        markEpisodes: unwatched.map((episode: any) => ({
+          episodeNumber: episode.episodeNumber,
+          title: episode.title,
+        })),
+      };
+    },
+    [isEpisodeAvailable, seasonDetailsByNumber, watchedEpisodeSet],
+  );
+
+  const openLogSheetForShow = useCallback(() => {
+    if (isShowPreview) return;
+    const scopes: LogWatchScope[] = [
+      {
+        key: "show",
+        label: "Entire show",
+        alreadyWatched: currentStatus === "finished" || currentStatus === "caught_up",
+      },
+      ...seasonsWithEpisodes.map((season: any) => buildSeasonLogScope(season)),
+    ];
+    setLogSheetState({ scopes });
+  }, [buildSeasonLogScope, currentStatus, isShowPreview, seasonsWithEpisodes]);
+
+  const openLogSheetForEpisode = useCallback(
+    (seasonNumber: number, episode: any) => {
+      if (isShowPreview) return;
+      const episodeNumber = episode.episodeNumber ?? episode.episode_number;
+      const key = `S${seasonNumber}E${episodeNumber}`;
+      setLogSheetState({
+        scopes: [
+          {
+            key: `episode:${key}`,
+            label: `S${String(seasonNumber).padStart(2, "0")} E${String(episodeNumber).padStart(2, "0")}${episode.name ? ` · ${episode.name}` : ""}`,
+            seasonNumber,
+            episodeNumber,
+            episodeTitle: episode.name,
+            alreadyWatched: watchedEpisodeSet.has(key),
+          },
+        ],
+      });
+    },
+    [isShowPreview, watchedEpisodeSet],
   );
 
   useEffect(() => {
@@ -2321,6 +2427,31 @@ export default function ShowScreen() {
             <GlassPressable
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                openLogSheetForShow();
+              }}
+              accessibilityLabel="Log a watch"
+              accessibilityRole="button"
+              radius={16}
+              variant="control"
+              fallbackColor="rgba(14,165,233,0.10)"
+              tintColor="rgba(14,165,233,0.10)"
+              borderColor="rgba(14,165,233,0.20)"
+              surfaceStyle={{
+                width: 52,
+                height: 52,
+              }}
+              contentStyle={{
+                alignItems: "center",
+                justifyContent: "center",
+                width: 52,
+                height: 52,
+              }}
+            >
+              <Ionicons name="repeat" size={22} color="#38BDF8" />
+            </GlassPressable>
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 setReviewSheetVisible(true);
               }}
               accessibilityLabel="Write a review"
@@ -2669,6 +2800,7 @@ export default function ShowScreen() {
             imdbSeasonRatings={imdbRatings.seasons}
             isAuthenticated={isAuthenticated}
             watchedEpisodeSet={watchedEpisodeSet}
+            episodeLogCounts={episodeLogCounts}
             myEpisodeRatingMap={myEpisodeRatingMap}
             isEpisodeAvailable={isEpisodeAvailable}
             onLoadMoreSeasons={() => {
@@ -3255,6 +3387,7 @@ export default function ShowScreen() {
       {/* Episode Detail Sheet */}
       {episodeSheetVisible && selectedEpisode && (() => {
           const sheetEpKey = `S${selectedEpisode.seasonNumber}E${selectedEpisode.episode.episodeNumber}`;
+          const sheetEpLogs = episodeLogsByKey.get(sheetEpKey) ?? [];
           const sheetIsWatched = watchedEpisodeSet.has(sheetEpKey);
           const sheetIsAvailable = isEpisodeAvailable(selectedEpisode.episode.airDate);
           const myEpData = myEpisodeRatingMap.get(sheetEpKey);
@@ -3540,6 +3673,37 @@ export default function ShowScreen() {
                       </Text>
                     </GlassPressable>
 
+                    {/* Log a viewing (rewatch, backdate, rate the viewing) */}
+                    {sheetIsAvailable ? (
+                      <GlassPressable
+                        accessibilityLabel={sheetIsWatched ? "Log a rewatch" : "Log with details"}
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(14,165,233,0.10)"
+                        tintColor="rgba(14,165,233,0.10)"
+                        borderColor="rgba(14,165,233,0.22)"
+                        contentStyle={{
+                          alignItems: "center",
+                          flexDirection: "row",
+                          gap: 8,
+                          paddingHorizontal: 16,
+                          paddingVertical: 10,
+                        }}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          openLogSheetForEpisode(
+                            selectedEpisode.seasonNumber,
+                            selectedEpisode.episode,
+                          );
+                        }}
+                      >
+                        <Ionicons name="repeat" size={18} color="#38BDF8" />
+                        <Text className="text-sm font-semibold" style={{ color: "#7dd3fc" }}>
+                          Log
+                        </Text>
+                      </GlassPressable>
+                    ) : null}
+
                     {/* IMDb rating pill */}
                     {sheetImdbLoading ? (
                       <ShimmerBlock width={82} height={40} radius={999} />
@@ -3576,6 +3740,80 @@ export default function ShowScreen() {
                     {selectedEpisode.episode.overview}
                   </Text>
                 ) : null}
+
+                {/* ─── Your viewings ─── */}
+                {isAuthenticated && sheetEpLogs.length > 0 && (
+                  <GlassSurface
+                    radius={18}
+                    variant="surface"
+                    fallbackColor="rgba(22,26,34,0.66)"
+                    style={{ marginTop: 24 }}
+                    contentStyle={{ padding: 16 }}
+                  >
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-sm font-semibold text-text-secondary">
+                        Your viewings
+                      </Text>
+                      <View className="rounded-full border border-brand-500/25 bg-brand-500/10 px-2 py-0.5">
+                        <Text className="text-[11px] font-bold text-brand-300">
+                          ×{sheetEpLogs.length}
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="mt-2">
+                      {sheetEpLogs.map((log: any, index: number) => (
+                        <Pressable
+                          key={log._id}
+                          accessibilityLabel={`Edit viewing from ${formatWatchedDateLabel(log)}`}
+                          className="flex-row items-center gap-3 py-2.5 active:opacity-70"
+                          style={
+                            index < sheetEpLogs.length - 1
+                              ? {
+                                  borderBottomColor: "rgba(255,255,255,0.07)",
+                                  borderBottomWidth: StyleSheet.hairlineWidth,
+                                }
+                              : undefined
+                          }
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            setLogSheetState({ editLog: log });
+                          }}
+                        >
+                          <Ionicons
+                            name={log.isRewatch ? "repeat" : "checkmark-circle-outline"}
+                            size={16}
+                            color={log.isRewatch ? "#38BDF8" : "#5A6070"}
+                          />
+                          <View className="min-w-0 flex-1">
+                            <Text className="text-[14px] font-medium text-text-primary">
+                              {formatWatchedDateLabel(log)}
+                            </Text>
+                            {log.note ? (
+                              <Text
+                                className="mt-0.5 text-[12px] text-text-tertiary"
+                                numberOfLines={1}
+                              >
+                                {log.note}
+                              </Text>
+                            ) : null}
+                          </View>
+                          {typeof log.rating === "number" ? (
+                            <View className="flex-row items-center gap-1">
+                              <Ionicons name="star" size={12} color="#FBBF24" />
+                              <Text className="text-[12px] font-semibold text-amber-300">
+                                {log.rating}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {log.reaction ? (
+                            <Text style={{ fontSize: 14 }}>{log.reaction}</Text>
+                          ) : null}
+                          <Ionicons name="chevron-forward" size={14} color="#404654" />
+                        </Pressable>
+                      ))}
+                    </View>
+                  </GlassSurface>
+                )}
 
                 {/* ─── Your rating ─── */}
                 {isAuthenticated && sheetIsAvailable && (
@@ -3944,6 +4182,16 @@ export default function ShowScreen() {
           </View>
           );
         })()}
+      <LogWatchSheet
+        visible={logSheetState !== null}
+        onClose={() => setLogSheetState(null)}
+        showId={showId as string}
+        showTitle={show?.title ?? "This show"}
+        scopes={logSheetState?.scopes}
+        initialScopeKey={logSheetState?.initialScopeKey}
+        editLog={logSheetState?.editLog ?? null}
+      />
+
       <ReportModal
         visible={reportReviewId !== null}
         onClose={() => setReportReviewId(null)}

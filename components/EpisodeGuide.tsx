@@ -62,6 +62,8 @@ type EpisodeGuideProps = {
   imdbSeasonRatings?: Record<number, EpisodeGuideImdbSeason | null>;
   isAuthenticated: boolean;
   watchedEpisodeSet: Set<string>;
+  // "S1E2" → number of logged viewings; ×N badge appears from 2 up.
+  episodeLogCounts?: Map<string, number>;
   myEpisodeRatingMap: Map<string, { rating: number; reviewText?: string }>;
   isEpisodeAvailable: (airDate?: string | null) => boolean;
   onLoadMoreSeasons: () => void;
@@ -98,6 +100,7 @@ function EpisodeGuideComponent({
   imdbSeasonRatings,
   isAuthenticated,
   watchedEpisodeSet,
+  episodeLogCounts,
   myEpisodeRatingMap,
   isEpisodeAvailable,
   onLoadMoreSeasons,
@@ -397,6 +400,7 @@ function EpisodeGuideComponent({
                     const isWatched = watchedEpisodeSet.has(episodeKey);
                     const isAvailable = isEpisodeAvailable(episode.airDate);
                     const myRatingData = myEpisodeRatingMap.get(episodeKey);
+                    const logCount = episodeLogCounts?.get(episodeKey) ?? 0;
 
                     return (
                       <Pressable
@@ -453,6 +457,17 @@ function EpisodeGuideComponent({
                                 <Ionicons name="tv-outline" size={24} color="#5A6070" />
                               </View>
                             )}
+                            {logCount >= 2 ? (
+                              <View
+                                className="absolute bottom-1.5 left-1.5 flex-row items-center gap-1 rounded-full px-1.5 py-0.5"
+                                style={{ backgroundColor: "rgba(0,0,0,0.62)" }}
+                              >
+                                <Ionicons name="repeat" size={9} color="#7DD3FC" />
+                                <Text className="text-[9px] font-bold" style={{ color: "#7DD3FC" }}>
+                                  ×{logCount}
+                                </Text>
+                              </View>
+                            ) : null}
                             {isAuthenticated && isAvailable ? (
                               <GlassPressable
                                 radius={11}

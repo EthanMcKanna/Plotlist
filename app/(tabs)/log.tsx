@@ -28,21 +28,28 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import {
   buildDiaryFeed,
   computeDiaryPulse,
+  getDiaryApproxLabel,
   getDiaryEmptyCopy,
   getDiaryEpisodeLabel,
   getDiaryHeadline,
   getDiaryItemRating,
+  getDiaryItemReaction,
   getDiaryItemText,
   getDiaryItemTitle,
+  getDiaryLogPrecision,
+  isDiaryRewatch,
+  withLocalDiaryTimestamps,
   type DiaryBingeRow,
   type DiaryDayActivity,
   type DiaryDayLabel,
   type DiaryEntryRow,
   type DiaryFilter,
   type DiaryItem,
+  type DiaryLogItem,
   type DiaryMonthRow,
   type DiaryRow,
 } from "../../lib/logDiary";
+import { LogWatchSheet, type EditableWatchLog } from "../../components/LogWatchSheet";
 import { formatTime } from "../../lib/format";
 import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
@@ -60,7 +67,7 @@ const PAGE_SIZE = 40;
 const MAX_LIMIT = 160;
 
 type DiaryAction =
-  | { type: "log"; logId: Id<"watchLogs">; showId: string | null; title: string }
+  | { type: "log"; logId: Id<"watchLogs">; showId: string | null; title: string; item: DiaryLogItem }
   | { type: "review"; reviewId: Id<"reviews">; showId: string | null; title: string };
 
 export type LogSurfaceProps = {
@@ -69,6 +76,7 @@ export type LogSurfaceProps = {
   onLoadMore?: () => void;
   onDeleteLog?: (logId: Id<"watchLogs">, title: string) => void;
   onDeleteReview?: (reviewId: Id<"reviews">, title: string) => void;
+  onEditLog?: (item: DiaryLogItem) => void;
   now?: number;
 };
 
@@ -269,26 +277,36 @@ const EntryRow = memo(function EntryRow({
   const episodeLabel = getDiaryEpisodeLabel(item);
   const text = getDiaryItemText(item);
   const rating = getDiaryItemRating(item);
+  const reaction = getDiaryItemReaction(item);
   const isReview = item.type === "review";
   const href: Href | null = isReview
     ? `/review/${item.review._id}`
     : item.show?._id
       ? `/show/${item.show._id}`
       : null;
+  const isRewatch = isDiaryRewatch(item);
+  const precision = getDiaryLogPrecision(item);
+  const approxLabel = getDiaryApproxLabel(item);
+  // Exact entries show their clock time; day-precision backdates have the
+  // date in the rail and need no time; month/year/unknown say so.
+  const timeLabel =
+    isReview || precision === "exact"
+      ? formatTime(item.timestamp)
+      : approxLabel ?? "";
 
   return (
     <RowShell
       dayLabel={row.dayLabel}
       isLastOfDay={row.isLastOfDay}
       href={href}
-      accessibilityLabel={`${isReview ? "Review" : "Watch entry"} for ${title}`}
+      accessibilityLabel={`${isReview ? "Review" : isRewatch ? "Rewatch entry" : "Watch entry"} for ${title}`}
       onPress={lightHaptic}
       onLongPress={() => {
         mediumHaptic();
         onAction(
           isReview
             ? { type: "review", reviewId: item.review._id, showId: item.show?._id ?? null, title }
-            : { type: "log", logId: item.log._id, showId: item.show?._id ?? null, title },
+            : { type: "log", logId: item.log._id, showId: item.show?._id ?? null, title, item },
         );
       }}
     >
@@ -301,9 +319,9 @@ const EntryRow = memo(function EntryRow({
           >
             {title}
           </Text>
-          <Text className="text-[11px] font-medium text-text-tertiary">
-            {formatTime(item.timestamp)}
-          </Text>
+          {timeLabel ? (
+            <Text className="text-[11px] font-medium text-text-tertiary">{timeLabel}</Text>
+          ) : null}
         </View>
 
         {isReview ? (
@@ -318,9 +336,22 @@ const EntryRow = memo(function EntryRow({
             ) : null}
           </View>
         ) : (
-          <Text className="mt-1 text-[12px] font-semibold text-brand-300" numberOfLines={1}>
-            {episodeLabel ?? "Marked watched"}
-          </Text>
+          <View className="mt-1 flex-row items-center gap-2">
+            <Text
+              className="shrink text-[12px] font-semibold text-brand-300"
+              numberOfLines={1}
+            >
+              {episodeLabel ?? "Marked watched"}
+            </Text>
+            {isRewatch ? (
+              <View className="flex-row items-center gap-1 rounded-full border border-brand-500/25 bg-brand-500/10 px-1.5 py-0.5">
+                <Ionicons name="repeat" size={10} color="#7DD3FC" />
+                <Text className="text-[10px] font-bold text-brand-300">Rewatch</Text>
+              </View>
+            ) : null}
+            {rating !== null ? <Stars rating={rating} size={11} /> : null}
+            {reaction ? <Text style={{ fontSize: 13 }}>{reaction}</Text> : null}
+          </View>
         )}
 
         {text ? (
@@ -496,6 +527,7 @@ export function LogSurface({
   onLoadMore,
   onDeleteLog,
   onDeleteReview,
+  onEditLog,
   now = Date.now(),
 }: LogSurfaceProps) {
   const insets = useSafeAreaInsets();
@@ -538,7 +570,14 @@ export function LogSurface({
         onPress: () => onDeleteReview?.(reviewId, title),
       });
     } else {
-      const { logId, title } = pendingAction;
+      const { logId, title, item } = pendingAction;
+      if (onEditLog) {
+        options.push({
+          label: "Edit entry",
+          icon: "create-outline",
+          onPress: () => onEditLog(item),
+        });
+      }
       options.push({
         label: "Delete entry",
         icon: "trash-outline",
@@ -547,7 +586,7 @@ export function LogSurface({
       });
     }
     return options;
-  }, [onDeleteLog, onDeleteReview, pendingAction]);
+  }, [onDeleteLog, onDeleteReview, onEditLog, pendingAction]);
 
   const renderRow = useCallback(
     ({ item }: { item: DiaryRow }) => {
@@ -619,6 +658,11 @@ export default function LogScreen() {
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const [limit, setLimit] = useState(60);
+  const [editingLog, setEditingLog] = useState<{
+    log: EditableWatchLog;
+    showId: string;
+    showTitle: string;
+  } | null>(null);
   const activity = useQuery(
     api.watchLogs.listActivityForUser,
     me?._id ? { userId: me._id, limit } : "skip",
@@ -697,7 +741,9 @@ export default function LogScreen() {
     );
   }
 
-  const items: DiaryItem[] = (activity.items as DiaryItem[] | undefined) ?? [];
+  const items: DiaryItem[] = withLocalDiaryTimestamps(
+    (activity.items as DiaryItem[] | undefined) ?? [],
+  );
 
   return (
     <Screen hasTabBar>
@@ -707,6 +753,21 @@ export default function LogScreen() {
         onLoadMore={handleLoadMore}
         onDeleteLog={handleDeleteLog}
         onDeleteReview={handleDeleteReview}
+        onEditLog={(item) =>
+          setEditingLog({
+            log: item.log as EditableWatchLog,
+            showId: item.show?._id ?? (item.log.showId as string),
+            showTitle: getDiaryItemTitle(item),
+          })
+        }
+      />
+
+      <LogWatchSheet
+        visible={editingLog !== null}
+        onClose={() => setEditingLog(null)}
+        showId={editingLog?.showId ?? ""}
+        showTitle={editingLog?.showTitle ?? ""}
+        editLog={editingLog?.log ?? null}
       />
     </Screen>
   );

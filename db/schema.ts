@@ -230,6 +230,23 @@ export const watchStates = sqliteTable(
   }),
 );
 
+// How much of watched_at is meaningful. "exact" carries a full timestamp;
+// "day"/"month"/"year" mean the user backdated to a calendar period held in
+// watched_on ("2026-07-04" / "2026-07" / "2026") and watched_at is a
+// derived UTC-noon sort key for that period; "unknown" means the user
+// couldn't place the viewing at all and watched_at is just when they logged it.
+export const watchLogDatePrecisionValues = [
+  "exact",
+  "day",
+  "month",
+  "year",
+  "unknown",
+] as const;
+
+// One row per viewing, append-only: the same episode watched three times is
+// three rows with independent dates. season_number/episode_number encode
+// scope — both set = an episode viewing, season only = a whole-season
+// viewing, both null = a whole-show viewing.
 export const watchLogs = sqliteTable(
   "watch_logs",
   {
@@ -245,11 +262,26 @@ export const watchLogs = sqliteTable(
     seasonNumber: integer("season_number"),
     episodeNumber: integer("episode_number"),
     episodeTitle: text("episode_title"),
+    datePrecision: text("date_precision", { enum: watchLogDatePrecisionValues })
+      .default("exact")
+      .notNull(),
+    // Calendar period for day/month/year precision; null for exact/unknown.
+    watchedOn: text("watched_on"),
+    // When the entry was written (vs. watched_at, when the viewing happened).
+    // Nullable because SQLite can't add a NOT NULL column; pre-feature rows
+    // are backfilled to watched_at and all writers set it.
+    createdAt: timestampMs("created_at"),
+    // Per-viewing rating/reaction. Independent from the reviews table, which
+    // stays the single "current" rating per episode/show.
+    rating: doublePrecision("rating"),
+    reaction: text("reaction"),
+    isRewatch: boolean("is_rewatch").default(false).notNull(),
   },
   (table) => ({
     userWatchedIdx: index("watch_logs_user_watched_idx").on(table.userId, table.watchedAt),
     showWatchedIdx: index("watch_logs_show_watched_idx").on(table.showId, table.watchedAt),
     watchedIdx: index("watch_logs_watched_idx").on(table.watchedAt),
+    userShowIdx: index("watch_logs_user_show_idx").on(table.userId, table.showId),
   }),
 );
 
