@@ -8,7 +8,6 @@ import {
   type ComponentType,
 } from "react";
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   RefreshControl,
@@ -1150,8 +1149,7 @@ export function HomeSurface({
   };
 
   // Desktop web replaces the floating mobile top bar (avatar + bell live in
-  // the sidebar there) with an inline greeting header. Pull-to-refresh does
-  // not exist for mouse users, so the header carries a refresh button.
+  // the sidebar there) with an inline greeting header.
   const desktopHeader = isDesktopWeb ? (
     <View className="flex-row items-center justify-between gap-4 px-6 pb-2 pt-8">
       <Text className="flex-1 text-[28px] font-black tracking-tight text-text-primary">
@@ -1160,29 +1158,6 @@ export function HomeSurface({
           data.me?.displayName ?? data.me?.name ?? null,
         )}
       </Text>
-      <Pressable
-        onPress={() => void handleRefresh()}
-        disabled={refreshing}
-        accessibilityRole="button"
-        accessibilityLabel="Refresh home"
-        accessibilityState={{ disabled: refreshing, busy: refreshing }}
-        {...(Platform.OS === "web" ? { title: "Refresh" } : null)}
-        className="h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 web:transition-colors active:opacity-80"
-      >
-        {refreshing ? (
-          <ActivityIndicator size="small" color="#9BA1B0" />
-        ) : (
-          <Ionicons
-            name="refresh"
-            size={18}
-            color="#9BA1B0"
-            accessible={false}
-            accessibilityElementsHidden
-            aria-hidden={true}
-            importantForAccessibility="no"
-          />
-        )}
-      </Pressable>
     </View>
   ) : null;
 
