@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { withAlpha } from "../lib/genreExplorer";
+import { useIsDesktopWeb } from "../lib/webLayout";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -65,17 +66,17 @@ function ScopeToken({
       {...(Platform.OS === "web"
         ? { title: `Exit ${meta.label.toLowerCase()} search` }
         : null)}
-      style={(state) => [
+      // NativeWind drops style-FUNCTION results on web when className is
+      // present, so hover/active live in classes and dynamic accent colors in
+      // a static style object (same rule for every Pressable in this file).
+      style={[
         styles.scopeToken,
         {
-          backgroundColor: withAlpha(
-            meta.accent,
-            Platform.OS === "web" && (state as any).hovered ? 0.22 : 0.14,
-          ),
+          backgroundColor: withAlpha(meta.accent, 0.14),
           borderColor: withAlpha(meta.accent, 0.42),
         },
       ]}
-      className="active:opacity-70"
+      className="hover:opacity-80 active:opacity-70 web:transition-opacity"
     >
       <Ionicons
         name={meta.icon}
@@ -108,6 +109,7 @@ function ScopeAction({
   title,
   subtitle,
   accessibilityLabel,
+  isDesktopWeb,
   onPress,
 }: {
   icon: IconName;
@@ -115,6 +117,7 @@ function ScopeAction({
   title: string;
   subtitle: string;
   accessibilityLabel: string;
+  isDesktopWeb: boolean;
   onPress: () => void;
 }) {
   return (
@@ -122,20 +125,26 @@ function ScopeAction({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      style={(state) => [
-        styles.scopeAction,
-        Platform.OS === "web" && (state as any).hovered
-          ? styles.scopeActionHovered
-          : null,
-      ]}
-      className="active:opacity-75"
+      className={
+        isDesktopWeb
+          ? "flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-3.5 py-3 hover:bg-dark-hover active:bg-dark-hover web:transition-colors"
+          : "flex-row items-center gap-2.5 rounded-2xl border border-dark-border bg-dark-card px-3 py-2.5 hover:bg-dark-hover active:bg-dark-hover web:transition-colors"
+      }
+      // Phones split the row 50/50; the desktop column is wide enough that
+      // stretched cards look empty, so they hug their content instead.
+      style={isDesktopWeb ? styles.scopeActionDesktop : styles.scopeActionFill}
     >
       <View
-        style={[styles.scopeActionIcon, { backgroundColor: withAlpha(accent, 0.14) }]}
+        style={{ backgroundColor: withAlpha(accent, 0.16) }}
+        className={
+          isDesktopWeb
+            ? "h-9 w-9 items-center justify-center rounded-xl"
+            : "h-8 w-8 items-center justify-center rounded-lg"
+        }
       >
         <Ionicons
           name={icon}
-          size={14}
+          size={isDesktopWeb ? 17 : 15}
           color={accent}
           accessible={false}
           accessibilityElementsHidden
@@ -144,13 +153,38 @@ function ScopeAction({
         />
       </View>
       <View className="min-w-0 flex-1">
-        <Text className="text-[13px] font-bold text-text-primary" numberOfLines={1}>
+        <Text
+          className={
+            isDesktopWeb
+              ? "text-[14px] font-bold text-text-primary"
+              : "text-[13px] font-bold text-text-primary"
+          }
+          numberOfLines={1}
+        >
           {title}
         </Text>
-        <Text className="text-[11px] text-text-tertiary" numberOfLines={1}>
+        <Text
+          className={
+            isDesktopWeb
+              ? "mt-0.5 text-[12px] text-text-tertiary"
+              : "text-[11px] text-text-tertiary"
+          }
+          numberOfLines={1}
+        >
           {subtitle}
         </Text>
       </View>
+      {isDesktopWeb ? (
+        <Ionicons
+          name="chevron-forward"
+          size={14}
+          color="#5A6070"
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+      ) : null}
     </Pressable>
   );
 }
@@ -179,6 +213,7 @@ export function SearchCommandCenter({
   onClear: () => void;
 }) {
   const copy = getSearchCommandCenterCopy(mode);
+  const isDesktopWeb = useIsDesktopWeb();
   const scopeAccent = mode === "shows" ? "#38BDF8" : SCOPE_META[mode].accent;
   const showScopeActions = mode === "shows" && query.length === 0;
 
@@ -227,6 +262,10 @@ export function SearchCommandCenter({
           placeholderTextColor="#6D7484"
           accessibilityLabel={copy.accessibilityLabel}
           className="ml-2.5 flex-1 py-3 text-[16px] text-text-primary"
+          // The frame's accent border is the focus treatment; without this the
+          // browser draws its default ring on the inner <input> too, nesting a
+          // second rectangle inside the rounded field.
+          style={Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null}
           returnKeyType="search"
           autoCorrect={false}
           autoCapitalize="none"
@@ -267,13 +306,7 @@ export function SearchCommandCenter({
               accessibilityRole="button"
               accessibilityLabel="Clear search"
               {...(Platform.OS === "web" ? { title: "Clear search" } : null)}
-              style={(state) => [
-                styles.clearButton,
-                Platform.OS === "web" && (state as any).hovered
-                  ? styles.clearButtonHovered
-                  : null,
-              ]}
-              className="active:opacity-70"
+              className="h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 active:opacity-70 web:transition-colors"
             >
               <Ionicons
                 name="close"
@@ -297,6 +330,7 @@ export function SearchCommandCenter({
             title="Vibe search"
             subtitle="Describe a mood"
             accessibilityLabel="Switch to vibe search"
+            isDesktopWeb={isDesktopWeb}
             onPress={() => onModeChange("vibe")}
           />
           <ScopeAction
@@ -305,6 +339,7 @@ export function SearchCommandCenter({
             title="Find people"
             subtitle="Who to follow"
             accessibilityLabel="Switch to people search"
+            isDesktopWeb={isDesktopWeb}
             onPress={() => onModeChange("people")}
           />
         </View>
@@ -320,42 +355,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 18,
   },
-  clearButton: {
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 8,
-    height: 32,
-    justifyContent: "center",
-    width: 32,
-  },
-  clearButtonHovered: {
-    backgroundColor: "rgba(255,255,255,0.14)",
-  },
   container: {
     gap: 10,
   },
-  scopeAction: {
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.045)",
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+  scopeActionDesktop: {
+    flexBasis: "auto",
+    flexGrow: 0,
+    minWidth: 250,
+  },
+  scopeActionFill: {
     flex: 1,
-    flexDirection: "row",
-    gap: 9,
-    minHeight: 52,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
-  scopeActionHovered: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  scopeActionIcon: {
-    alignItems: "center",
-    borderRadius: 10,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
   },
   scopeRow: {
     flexDirection: "row",
