@@ -78,8 +78,9 @@ function DraggableFavoriteShow({
   return (
     <GestureDetector gesture={pan}>
       <Animated.View
-        style={[animatedStyle, { paddingTop: 6, paddingRight: 6 }]}
-        className="mr-4"
+        // marginRight lives in style, not className — NativeWind classes are
+        // dropped from Reanimated components in release web builds.
+        style={[animatedStyle, { marginRight: 16, paddingTop: 6, paddingRight: 6 }]}
       >
         <Pressable
           onPress={() => onRemove(show._id)}

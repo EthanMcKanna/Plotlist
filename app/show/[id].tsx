@@ -3332,7 +3332,9 @@ export default function ShowScreen() {
                 >
                 <Animated.ScrollView
                   ref={sheetScrollRef}
-                  className="flex-1"
+                  // flex lives in style, not className — NativeWind classes
+                  // are dropped from Reanimated components in release web.
+                  style={{ flex: 1 }}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
                   keyboardShouldPersistTaps="handled"

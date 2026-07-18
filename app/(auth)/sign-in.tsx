@@ -80,6 +80,18 @@ const CODE_LEN = 6;
 
 const SHOWS = CURATED_SHOWS;
 
+// NativeWind classNames are dropped from Reanimated components in release
+// web builds (the repo's known Animated-className gotcha). Web never runs
+// these entrance animations (animateOnMount is false there), so it renders
+// the plain primitives; native keeps the animated ones. The cast keeps the
+// `entering` prop typed — it is always undefined on web.
+const EnteringView = (Platform.OS === "web"
+  ? View
+  : Animated.View) as typeof Animated.View;
+const EnteringText = (Platform.OS === "web"
+  ? Text
+  : Animated.Text) as typeof Animated.Text;
+
 const R1 = [SHOWS[0], SHOWS[1], SHOWS[2], SHOWS[3], SHOWS[4], SHOWS[5], SHOWS[12]];
 const R2 = [SHOWS[6], SHOWS[7], SHOWS[8], SHOWS[9], SHOWS[10], SHOWS[13], SHOWS[14]];
 const R3 = [SHOWS[11], SHOWS[15], SHOWS[16], SHOWS[17], SHOWS[18], SHOWS[3], SHOWS[1]];
@@ -806,7 +818,7 @@ export default function SignInScreen() {
                 </Text>
               </Animated.View>
 
-              <Animated.View
+              <EnteringView
                 entering={animateOnMount ? FadeIn.delay(350).duration(500) : undefined}
                 className="my-3 h-[1.5px] w-14 rounded-full bg-brand-500"
               />
@@ -820,7 +832,7 @@ export default function SignInScreen() {
               </Animated.View>
 
               {errorMessage ? (
-                <Animated.View
+                <EnteringView
                   entering={
                     animateOnMount ? FadeInDown.duration(220) : undefined
                   }
@@ -830,7 +842,7 @@ export default function SignInScreen() {
                   <Text className="text-[13px] font-semibold leading-5 text-red-300">
                     {errorMessage}
                   </Text>
-                </Animated.View>
+                </EnteringView>
               ) : null}
 
               {/* ── Form ── */}
@@ -849,14 +861,14 @@ export default function SignInScreen() {
                     </View>
                   ) : null}
 
-                  <Animated.Text
+                  <EnteringText
                     entering={animateOnMount ? FadeIn.delay(700).duration(400) : undefined}
                     className="mt-5 text-center text-[13px] leading-5 text-text-tertiary"
                   >
                     {loading
                       ? "Signing you in…"
                       : "One tap with your Apple ID. No passwords, no codes."}
-                  </Animated.Text>
+                  </EnteringText>
 
                   <Pressable
                     onPress={() => goToPhone("apple")}
@@ -929,12 +941,12 @@ export default function SignInScreen() {
                     />
                   </View>
 
-                  <Animated.Text
+                  <EnteringText
                     entering={animateOnMount ? FadeIn.delay(250).duration(400) : undefined}
                     className="mt-4 text-center text-[13px] leading-5 text-text-tertiary"
                   >
                     We&apos;ll text you a one-time code.
-                  </Animated.Text>
+                  </EnteringText>
 
                   {appleAvailable && Platform.OS === "web" ? (
                     // Web: Apple's JS popup flow, straight from the phone
@@ -965,7 +977,7 @@ export default function SignInScreen() {
                     </Pressable>
                   ) : null}
 
-                  <Animated.Text
+                  <EnteringText
                     entering={animateOnMount ? FadeIn.delay(300).duration(400) : undefined}
                     className="mt-4 text-center text-[12px] leading-4 text-text-tertiary"
                   >
@@ -986,7 +998,7 @@ export default function SignInScreen() {
                       Privacy Policy
                     </Text>
                     .
-                  </Animated.Text>
+                  </EnteringText>
                 </Animated.View>
               ) : (
                 <Animated.View key="step-code" entering={paneEntering}>
