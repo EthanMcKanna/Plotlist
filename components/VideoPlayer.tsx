@@ -23,11 +23,14 @@ export function VideoPlayer({ videoKey, title, type }: VideoPlayerProps) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           setModalVisible(true);
         }}
-        className="w-64 active:opacity-80"
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${title}`}
+        className="w-64 web:transition-opacity active:opacity-80 hover:opacity-90"
       >
         <View className="relative">
           <Image
             source={{ uri: thumbnailUrl }}
+            accessibilityLabel={title}
             style={{ width: 256, height: 144, borderRadius: 12 }}
             contentFit="cover"
             transition={200}

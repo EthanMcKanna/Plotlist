@@ -59,6 +59,7 @@ import Animated, {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api } from "../../lib/plotlist/api";
+import { confirmAction, notify, notifyError } from "../../lib/dialogs";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
@@ -77,6 +78,7 @@ import { EpisodeGuide } from "../../components/EpisodeGuide";
 import { ImdbLogo } from "../../components/ImdbBadge";
 import {
   SHOW_BACKDROP_HEIGHT,
+  SHOW_DETAIL_MAX_WIDTH,
   SHOW_POSTER_HEIGHT,
   SHOW_POSTER_WIDTH,
   ShimmerBlock,
@@ -112,8 +114,9 @@ import {
 } from "../../lib/seasonGuide";
 
 const BACKDROP_HEIGHT = SHOW_BACKDROP_HEIGHT;
-// Detail pages read best as a single centered column on desktop web.
-const WEB_SHOW_DETAIL_MAX_WIDTH = 1040;
+// Detail pages read best as a single centered column on desktop web. Shared
+// with the skeleton so the loading and loaded columns line up exactly.
+const WEB_SHOW_DETAIL_MAX_WIDTH = SHOW_DETAIL_MAX_WIDTH;
 const DISMISS_THRESHOLD = 120;
 const DISMISS_VELOCITY = 500;
 const POSTER_HEIGHT = SHOW_POSTER_HEIGHT;
@@ -1005,6 +1008,21 @@ export default function ShowScreen() {
     }, 290);
   }, []);
 
+  // The episode sheet is a custom overlay (not a react-native Modal), so on
+  // web it needs its own Escape-to-close wiring.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !episodeSheetVisible) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeEpisodeSheet();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeEpisodeSheet, episodeSheetVisible]);
+
   const episodeSheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetTranslateY.value }],
   }));
@@ -1670,7 +1688,7 @@ export default function ShowScreen() {
           episodeNumber,
           episodeTitle,
         }).catch((error) => {
-          Alert.alert(
+          notifyError(
             "Couldn't mark episodes",
             getUserFacingApiErrorMessage(error) ?? String(error),
           );
@@ -1711,6 +1729,11 @@ export default function ShowScreen() {
         return;
       }
       if (!isAuthenticated) {
+        // Web gets the standard gated-action pattern: straight to sign-in.
+        if (Platform.OS === "web") {
+          router.push("/sign-in");
+          return;
+        }
         Alert.alert("Sign in required", "Set your watch status after signing in.");
         return;
       }
@@ -1728,10 +1751,10 @@ export default function ShowScreen() {
       setOptimisticStatus(optimisticValue);
       void setStatus({ showId, status: value }).catch((error) => {
         setOptimisticStatus(undefined);
-        Alert.alert("Couldn't update status", String(error));
+        notifyError("Couldn't update status", String(error));
       });
     },
-    [activeDetails?.status, isAuthenticated, isShowPreview, setStatus, showId]
+    [activeDetails?.status, isAuthenticated, isShowPreview, router, setStatus, showId]
   );
 
   const handleRemoveStatus = useCallback(() => {
@@ -1744,21 +1767,25 @@ export default function ShowScreen() {
     setOptimisticStatus(null);
     void removeStatus({ showId }).catch((error) => {
       setOptimisticStatus(undefined);
-      Alert.alert("Couldn't update status", String(error));
+      notifyError("Couldn't update status", String(error));
     });
   }, [isAuthenticated, isShowPreview, removeStatus, showId]);
 
   const handleReview = useCallback(async () => {
     if (!isAuthenticated) {
+      if (Platform.OS === "web") {
+        router.push("/sign-in");
+        return;
+      }
       Alert.alert("Sign in required", "Post a review after signing in.");
       return;
     }
     if (rating < 0.5 || rating > 5) {
-      Alert.alert("Invalid rating", "Tap the stars to set a rating.");
+      notifyError("Invalid rating", "Tap the stars to set a rating.");
       return;
     }
     if (!reviewText) {
-      Alert.alert("Missing review", "Write a short review first.");
+      notifyError("Missing review", "Write a short review first.");
       return;
     }
     const draft = { rating, reviewText, spoiler };
@@ -1780,13 +1807,17 @@ export default function ShowScreen() {
       setReviewText(draft.reviewText);
       setSpoiler(draft.spoiler);
       setReviewSheetVisible(true);
-      Alert.alert("Could not publish review", getUserFacingApiErrorMessage(error) ?? String(error));
+      notifyError("Could not publish review", getUserFacingApiErrorMessage(error) ?? String(error));
     }
-  }, [createReview, isAuthenticated, isShowPreview, rating, reviewText, showId, spoiler]);
+  }, [createReview, isAuthenticated, isShowPreview, rating, reviewText, router, showId, spoiler]);
 
   const handleToggleList = useCallback(
     (listId: Id<"lists">) => {
       if (!isAuthenticated) {
+        if (Platform.OS === "web") {
+          router.push("/sign-in");
+          return;
+        }
         Alert.alert("Sign in required", "Add to a list after signing in.");
         return;
       }
@@ -1812,14 +1843,18 @@ export default function ShowScreen() {
       }
       void toggleListItem({ listId, showId }).catch((error) => {
         setOptimisticMemberSet(null);
-        Alert.alert("Error", String(error));
+        notifyError("Error", String(error));
       });
     },
-    [toggleListItem, isAuthenticated, isShowPreview, showId, memberSet],
+    [toggleListItem, isAuthenticated, isShowPreview, router, showId, memberSet],
   );
 
   const handleCreateListFromPicker = useCallback(async () => {
     if (!isAuthenticated) {
+      if (Platform.OS === "web") {
+        router.push("/sign-in");
+        return;
+      }
       Alert.alert("Sign in required", "Create a list after signing in.");
       return;
     }
@@ -1848,7 +1883,7 @@ export default function ShowScreen() {
       setNewListMode(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
+      notifyError("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setCreatingList(false);
     }
@@ -1858,24 +1893,24 @@ export default function ShowScreen() {
     isAuthenticated,
     isShowPreview,
     newListTitle,
+    router,
     serverMemberSet,
     showId,
   ]);
 
   const handleDeleteReview = useCallback(
     (reviewId: string) => {
-      Alert.alert("Delete review?", "This can't be undone.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteReview({ reviewId: reviewId as Id<"reviews"> }).catch(() => {
-              Alert.alert("Couldn't delete review", "Check your connection and try again.");
-            });
-          },
+      confirmAction({
+        title: "Delete review?",
+        message: "This can't be undone.",
+        confirmLabel: "Delete",
+        destructive: true,
+        onConfirm: () => {
+          void deleteReview({ reviewId: reviewId as Id<"reviews"> }).catch(() => {
+            notifyError("Couldn't delete review", "Check your connection and try again.");
+          });
         },
-      ]);
+      });
     },
     [deleteReview],
   );
@@ -1979,7 +2014,7 @@ export default function ShowScreen() {
     try {
       await Linking.openURL(provider.deepLinkUrl);
     } catch {
-      Alert.alert("Couldn't open provider", "Try again in a moment.");
+      notifyError("Couldn't open provider", "Try again in a moment.");
     }
   }, []);
   const handleBackPress = useCallback(() => {
@@ -2038,6 +2073,7 @@ export default function ShowScreen() {
             {backdropUri ? (
               <Image
                 source={{ uri: backdropUri }}
+                accessibilityLabel={show?.title ? `${show.title} backdrop` : undefined}
                 style={{ width: "100%", height: BACKDROP_HEIGHT }}
                 contentFit="cover"
                 cachePolicy="memory-disk"
@@ -2100,6 +2136,7 @@ export default function ShowScreen() {
             >
               <Image
                 source={show?.posterUrl ? { uri: show.posterUrl } : undefined}
+                accessibilityLabel={show?.title ? `${show.title} poster` : undefined}
                 style={{
                   width: POSTER_WIDTH,
                   height: POSTER_HEIGHT,
@@ -2348,7 +2385,10 @@ export default function ShowScreen() {
         <View className="mt-8 px-6">
           <Text
             className="text-sm text-text-secondary"
-            style={{ lineHeight: 22 }}
+            style={[
+              { lineHeight: 22 },
+              Platform.OS === "web" && { userSelect: "text" as const },
+            ]}
           >
             {show?.overview ?? "No overview available."}
           </Text>
@@ -2535,9 +2575,9 @@ export default function ShowScreen() {
                       action="Browse"
                       accessibilityLabel={`Browse ${item.def.title} shows`}
                       style={{ marginRight: 12 }}
+                      href={`/facet/${item.def.key}`}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        guardedPush(`/facet/${item.def.key}`);
                       }}
                     />
                   )}
@@ -2569,16 +2609,9 @@ export default function ShowScreen() {
                       name={item.name}
                       role={item.character}
                       profilePath={item.profilePath}
+                      personId={String(item.id)}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        guardedPush({
-                          pathname: "/person/[id]",
-                          params: {
-                            id: String(item.id),
-                            name: item.name,
-                            profilePath: item.profilePath ?? "",
-                          },
-                        });
                       }}
                     />
                   )}
@@ -2610,16 +2643,9 @@ export default function ShowScreen() {
                       name={item.name}
                       role={item.job}
                       profilePath={item.profilePath}
+                      personId={String(item.id)}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        guardedPush({
-                          pathname: "/person/[id]",
-                          params: {
-                            id: String(item.id),
-                            name: item.name,
-                            profilePath: item.profilePath ?? "",
-                          },
-                        });
                       }}
                     />
                   )}
@@ -3070,134 +3096,160 @@ export default function ShowScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Review sheet */}
+      {/* Review sheet — full-screen page sheet on phones, centered dialog on
+          desktop web and wide iPad windows */}
       <Modal
         visible={reviewSheetVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
+        transparent={isDesktopWeb}
+        animationType={isDesktopWeb ? "fade" : "slide"}
+        presentationStyle={isDesktopWeb ? "overFullScreen" : "pageSheet"}
         statusBarTranslucent
         onRequestClose={() => setReviewSheetVisible(false)}
       >
-        <View className="flex-1 bg-dark-bg" style={{ backgroundColor: "#0D0F14" }}>
-          <View
-            className="flex-row items-center justify-between border-b border-dark-border px-6 py-4"
-            style={webReadingStyle}
-          >
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setReviewSheetVisible(false);
-              }}
-            >
-              <Text className="text-base text-text-tertiary">Cancel</Text>
-            </Pressable>
-            <Text className="text-base font-semibold text-text-primary">
-              Write a Review
-            </Text>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                handleReview();
-              }}
-              disabled={rating < 0.5 || !reviewText}
-            >
-              <Text
-                className={`text-base font-semibold ${
-                  rating >= 0.5 && reviewText
-                    ? "text-brand-500"
-                    : "text-text-tertiary"
-                }`}
+        {(() => {
+          const composer = (
+            <View className="flex-1 bg-dark-bg" style={{ backgroundColor: "#0D0F14" }}>
+              <View
+                className="flex-row items-center justify-between border-b border-dark-border px-6 py-4"
+                style={webReadingStyle}
               >
-                Publish
-              </Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            className="flex-1"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={[
-              {
-                paddingHorizontal: 24,
-                paddingTop: 24,
-                paddingBottom: insets.bottom + 32,
-              },
-              webReadingStyle,
-            ]}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View className="mb-6">
-              <Text className="mb-3 text-sm font-semibold text-text-secondary">
-                Your rating
-              </Text>
-              <StarRating value={rating} onChange={setRating} size={36} />
-              {rating > 0 && (
-                <Text className="mt-2 text-sm text-text-tertiary">
-                  {rating} out of 5 stars
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setReviewSheetVisible(false);
+                  }}
+                >
+                  <Text className="text-base text-text-tertiary">Cancel</Text>
+                </Pressable>
+                <Text className="text-base font-semibold text-text-primary">
+                  Write a Review
                 </Text>
-              )}
-            </View>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    handleReview();
+                  }}
+                  disabled={rating < 0.5 || !reviewText}
+                >
+                  <Text
+                    className={`text-base font-semibold ${
+                      rating >= 0.5 && reviewText
+                        ? "text-brand-500"
+                        : "text-text-tertiary"
+                    }`}
+                  >
+                    Publish
+                  </Text>
+                </Pressable>
+              </View>
 
-            <Text className="mb-2 text-sm font-semibold text-text-secondary">
-              Review
-            </Text>
-            <GlassSurface
-              radius={18}
-              variant="control"
-              fallbackColor="rgba(22,26,34,0.72)"
-              contentStyle={{ minHeight: 140 }}
-            >
-              <TextInput
-                value={reviewText}
-                onChangeText={setReviewText}
-                placeholder="Share your thoughts..."
-                placeholderTextColor="#5A6070"
-                multiline
-                autoFocus
-                className="text-base text-text-primary"
-                style={{
-                  minHeight: 140,
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  textAlignVertical: "top",
-                }}
-              />
-            </GlassSurface>
-
-            <GlassPressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setSpoiler((prev) => !prev);
-              }}
-              radius={999}
-              variant="control"
-              fallbackColor={spoiler ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)"}
-              tintColor={spoiler ? "rgba(239,68,68,0.10)" : undefined}
-              borderColor={spoiler ? "rgba(239,68,68,0.28)" : undefined}
-              style={{ alignSelf: "flex-start", marginTop: 16 }}
-              contentStyle={{
-                alignItems: "center",
-                flexDirection: "row",
-                gap: 8,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-              }}
-            >
-              <Ionicons
-                name={spoiler ? "warning" : "warning-outline"}
-                size={14}
-                color={spoiler ? "#EF4444" : "#9BA1B0"}
-              />
-              <Text
-                className={`text-sm font-medium ${
-                  spoiler ? "text-red-400" : "text-text-secondary"
-                }`}
+              <ScrollView
+                className="flex-1"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                  {
+                    paddingHorizontal: 24,
+                    paddingTop: 24,
+                    paddingBottom: insets.bottom + 32,
+                  },
+                  webReadingStyle,
+                ]}
+                keyboardShouldPersistTaps="handled"
               >
-                {spoiler ? "Contains spoilers" : "No spoilers"}
-              </Text>
-            </GlassPressable>
-          </ScrollView>
-        </View>
+                <View className="mb-6">
+                  <Text className="mb-3 text-sm font-semibold text-text-secondary">
+                    Your rating
+                  </Text>
+                  <StarRating value={rating} onChange={setRating} size={36} />
+                  {rating > 0 && (
+                    <Text className="mt-2 text-sm text-text-tertiary">
+                      {rating} out of 5 stars
+                    </Text>
+                  )}
+                </View>
+
+                <Text className="mb-2 text-sm font-semibold text-text-secondary">
+                  Review
+                </Text>
+                <GlassSurface
+                  radius={18}
+                  variant="control"
+                  fallbackColor="rgba(22,26,34,0.72)"
+                  contentStyle={{ minHeight: 140 }}
+                >
+                  <TextInput
+                    value={reviewText}
+                    onChangeText={setReviewText}
+                    placeholder="Share your thoughts..."
+                    placeholderTextColor="#5A6070"
+                    multiline
+                    autoFocus
+                    className="text-base text-text-primary"
+                    style={{
+                      minHeight: 140,
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      textAlignVertical: "top",
+                    }}
+                  />
+                </GlassSurface>
+
+                <GlassPressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setSpoiler((prev) => !prev);
+                  }}
+                  radius={999}
+                  variant="control"
+                  fallbackColor={spoiler ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)"}
+                  tintColor={spoiler ? "rgba(239,68,68,0.10)" : undefined}
+                  borderColor={spoiler ? "rgba(239,68,68,0.28)" : undefined}
+                  style={{ alignSelf: "flex-start", marginTop: 16 }}
+                  contentStyle={{
+                    alignItems: "center",
+                    flexDirection: "row",
+                    gap: 8,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                  }}
+                >
+                  <Ionicons
+                    name={spoiler ? "warning" : "warning-outline"}
+                    size={14}
+                    color={spoiler ? "#EF4444" : "#9BA1B0"}
+                  />
+                  <Text
+                    className={`text-sm font-medium ${
+                      spoiler ? "text-red-400" : "text-text-secondary"
+                    }`}
+                  >
+                    {spoiler ? "Contains spoilers" : "No spoilers"}
+                  </Text>
+                </GlassPressable>
+              </ScrollView>
+            </View>
+          );
+          if (!isDesktopWeb) {
+            return composer;
+          }
+          return (
+            <Pressable
+              onPress={() => setReviewSheetVisible(false)}
+              className="flex-1 justify-center bg-black/50 px-6"
+            >
+              <Pressable onPress={(e) => e.stopPropagation()} style={webSheetStyle}>
+                <View
+                  className="overflow-hidden rounded-3xl border border-dark-border"
+                  // Definite height so the composer's flex-1 scroll area
+                  // resolves inside the centered dialog.
+                  style={{ height: Math.min(620, SCREEN_HEIGHT - 96) }}
+                >
+                  {composer}
+                </View>
+              </Pressable>
+            </Pressable>
+          );
+        })()}
       </Modal>
 
       {/* Episode Detail Sheet */}
@@ -3295,6 +3347,7 @@ export default function ShowScreen() {
                 {selectedStillPath ? (
                   <Image
                     source={{ uri: selectedStillPath }}
+                    accessibilityLabel={`${selectedEpisode.episode.name} still`}
                     style={{ width: "100%", height: "100%", backgroundColor: "#1C2028" }}
                     contentFit="cover"
                     transition={200}
@@ -3514,7 +3567,10 @@ export default function ShowScreen() {
 
                 {/* Overview */}
                 {selectedEpisode.episode.overview ? (
-                  <Text className="mt-5 text-[15px] leading-6 text-text-secondary">
+                  <Text
+                    className="mt-5 text-[15px] leading-6 text-text-secondary"
+                    style={Platform.OS === "web" ? { userSelect: "text" as const } : null}
+                  >
                     {selectedEpisode.episode.overview}
                   </Text>
                 ) : null}
@@ -3557,21 +3613,20 @@ export default function ShowScreen() {
                               setEpisodeReviewExpanded(false);
                               setEpisodeReviewText("");
                               removeEpisodeRating(removeArgs).catch(() => {
-                                Alert.alert(
+                                notifyError(
                                   "Couldn't remove rating",
                                   "Check your connection and try again.",
                                 );
                               });
                             };
                             if (myEpReviewText) {
-                              Alert.alert(
-                                "Remove rating?",
-                                "Your episode review will be deleted too.",
-                                [
-                                  { text: "Cancel", style: "cancel" },
-                                  { text: "Remove", style: "destructive", onPress: performRemove },
-                                ],
-                              );
+                              confirmAction({
+                                title: "Remove rating?",
+                                message: "Your episode review will be deleted too.",
+                                confirmLabel: "Remove",
+                                destructive: true,
+                                onConfirm: performRemove,
+                              });
                             } else {
                               performRemove();
                             }
@@ -3585,7 +3640,7 @@ export default function ShowScreen() {
                               episodeTitle: selectedEpisode.episode.name,
                               rating: val,
                             }).catch(() => {
-                              Alert.alert(
+                              notifyError(
                                 "Couldn't save rating",
                                 "Check your connection and try again.",
                               );
@@ -3642,7 +3697,7 @@ export default function ShowScreen() {
                                       rating: myEpRating,
                                       reviewText: "",
                                     }).catch(() => {
-                                      Alert.alert(
+                                      notifyError(
                                         "Couldn't delete review",
                                         "Check your connection and try again.",
                                       );
@@ -3681,7 +3736,7 @@ export default function ShowScreen() {
                                   }).catch((error) => {
                                     setEpisodeReviewText(draft);
                                     setEpisodeReviewExpanded(true);
-                                    Alert.alert(
+                                    notifyError(
                                       "Couldn't save review",
                                       getUserFacingApiErrorMessage(error) ??
                                         "Check your connection and try again.",
@@ -3806,7 +3861,15 @@ export default function ShowScreen() {
                               </View>
                             </View>
                             {item.review.reviewText ? (
-                              <Text className="mt-2 text-sm leading-5 text-text-secondary" numberOfLines={4}>
+                              <Text
+                                className="mt-2 text-sm leading-5 text-text-secondary"
+                                numberOfLines={4}
+                                style={
+                                  Platform.OS === "web"
+                                    ? { userSelect: "text" as const }
+                                    : null
+                                }
+                              >
                                 {item.review.reviewText}
                               </Text>
                             ) : null}
@@ -3886,9 +3949,9 @@ export default function ShowScreen() {
           if (!reportReviewId) return;
           try {
             await reportReview({ targetType: "review", targetId: reportReviewId, reason });
-            Alert.alert("Report submitted", "Thanks — we'll take a look.");
+            notify("Report submitted", "Thanks — we'll take a look.");
           } catch {
-            Alert.alert("Couldn't submit report", "Check your connection and try again.");
+            notifyError("Couldn't submit report", "Check your connection and try again.");
           }
         }}
       />

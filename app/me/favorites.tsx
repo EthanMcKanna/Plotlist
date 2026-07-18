@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
@@ -12,9 +12,11 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 
+import { HorizontalRail } from "../../components/HorizontalRail";
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
+import { notifyError } from "../../lib/dialogs";
 import type { Id } from "../../lib/plotlist/types";
 
 const MAX_SHOWS = 4;
@@ -79,9 +81,16 @@ function DraggableFavoriteShow({
         style={[animatedStyle, { paddingTop: 6, paddingRight: 6 }]}
         className="mr-4"
       >
-        <Pressable onPress={() => onRemove(show._id)}>
+        <Pressable
+          onPress={() => onRemove(show._id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${show.title} from favorites`}
+          {...(Platform.OS === "web"
+            ? { title: `Remove ${show.title} from favorites` }
+            : null)}
+        >
           <View>
-            <Poster uri={show.posterUrl} width={80} />
+            <Poster uri={show.posterUrl} width={80} alt={show.title} />
             <View
               className="absolute items-center justify-center rounded-full bg-status-danger"
               style={{ width: 24, height: 24, top: -6, right: -6 }}
@@ -227,7 +236,7 @@ export default function FavoritesScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
     } catch (error) {
-      Alert.alert("Could not save", String(error));
+      notifyError("Could not save", String(error));
     } finally {
       setSaving(false);
     }
@@ -293,7 +302,7 @@ export default function FavoritesScreen() {
           <View className="flex-row items-center gap-2 rounded-xl border border-dark-border bg-dark-card px-3 py-2.5">
             <Ionicons name="search" size={18} color="#5A6070" />
             <TextInput
-              className="flex-1 text-sm text-text-primary"
+              className="flex-1 text-[16px] text-text-primary"
               placeholder="Search shows..."
               placeholderTextColor="#5A6070"
               value={searchText}
@@ -308,11 +317,8 @@ export default function FavoritesScreen() {
             ) : null}
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="mt-3"
-          >
+          <View className="mt-3">
+            <HorizontalRail accessibilityLabel="Shows to pick from">
             {showsToDisplay.map((show: any) => {
               const isSelected = selectedShowIdSet.has(String(show._id));
               return (
@@ -340,7 +346,8 @@ export default function FavoritesScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+            </HorizontalRail>
+          </View>
 
           {searchText.length >= 2 && (!searchResults || searchResults.length === 0) ? (
             <Text className="mt-3 text-center text-xs text-text-tertiary">

@@ -10,6 +10,26 @@
 
 /* Web-only polish — selectors below have no react-native mapping, so they
    are dropped from native builds and only ship in the web bundle. */
+:root {
+  /* Dark-scheme browser chrome: form controls, autofill, native pickers,
+     and default scrollbars all render dark instead of light-on-dark. */
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #0d0f14;
+  /* No rubber-band chaining into the browser's back/forward swipe. */
+  overscroll-behavior-y: none;
+}
+
+img {
+  /* Posters/stills are UI, not documents: no ghost-image drags when the
+     pointer slips during a click or rail scroll. */
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
 @media (pointer: fine) {
   [role="button"],
   [role="link"],

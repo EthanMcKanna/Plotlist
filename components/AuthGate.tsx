@@ -34,14 +34,42 @@ const WELCOME_TOUR_ROUTE = "/onboarding/welcome";
 
 type AuthRoute = "/sign-in" | "/home" | typeof ONBOARDING_ROUTE;
 
-function replaceRoute(router: ReturnType<typeof useRouter>, href: AuthRoute) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    if (window.location.pathname !== href) {
-      window.location.replace(href);
-    }
+// Client-side on every platform: a hard window.location redirect here would
+// re-run the whole JS boot (and re-show the launch curtain) on each auth
+// redirect, which reads as a full app relaunch on web.
+function replaceRoute(
+  router: ReturnType<typeof useRouter>,
+  href: AuthRoute | string,
+) {
+  if (
+    Platform.OS === "web" &&
+    typeof window !== "undefined" &&
+    window.location.pathname === href
+  ) {
     return;
   }
-  router.replace(href);
+  router.replace(href as AuthRoute);
+}
+
+// Web: remember where a signed-out visitor was headed (a shared /show or
+// /profile link) so sign-in can drop them back there instead of /home.
+function buildSignInHref(pathname: string | null | undefined): string {
+  if (Platform.OS !== "web" || typeof window === "undefined") {
+    return "/sign-in";
+  }
+  const target = `${window.location.pathname}${window.location.search}`;
+  if (!pathname || pathname === "/" || pathname.startsWith("/sign-in")) {
+    return "/sign-in";
+  }
+  return `/sign-in?next=${encodeURIComponent(target)}`;
+}
+
+// Only ever bounce back to same-app paths — never absolute URLs.
+export function sanitizeNextParam(next: unknown): string | null {
+  if (typeof next !== "string") return null;
+  if (!next.startsWith("/") || next.startsWith("//")) return null;
+  if (next.startsWith("/sign-in") || next === "/") return null;
+  return next;
 }
 
 function isDevPreviewRoute(
@@ -142,7 +170,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     if (!isAuthenticated && !inAuthGroup && !inDevPreview && !isPublicWebRoute) {
       setIsRouteSettled(false);
-      replaceRoute(router, "/sign-in");
+      replaceRoute(router, buildSignInHref(pathname));
       return;
     }
 
@@ -163,7 +191,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     if (isAuthenticated && (inAuthGroup || atRoot)) {
       setIsRouteSettled(false);
-      replaceRoute(router, "/home");
+      const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
+      replaceRoute(router, sanitizeNextParam(nextParam) ?? "/home");
       return;
     }
 
@@ -204,10 +233,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
         }
         hasHandledAuthFailure.current = true;
         await clearStoredSession();
-        if (typeof window !== "undefined" && typeof window.location?.assign === "function") {
-          window.location.assign("/sign-in");
-          return;
-        }
         router.replace("/sign-in");
       })
       .finally(() => {

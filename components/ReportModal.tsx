@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Modal, Pressable, Text, TextInput, View } from "react-native";
+import { Modal, Platform, Pressable, Text, TextInput, View } from "react-native";
 
 import { useIsWideLayout, useWebSheetStyle } from "../lib/webLayout";
 import { GlassSurface } from "./NativeGlass";
@@ -58,6 +58,8 @@ export function ReportModal({
             onChangeText={setReason}
             placeholder="Reason"
             multiline
+            // Web: the dialog opened for exactly this field, so focus it.
+            autoFocus={Platform.OS === "web"}
             placeholderTextColor="#5A6070"
             className="mt-3 min-h-[100px] rounded-xl border border-dark-border bg-dark-card px-4 py-3 text-[16px] text-text-primary"
           />

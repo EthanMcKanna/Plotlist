@@ -8,11 +8,15 @@ export function Poster({
   size = "md",
   width,
   className,
+  alt,
 }: {
   uri?: string | null;
   size?: "sm" | "md" | "lg";
   width?: number;
   className?: string;
+  // Show title; becomes the <img> alt attribute on web (expo-image maps
+  // accessibilityLabel to alt), read by assistive tech everywhere.
+  alt?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const dimension =
@@ -49,6 +53,7 @@ export function Poster({
           transition={200}
           onError={() => setFailed(true)}
           className={className}
+          accessibilityLabel={alt}
         />
       ) : null}
     </View>

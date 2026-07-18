@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "../components/NativeGlass";
 import { FacetGroupPills } from "../components/GenreExplorer";
-import { guardedPush } from "../lib/navigation";
+import { LinkPressable } from "../components/LinkPressable";
 import { api } from "../lib/plotlist/api";
 import { useAction } from "../lib/plotlist/react";
 import {
@@ -36,7 +37,7 @@ import {
   missingFacetPreviewKeys,
   storeFacetPreviews,
 } from "../lib/facetPreviewStore";
-import { SHOW_BACK_BUTTON, usePosterGridLayout,
+import { SHOW_BACK_BUTTON, useIsDesktopWeb, usePosterGridLayout,
   useWebPageStyle,
   WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
 
@@ -64,7 +65,8 @@ function FacetTile({
   const poster = getCachedFacetPosters(facet.key)[0] ?? null;
   const countLabel = formatShowCount(count);
   return (
-    <Pressable
+    <LinkPressable
+      href={`/facet/${facet.key}`}
       onPress={() => onPress(facet)}
       accessibilityRole="button"
       accessibilityLabel={
@@ -73,7 +75,7 @@ function FacetTile({
           : `Browse ${facet.title}`
       }
       style={[styles.tile, { width }]}
-      className="active:opacity-85"
+      className="active:opacity-85 hover:opacity-90 web:transition-opacity"
     >
       <LinearGradient
         colors={[withAlpha(accent, 0.3), withAlpha(accent, 0.06)]}
@@ -110,7 +112,7 @@ function FacetTile({
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -129,6 +131,7 @@ export default function ExploreScreen() {
     targetItemWidth: 260,
   });
   const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
+  const isDesktopWeb = useIsDesktopWeb();
 
   const [filter, setFilter] = useState("");
   const [selectedGroup, setSelectedGroup] = useState<FacetGroupKey>("mood");
@@ -193,9 +196,10 @@ export default function ExploreScreen() {
     };
   }, [visibleFacets, getFacetPreviews]);
 
-  const handleOpenFacet = (facet: FacetDef) => {
+  // Navigation belongs to the tile's LinkPressable; this is the press
+  // side effect only.
+  const handleOpenFacet = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    guardedPush(`/facet/${facet.key}`);
   };
 
   const renderTiles = (facets: FacetDef[], accentFor: (facet: FacetDef) => string) => (
@@ -272,6 +276,16 @@ export default function ExploreScreen() {
               className="ml-2 flex-1 py-2.5 text-[15px] text-text-primary"
               autoCorrect={false}
               autoCapitalize="none"
+              // Desktop web: filtering is keyboard-first, so the field is
+              // ready on arrival and Escape clears it.
+              autoFocus={isDesktopWeb}
+              {...(Platform.OS === "web"
+                ? {
+                    onKeyPress: (event: { nativeEvent: { key: string } }) => {
+                      if (event.nativeEvent.key === "Escape") setFilter("");
+                    },
+                  }
+                : null)}
             />
             {filter.length > 0 ? (
               <Pressable

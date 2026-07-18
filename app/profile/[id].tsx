@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StatusBar,
@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { FlashList } from "../../components/FlashList";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useAction, useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -19,10 +19,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SectionHeader } from "../../components/SectionHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { FanPreviewCard } from "../../components/FanPreviewCard";
+import { HorizontalRail } from "../../components/HorizontalRail";
+import { LinkPressable } from "../../components/LinkPressable";
 import { Poster } from "../../components/Poster";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { ReportModal } from "../../components/ReportModal";
 import { api } from "../../lib/plotlist/api";
+import { confirmAction, notify, notifyError } from "../../lib/dialogs";
 import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { usePosterGridLayout, useWebPageStyle } from "../../lib/webLayout";
@@ -51,11 +54,11 @@ type ProfileShowPreview = {
 function MiniStat({
   label,
   value,
-  onPress,
+  href,
 }: {
   label: string;
   value: string | number;
-  onPress?: () => void;
+  href?: Href;
 }) {
   const content = (
     <View className="items-center">
@@ -63,17 +66,15 @@ function MiniStat({
       <Text className="text-[11px] text-text-tertiary">{label}</Text>
     </View>
   );
-  if (onPress) {
+  if (href) {
     return (
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onPress();
-        }}
-        className="flex-1 items-center py-2 active:opacity-70"
+      <LinkPressable
+        href={href}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        className="flex-1 items-center py-2 web:transition-opacity active:opacity-70 hover:opacity-70"
       >
         {content}
-      </Pressable>
+      </LinkPressable>
     );
   }
   return <View className="flex-1 items-center py-2">{content}</View>;
@@ -85,23 +86,19 @@ function StatDivider() {
 
 function ShowPosterCard({
   show,
-  onPress,
   badge,
 }: {
   show: { _id: string; title: string; posterUrl?: string | null; year?: number };
-  onPress: () => void;
   badge?: string;
 }) {
   return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
-      className="mr-3 w-[100px] active:opacity-80"
+    <LinkPressable
+      href={`/show/${show._id}`}
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+      className="mr-3 w-[100px] web:transition-opacity active:opacity-80 hover:opacity-90"
     >
       <View className="relative">
-        <Poster uri={show.posterUrl} width={100} />
+        <Poster uri={show.posterUrl} width={100} alt={show.title} />
         {badge ? (
           <View className="absolute bottom-1.5 right-1.5 flex-row items-center gap-0.5 rounded-full bg-black/70 px-2 py-0.5">
             <Ionicons name="star" size={10} color="#F59E0B" />
@@ -112,7 +109,7 @@ function ShowPosterCard({
       <Text className="mt-1.5 text-xs font-medium text-text-secondary" numberOfLines={2}>
         {show.title}
       </Text>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -172,7 +169,6 @@ function ReviewStars({ rating }: { rating: number }) {
 // Diary-style review row borrowed from the Log page's visual language: flat,
 // hairline-divided, small poster, inline stars — no card chrome.
 function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
-  const router = useRouter();
   const review = item.review;
   const episodeLabel =
     typeof review.seasonNumber === "number" && typeof review.episodeNumber === "number"
@@ -180,14 +176,12 @@ function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
       : null;
 
   return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push(`/review/${review._id}`);
-      }}
+    <LinkPressable
+      href={`/review/${review._id}`}
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
       accessibilityRole="button"
       accessibilityLabel={`Review for ${item.show?.title ?? "Unknown"}`}
-      className="active:opacity-85"
+      className="web:transition-opacity active:opacity-85 hover:opacity-90"
     >
       <View
         className="flex-row gap-3 py-3"
@@ -225,6 +219,16 @@ function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
                 <Text
                   className="text-[13px] leading-5 text-text-secondary"
                   numberOfLines={3}
+                  {...(Platform.OS === "web"
+                    ? {
+                        style: { userSelect: "text" } as const,
+                        // Selecting review text must not fire the row's link.
+                        onPress: (event: any) => {
+                          event?.preventDefault?.();
+                          event?.stopPropagation?.();
+                        },
+                      }
+                    : null)}
                 >
                   {review.reviewText}
                 </Text>
@@ -239,7 +243,7 @@ function ProfileReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -325,9 +329,9 @@ export default function ProfileScreen() {
         width={publicListCardWidth}
         height={200}
         accessibilityLabel={`Open list ${item.title}`}
+        href={`/list/${item._id}`}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          guardedPush(`/list/${item._id}`);
         }}
       />
     ),
@@ -395,25 +399,21 @@ export default function ProfileScreen() {
 
   const handleBlock = useCallback(() => {
     const name = profile?.user?.displayName ?? profile?.user?.username ?? "this user";
-    Alert.alert(
-      `Block ${name}?`,
-      "They won't be able to follow you or see your activity, and you won't see theirs. Any follow relationship is removed. They aren't notified.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Block",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await blockUser({ userId: userIdValue });
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (error) {
-              Alert.alert("Could not block", String(error));
-            }
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: `Block ${name}?`,
+      message:
+        "They won't be able to follow you or see your activity, and you won't see theirs. Any follow relationship is removed. They aren't notified.",
+      confirmLabel: "Block",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await blockUser({ userId: userIdValue });
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error) {
+          notifyError("Could not block", String(error));
+        }
+      },
+    });
   }, [blockUser, profile?.user?.displayName, profile?.user?.username, userIdValue]);
 
   const handleUnblock = useCallback(async () => {
@@ -421,7 +421,7 @@ export default function ProfileScreen() {
       await unblockUser({ userId: userIdValue });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Could not unblock", String(error));
+      notifyError("Could not unblock", String(error));
     }
   }, [unblockUser, userIdValue]);
 
@@ -429,9 +429,9 @@ export default function ProfileScreen() {
     async (reason?: string) => {
       try {
         await createReport({ targetType: "user", targetId: userIdValue, reason });
-        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+        notify("Report submitted", "Thanks — we'll take a look.");
       } catch (error) {
-        Alert.alert("Could not submit report", String(error));
+        notifyError("Could not submit report", String(error));
       }
     },
     [createReport, userIdValue],
@@ -571,19 +571,44 @@ export default function ProfileScreen() {
           style={{ paddingTop: insets.top + 16, paddingBottom: 16 }}
         >
           {me ? (
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setMenuVisible(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Profile options"
-              hitSlop={10}
-              className="absolute right-4 z-10 h-9 w-9 items-center justify-center rounded-full bg-black/30 active:bg-black/50"
-              style={{ top: insets.top + 12 }}
-            >
-              <Ionicons name="ellipsis-horizontal" size={18} color="#F1F3F7" />
-            </Pressable>
+            Platform.OS === "web" ? (
+              // The gradient band is full-bleed; keep the options control
+              // inside the centered content column instead of pinned to the
+              // window edge on wide viewports.
+              <View
+                pointerEvents="box-none"
+                className="absolute inset-x-0 z-10"
+                style={[styles.webHeaderColumn, { top: insets.top + 12 }]}
+              >
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setMenuVisible(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Profile options"
+                  hitSlop={10}
+                  {...({ title: "Profile options" } as object)}
+                  className="absolute right-4 top-0 h-9 w-9 items-center justify-center rounded-full bg-black/30 web:transition-colors active:bg-black/50 hover:bg-black/50"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color="#F1F3F7" />
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setMenuVisible(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Profile options"
+                hitSlop={10}
+                className="absolute right-4 z-10 h-9 w-9 items-center justify-center rounded-full bg-black/30 active:bg-black/50"
+                style={{ top: insets.top + 12 }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={18} color="#F1F3F7" />
+              </Pressable>
+            )
           ) : null}
           <View className="items-center px-6">
             <Avatar
@@ -602,6 +627,9 @@ export default function ProfileScreen() {
               <Text
                 className="mt-2.5 text-center text-sm leading-5 text-text-secondary"
                 numberOfLines={4}
+                {...(Platform.OS === "web"
+                  ? { style: { userSelect: "text" } as const }
+                  : null)}
               >
                 {profile.user.bio}
               </Text>
@@ -678,13 +706,13 @@ export default function ProfileScreen() {
             <MiniStat
               label="Followers"
               value={profile?.counts.followers ?? 0}
-              onPress={() => router.push(`/followers/${userId}`)}
+              href={`/followers/${userId}`}
             />
             <StatDivider />
             <MiniStat
               label="Following"
               value={profile?.counts.following ?? 0}
-              onPress={() => router.push(`/following/${userId}`)}
+              href={`/following/${userId}`}
             />
             <StatDivider />
             <MiniStat label="Shows" value={profile?.counts.shows ?? 0} />
@@ -806,19 +834,13 @@ export default function ProfileScreen() {
                   ) : null
                 }
               />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                className="mt-3"
-              >
-                {profile.favoriteShows.map((show: ProfileShowPreview) => (
-                  <ShowPosterCard
-                    key={show._id}
-                    show={show}
-                    onPress={() => guardedPush(`/show/${show._id}`)}
-                  />
-                ))}
-              </ScrollView>
+              <View className="mt-3">
+                <HorizontalRail>
+                  {profile.favoriteShows.map((show: ProfileShowPreview) => (
+                    <ShowPosterCard key={show._id} show={show} />
+                  ))}
+                </HorizontalRail>
+              </View>
             </View>
           ) : null}
 
@@ -826,38 +848,26 @@ export default function ProfileScreen() {
           {profile?.currentlyWatching && profile.currentlyWatching.length > 0 ? (
             <View className="mt-7">
               <SectionHeader title="Currently Watching" />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                className="mt-3"
-              >
-                {profile.currentlyWatching.map((show: ProfileShowPreview) => (
-                  <ShowPosterCard
-                    key={show._id}
-                    show={show}
-                    onPress={() => guardedPush(`/show/${show._id}`)}
-                  />
-                ))}
-              </ScrollView>
+              <View className="mt-3">
+                <HorizontalRail>
+                  {profile.currentlyWatching.map((show: ProfileShowPreview) => (
+                    <ShowPosterCard key={show._id} show={show} />
+                  ))}
+                </HorizontalRail>
+              </View>
             </View>
           ) : null}
 
           {profile?.watchlistPreview && profile.watchlistPreview.length > 0 ? (
             <View className="mt-7">
               <SectionHeader title="Watchlist" />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                className="mt-3"
-              >
-                {profile.watchlistPreview.map((show: ProfileShowPreview) => (
-                  <ShowPosterCard
-                    key={show._id}
-                    show={show}
-                    onPress={() => guardedPush(`/show/${show._id}`)}
-                  />
-                ))}
-              </ScrollView>
+              <View className="mt-3">
+                <HorizontalRail>
+                  {profile.watchlistPreview.map((show: ProfileShowPreview) => (
+                    <ShowPosterCard key={show._id} show={show} />
+                  ))}
+                </HorizontalRail>
+              </View>
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -900,7 +910,7 @@ export default function ProfileScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       loadMorePublicLists(5);
                     }}
-                    className="self-start rounded-full border border-dark-border px-4 py-2"
+                    className="self-start rounded-full border border-dark-border px-4 py-2 web:transition-colors hover:bg-dark-hover"
                   >
                     <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
                       Load more lists
@@ -939,7 +949,7 @@ export default function ProfileScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       loadMoreReviews(10);
                     }}
-                    className="self-start rounded-full border border-dark-border px-4 py-2"
+                    className="self-start rounded-full border border-dark-border px-4 py-2 web:transition-colors hover:bg-dark-hover"
                   >
                     <Text className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
                       Load more reviews
@@ -970,5 +980,11 @@ const styles = StyleSheet.create({
   },
   starRow: {
     gap: 2,
+  },
+  // Web-only: same centered column as the page content below the header.
+  webHeaderColumn: {
+    marginHorizontal: "auto",
+    maxWidth: WEB_PROFILE_MAX_WIDTH,
+    width: "100%",
   },
 });

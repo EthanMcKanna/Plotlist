@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "../../components/EmptyState";
+import { LinkPressable } from "../../components/LinkPressable";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
@@ -311,13 +312,13 @@ export default function WatchStatsScreen() {
                   <SectionTitle title="Most watched" />
                   <GlassSurface radius={12} variant="surface">
                     {insights.topShows.map((show, index) => (
-                      <Pressable
+                      <LinkPressable
                         key={show.showId}
+                        href={`/show/${show.showId}`}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          guardedPush(`/show/${show.showId}`);
                         }}
-                        className={`flex-row items-center gap-3 px-4 py-3 active:bg-dark-hover ${
+                        className={`flex-row items-center gap-3 px-4 py-3 active:bg-dark-hover hover:bg-dark-hover web:transition-colors ${
                           index !== insights.topShows.length - 1
                             ? "border-b border-dark-border"
                             : ""
@@ -340,7 +341,7 @@ export default function WatchStatsScreen() {
                           </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={15} color="#5A6070" />
-                      </Pressable>
+                      </LinkPressable>
                     ))}
                   </GlassSurface>
                 </View>
@@ -457,13 +458,13 @@ export default function WatchStatsScreen() {
                   <SectionTitle title="Recently watched" />
                   <GlassSurface radius={12} variant="surface">
                     {insights.recentEpisodes.map((episode, index) => (
-                      <Pressable
+                      <LinkPressable
                         key={episode.id}
+                        href={`/show/${episode.showId}`}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          guardedPush(`/show/${episode.showId}`);
                         }}
-                        className={`flex-row items-center gap-3 px-4 py-3 active:bg-dark-hover ${
+                        className={`flex-row items-center gap-3 px-4 py-3 active:bg-dark-hover hover:bg-dark-hover web:transition-colors ${
                           index !== insights.recentEpisodes.length - 1
                             ? "border-b border-dark-border"
                             : ""
@@ -485,7 +486,7 @@ export default function WatchStatsScreen() {
                           </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={15} color="#5A6070" />
-                      </Pressable>
+                      </LinkPressable>
                     ))}
                   </GlassSurface>
                 </View>

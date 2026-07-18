@@ -36,12 +36,18 @@ import {
   useCommentThread,
 } from "../../components/Comments";
 import { LikeButton } from "../../components/LikeButton";
+import { LinkPressable } from "../../components/LinkPressable";
 import { Poster } from "../../components/Poster";
 import { Avatar } from "../../components/Avatar";
 import { ListForm } from "../../components/ListForm";
 import { api } from "../../lib/plotlist/api";
+import { confirmAction, notify, notifyError, promptSignIn } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
-import { usePosterGridLayout } from "../../lib/webLayout";
+import {
+  useIsDesktopWeb,
+  usePosterGridLayout,
+  useWebSheetStyle,
+} from "../../lib/webLayout";
 import { sharePlotlistLink } from "../../lib/share";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import type { Id } from "../../lib/plotlist/types";
@@ -157,6 +163,7 @@ function SortablePosterCard({
   const isActive = draggingId === itemId;
   const target = getGridPosition(index, grid);
   const canDrag = isOwner && totalItems > 1;
+  const isDesktopWeb = useIsDesktopWeb();
 
   const animatedStyle = useAnimatedStyle(
     () => ({
@@ -180,7 +187,10 @@ function SortablePosterCard({
 
   const dragGesture = Gesture.Pan()
     .enabled(canDrag)
-    .activateAfterLongPress(220)
+    // Mouse pointers drag straight away (0 falls back to the pan's own
+    // distance threshold); touch — native and mobile web — keeps the hold so
+    // scrolling over the grid still wins.
+    .activateAfterLongPress(isDesktopWeb ? 0 : 220)
     .onStart(() => {
       runOnJS(onDragStart)(itemId, index);
     })
@@ -213,35 +223,56 @@ function SortablePosterCard({
       });
     });
 
+  const cardContent = (
+    <>
+      <View className="overflow-hidden rounded-2xl">
+        <Poster uri={show?.posterUrl} width={grid.itemWidth} alt={show?.title} />
+        <View className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1">
+          <Text className="text-[11px] font-semibold text-white">
+            #{index + 1}
+          </Text>
+        </View>
+      </View>
+      <Text
+        className="mt-2 text-xs font-medium text-text-primary"
+        numberOfLines={2}
+      >
+        {show?.title ?? "Unknown"}
+      </Text>
+      <Text className="mt-0.5 text-xs text-text-tertiary">
+        {show?.year ?? "Unknown year"}
+      </Text>
+    </>
+  );
+
   return (
     <GestureDetector gesture={dragGesture}>
       <Animated.View style={animatedStyle}>
-        <Pressable
-          onPress={() => {
-            if (show?._id) {
-              onPress(show._id);
-            }
-          }}
-          className="active:opacity-80"
-        >
-          <View className="overflow-hidden rounded-2xl">
-            <Poster uri={show?.posterUrl} width={grid.itemWidth} />
-            <View className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1">
-              <Text className="text-[11px] font-semibold text-white">
-                #{index + 1}
-              </Text>
-            </View>
-          </View>
-          <Text
-            className="mt-2 text-xs font-medium text-text-primary"
-            numberOfLines={2}
+        {show?._id && !canDrag ? (
+          // Non-draggable cards are real links on web; draggable ones stay
+          // plain Pressables — an anchor's native drag would fight the
+          // reorder pan.
+          <LinkPressable
+            href={`/show/${show._id}`}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            className="web:transition-opacity active:opacity-80 hover:opacity-90"
           >
-            {show?.title ?? "Unknown"}
-          </Text>
-          <Text className="mt-0.5 text-xs text-text-tertiary">
-            {show?.year ?? "Unknown year"}
-          </Text>
-        </Pressable>
+            {cardContent}
+          </LinkPressable>
+        ) : (
+          <Pressable
+            onPress={() => {
+              if (show?._id) {
+                onPress(show._id);
+              }
+            }}
+            className="web:transition-opacity active:opacity-80 hover:opacity-90"
+          >
+            {cardContent}
+          </Pressable>
+        )}
       </Animated.View>
     </GestureDetector>
   );
@@ -367,6 +398,10 @@ export default function ListScreen() {
   // Y offset of the comments section inside the scroll content, captured on
   // layout so the action-bar comment button can jump straight to the thread.
   const commentsYRef = useRef(0);
+  // Desktop web and wide iPad windows: the edit sheet becomes a centered
+  // dialog instead of an edge-to-edge bottom sheet.
+  const editSheetStyle = useWebSheetStyle(520);
+  const isDesktopWeb = useIsDesktopWeb();
   const posterGrid = usePosterGridLayout({
     maxWidth: WEB_LIST_MAX_WIDTH,
     horizontalPadding: 48,
@@ -429,7 +464,7 @@ export default function ListScreen() {
             .filter((id: string | null): id is string => Boolean(id)),
         });
       } catch (error) {
-        Alert.alert("Reorder failed", String(error));
+        notifyError("Reorder failed", String(error));
         setOrderedItems(items);
       }
     },
@@ -443,7 +478,11 @@ export default function ListScreen() {
 
   const handleToggleFollow = useCallback(async () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign in required", "Follow lists after signing in.");
+      if (Platform.OS === "web") {
+        promptSignIn("Follow lists after signing in.");
+      } else {
+        Alert.alert("Sign in required", "Follow lists after signing in.");
+      }
       return;
     }
     if (followPending) {
@@ -458,7 +497,7 @@ export default function ListScreen() {
         await followList({ listId });
       }
     } catch (error) {
-      Alert.alert("Something went wrong", String(error));
+      notifyError("Something went wrong", String(error));
     } finally {
       setFollowPending(false);
     }
@@ -493,7 +532,7 @@ export default function ListScreen() {
   const handleSaveEdit = useCallback(async () => {
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
-      Alert.alert("Missing title", "Give your list a name.");
+      notifyError("Missing title", "Give your list a name.");
       return;
     }
     setSavingEdit(true);
@@ -508,38 +547,33 @@ export default function ListScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditVisible(false);
     } catch (error) {
-      Alert.alert("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
+      notifyError("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setSavingEdit(false);
     }
   }, [editCommentsEnabled, editDescription, editIsPublic, editTitle, listId, updateList]);
 
   const handleDelete = useCallback(() => {
-    Alert.alert(
-      "Delete list",
-      `Are you sure you want to delete "${list?.title ?? "this list"}"? This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setEditVisible(false);
-              await deleteList({ listId });
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/me/lists");
-              }
-            } catch (error) {
-              Alert.alert("Could not delete list", String(error));
-            }
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: "Delete list",
+      message: `Are you sure you want to delete "${list?.title ?? "this list"}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          setEditVisible(false);
+          await deleteList({ listId });
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace("/me/lists");
+          }
+        } catch (error) {
+          notifyError("Could not delete list", String(error));
+        }
+      },
+    });
   }, [deleteList, list?.title, listId, router]);
 
   const handleDragStart = useCallback((itemId: string, index: number) => {
@@ -685,14 +719,14 @@ export default function ListScreen() {
 
           {/* ── Byline ── */}
           {list.owner ? (
-            <Pressable
+            <LinkPressable
+              href={`/profile/${list.owner._id}`}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                guardedPush(`/profile/${list.owner._id}`);
               }}
               accessibilityRole="button"
               accessibilityLabel={`View ${list.ownerName ?? "creator"}'s profile`}
-              className="mt-3 flex-row items-center gap-2.5 self-start active:opacity-70"
+              className="mt-3 flex-row items-center gap-2.5 self-start web:transition-opacity active:opacity-70 hover:opacity-70"
             >
               <Avatar
                 uri={list.owner.avatarUrl}
@@ -707,7 +741,7 @@ export default function ListScreen() {
                   @{list.owner.username}
                 </Text>
               ) : null}
-            </Pressable>
+            </LinkPressable>
           ) : null}
 
           {/* ── Meta line ── */}
@@ -750,7 +784,8 @@ export default function ListScreen() {
                 hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="View comments"
-                className={`flex-row items-center gap-1.5 py-1 pr-1 active:opacity-70 ${
+                {...(Platform.OS === "web" ? { title: "View comments" } : null)}
+                className={`flex-row items-center gap-1.5 py-1 pr-1 web:transition-opacity active:opacity-70 hover:opacity-70 ${
                   list.isPublic ? "ml-4" : ""
                 }`}
               >
@@ -771,7 +806,8 @@ export default function ListScreen() {
                 hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="Share list"
-                className="ml-4 py-1 pr-1 active:opacity-70"
+                {...(Platform.OS === "web" ? { title: "Share list" } : null)}
+                className="ml-4 py-1 pr-1 web:transition-opacity active:opacity-70 hover:opacity-70"
               >
                 <Ionicons name="share-outline" size={22} color="#9BA1B0" />
               </Pressable>
@@ -782,7 +818,8 @@ export default function ListScreen() {
                 onPress={openEdit}
                 accessibilityRole="button"
                 accessibilityLabel="Edit list"
-                className="flex-row items-center gap-1.5 rounded-full border border-dark-border bg-dark-card px-4 py-2 active:bg-dark-hover"
+                {...(Platform.OS === "web" ? { title: "Edit list" } : null)}
+                className="flex-row items-center gap-1.5 rounded-full border border-dark-border bg-dark-card px-4 py-2 web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
               >
                 <Ionicons name="pencil" size={13} color="#9BA1B0" />
                 <Text className="text-[13px] font-semibold text-text-secondary">Edit</Text>
@@ -796,10 +833,13 @@ export default function ListScreen() {
                   accessibilityLabel={
                     list.viewerIsFollowing ? "Unfollow list" : "Follow list"
                   }
-                  className={`flex-row items-center gap-1.5 rounded-full px-4 py-2 ${
+                  {...(Platform.OS === "web"
+                    ? { title: list.viewerIsFollowing ? "Unfollow list" : "Follow list" }
+                    : null)}
+                  className={`flex-row items-center gap-1.5 rounded-full px-4 py-2 web:transition-colors ${
                     list.viewerIsFollowing
-                      ? "border border-dark-border bg-dark-card active:bg-dark-hover"
-                      : "bg-brand-500 active:bg-brand-600"
+                      ? "border border-dark-border bg-dark-card active:bg-dark-hover hover:bg-dark-hover"
+                      : "bg-brand-500 active:bg-brand-600 hover:bg-brand-600"
                   }`}
                 >
                   <Ionicons
@@ -822,7 +862,8 @@ export default function ListScreen() {
                   }}
                   accessibilityRole="button"
                   accessibilityLabel="List options"
-                  className="h-9 w-9 items-center justify-center rounded-full active:bg-dark-hover"
+                  {...(Platform.OS === "web" ? { title: "List options" } : null)}
+                  className="h-9 w-9 items-center justify-center rounded-full web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
                 >
                   <Ionicons name="ellipsis-horizontal" size={18} color="#9BA1B0" />
                 </Pressable>
@@ -834,7 +875,9 @@ export default function ListScreen() {
             <SectionHeader title="Shows" />
             {isOwner && orderedItems.length > 1 ? (
               <Text className="mt-2 text-sm text-text-tertiary">
-                Hold and drag posters to reorder.
+                {isDesktopWeb
+                  ? "Drag posters to reorder."
+                  : "Hold and drag posters to reorder."}
               </Text>
             ) : null}
             {orderedItems.length > 0 ? (
@@ -888,9 +931,9 @@ export default function ListScreen() {
         onSubmit={async (reason) => {
           try {
             await report({ targetType: "list", targetId: listId, reason });
-            Alert.alert("Report submitted", "Thanks for the report.");
+            notify("Report submitted", "Thanks for the report.");
           } catch (error) {
-            Alert.alert("Could not report", String(error));
+            notifyError("Could not report", String(error));
           }
         }}
       />
@@ -903,7 +946,9 @@ export default function ListScreen() {
         onRequestClose={() => setEditVisible(false)}
       >
         <KeyboardAvoidingView
-          className="flex-1 justify-end bg-black/50"
+          className={`flex-1 bg-black/50 ${
+            isDesktopWeb ? "justify-center px-6" : "justify-end"
+          }`}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <Pressable
@@ -914,12 +959,21 @@ export default function ListScreen() {
             className="absolute inset-0"
           />
           <View
-            className="rounded-t-3xl border border-dark-border bg-dark-card px-4 pt-4"
-            style={{ paddingBottom: insets.bottom + 24 }}
+            className={`border border-dark-border bg-dark-card px-4 pt-4 ${
+              isDesktopWeb ? "rounded-3xl" : "rounded-t-3xl"
+            }`}
+            style={[
+              { paddingBottom: isDesktopWeb ? 24 : insets.bottom + 24 },
+              editSheetStyle,
+            ]}
           >
-            <View className="mb-4 items-center">
-              <View className="h-1 w-10 rounded-full bg-dark-border" />
-            </View>
+            {/* Handle bar — decorative here (no drag gesture), so wide
+                layouts drop it along with the bottom-sheet look */}
+            {isDesktopWeb ? null : (
+              <View className="mb-4 items-center">
+                <View className="h-1 w-10 rounded-full bg-dark-border" />
+              </View>
+            )}
             <Text className="mb-4 px-2 text-lg font-semibold text-text-primary">
               Edit list
             </Text>

@@ -1,5 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  Text,
+  View,
+} from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { router, type Href } from "expo-router";
@@ -7,6 +14,7 @@ import { router, type Href } from "expo-router";
 import { Avatar } from "../components/Avatar";
 import { EmptyState } from "../components/EmptyState";
 import { FlashList } from "../components/FlashList";
+import { LinkPressable } from "../components/LinkPressable";
 import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { formatRelativeTime } from "../lib/format";
@@ -15,7 +23,7 @@ import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
-import { SHOW_BACK_BUTTON } from "../lib/webLayout";
+import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
 
 const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   follow: "person-add",
@@ -50,21 +58,19 @@ function notificationHref(item: any): Href | null {
 function NotificationRow({
   item,
   onOpen,
+  onMarkRead,
 }: {
   item: any;
   onOpen: (item: any) => void;
+  onMarkRead: (item: any) => void;
 }) {
   const unread = !item.readAt;
-  return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onOpen(item);
-      }}
-      className={`flex-row items-start gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover ${
-        unread ? "bg-dark-elevated/60" : ""
-      }`}
-    >
+  const href = notificationHref(item);
+  const rowClassName = `flex-row items-start gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors ${
+    unread ? "bg-dark-elevated/60" : ""
+  }`;
+  const content = (
+    <>
       {item.actor ? (
         <Avatar
           uri={item.actor.avatarUrl}
@@ -92,11 +98,39 @@ function NotificationRow({
         </Text>
       </View>
       {unread ? <View className="mt-2 h-2 w-2 rounded-full bg-sky-400" /> : null}
+    </>
+  );
+  // Rows with a destination are real links on web (cmd/middle-click work);
+  // marking read stays a side effect of the press.
+  if (href) {
+    return (
+      <LinkPressable
+        href={href}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onMarkRead(item);
+        }}
+        className={rowClassName}
+      >
+        {content}
+      </LinkPressable>
+    );
+  }
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onOpen(item);
+      }}
+      className={rowClassName}
+    >
+      {content}
     </Pressable>
   );
 }
 
 export default function NotificationsScreen() {
+  const isDesktopWeb = useIsDesktopWeb();
   const unreadCount = useQuery(api.notifications.getUnreadCount);
   const {
     results: items,
@@ -109,17 +143,24 @@ export default function NotificationsScreen() {
 
   const listContentStyle = useMemo(() => ({ paddingVertical: 12 }), []);
 
-  const openNotification = useCallback(
+  const markNotificationRead = useCallback(
     (item: any) => {
       if (!item.readAt) {
         void markRead({ notificationId: item._id }).then(() => syncAppBadgeCount());
       }
+    },
+    [markRead],
+  );
+
+  const openNotification = useCallback(
+    (item: any) => {
+      markNotificationRead(item);
       const href = notificationHref(item);
       if (href) {
         guardedPush(href);
       }
     },
-    [markRead],
+    [markNotificationRead],
   );
 
   const handleMarkAllRead = useCallback(() => {
@@ -128,8 +169,14 @@ export default function NotificationsScreen() {
   }, [markAllRead]);
 
   const renderItem = useCallback(
-    ({ item }: { item: any }) => <NotificationRow item={item} onOpen={openNotification} />,
-    [openNotification],
+    ({ item }: { item: any }) => (
+      <NotificationRow
+        item={item}
+        onOpen={openNotification}
+        onMarkRead={markNotificationRead}
+      />
+    ),
+    [markNotificationRead, openNotification],
   );
 
   const [refreshing, setRefreshing] = useState(false);
@@ -173,6 +220,25 @@ export default function NotificationsScreen() {
           {(unreadCount ?? 0) > 0 ? (
             <Pressable onPress={handleMarkAllRead} hitSlop={8}>
               <Text className="text-sm font-semibold text-sky-400">Mark all read</Text>
+            </Pressable>
+          ) : null}
+          {/* Desktop web has no pull-to-refresh gesture. */}
+          {isDesktopWeb ? (
+            <Pressable
+              onPress={() => void handleRefresh()}
+              disabled={refreshing}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh notifications"
+              {...(Platform.OS === "web"
+                ? { title: "Refresh notifications" }
+                : null)}
+              className="h-8 w-8 items-center justify-center rounded-full hover:bg-white/5 web:transition-colors"
+            >
+              {refreshing ? (
+                <ActivityIndicator size="small" color="#9BA1B0" />
+              ) : (
+                <Ionicons name="refresh" size={17} color="#9BA1B0" />
+              )}
             </Pressable>
           ) : null}
         </View>

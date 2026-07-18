@@ -13,6 +13,8 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "../../../components/NativeGlass";
+import { HorizontalRail } from "../../../components/HorizontalRail";
+import { PageTitle } from "../../../components/PageTitle";
 import { Poster } from "../../../components/Poster";
 import { TasteMatchMeter } from "../../../components/TasteMatchSummary";
 import { useAction, useAuth, useQuery } from "../../../lib/plotlist/react";
@@ -103,6 +105,7 @@ export default function TasteBreakdownScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
+      <PageTitle title="Taste match" />
       {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
         className="pb-4 border-b border-dark-border"
@@ -215,18 +218,16 @@ export default function TasteBreakdownScreen() {
                     : "Shows they love that you haven't seen — sorted by your taste."}
                 </Text>
               </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
+              <HorizontalRail
                 contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 12 }}
               >
                 {picks.map((show: any) => (
                   <Pressable
                     key={show._id}
                     onPress={() => pressShow(show)}
-                    className="mr-3 w-[118px] active:opacity-80"
+                    className="mr-3 w-[118px] active:opacity-80 hover:opacity-90 web:transition-opacity"
                   >
-                    <Poster uri={show.posterUrl ?? undefined} width={118} />
+                    <Poster uri={show.posterUrl ?? undefined} width={118} alt={show.title} />
                     <Text
                       className="mt-2 text-xs font-medium text-text-primary"
                       numberOfLines={2}
@@ -238,7 +239,7 @@ export default function TasteBreakdownScreen() {
                     ) : null}
                   </Pressable>
                 ))}
-              </ScrollView>
+              </HorizontalRail>
             </View>
           ) : null}
 

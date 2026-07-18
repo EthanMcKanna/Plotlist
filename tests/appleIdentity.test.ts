@@ -115,6 +115,26 @@ describe("verifyAppleIdentityToken", () => {
     ).rejects.toThrow(ApiError);
   });
 
+  it("accepts the web Services ID audience when configured", async () => {
+    process.env.APPLE_WEB_CLIENT_ID = "com.example.web";
+    resetServerEnvCache();
+    try {
+      const identity = await verifyAppleIdentityToken(
+        makeToken({ aud: "com.example.web" }),
+      );
+      expect(identity.sub).toBe("001234.abcdef.5678");
+    } finally {
+      delete process.env.APPLE_WEB_CLIENT_ID;
+      resetServerEnvCache();
+    }
+  });
+
+  it("rejects the web Services ID audience when not configured", async () => {
+    await expect(
+      verifyAppleIdentityToken(makeToken({ aud: "com.example.web" })),
+    ).rejects.toThrow(ApiError);
+  });
+
   it("rejects a token from another issuer", async () => {
     await expect(
       verifyAppleIdentityToken(makeToken({ iss: "https://evil.example.com" })),

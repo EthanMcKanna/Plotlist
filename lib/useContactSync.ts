@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Linking, Platform, Share } from "react-native";
 
 import { api } from "./plotlist/api";
+import { notify, notifyError } from "./dialogs";
 import { useAction, useMutation } from "./plotlist/react";
 import { queryClient } from "./queryClient";
+import { showWebToast } from "./webToast";
 import {
   getContactSyncAlertCopy,
   runContactAutoSync,
@@ -95,12 +97,12 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
         invalidateContactQueries();
         if (!silent) {
           const copy = getContactSyncAlertCopy(result);
-          Alert.alert(copy.title, copy.message);
+          notify(copy.title, copy.message);
         }
         return result;
       } catch (error) {
         if (!silent) {
-          Alert.alert("Could not sync contacts", String(error));
+          notifyError("Could not sync contacts", String(error));
         }
         return null;
       } finally {
@@ -162,7 +164,7 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
         await Linking.openURL(smsUrl);
         await sendInvite({ entryId: candidate.entryId });
       } catch (error) {
-        Alert.alert("Invite failed", String(error));
+        notifyError("Invite failed", String(error));
       } finally {
         setInvitingId(null);
       }
@@ -171,6 +173,22 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
   );
 
   const shareInvite = useCallback(async () => {
+    if (Platform.OS === "web") {
+      // RN Share rejects on desktop browsers; use the web share sheet where
+      // it exists and fall back to the clipboard.
+      const message = buildInviteMessage();
+      try {
+        if (typeof navigator !== "undefined" && navigator.share) {
+          await navigator.share({ text: message });
+          return;
+        }
+        await navigator.clipboard.writeText(message);
+        showWebToast("Invite copied");
+      } catch {
+        // The user dismissing the share sheet is not an error worth surfacing.
+      }
+      return;
+    }
     try {
       await Share.share({ message: buildInviteMessage() });
     } catch {

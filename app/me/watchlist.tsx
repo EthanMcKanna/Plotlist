@@ -9,10 +9,10 @@ import * as Haptics from "expo-haptics";
 import { Screen } from "../../components/Screen";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { EmptyState } from "../../components/EmptyState";
+import { LinkPressable } from "../../components/LinkPressable";
 import { Poster } from "../../components/Poster";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { api } from "../../lib/plotlist/api";
-import { guardedPush } from "../../lib/navigation";
 import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
 
 const GAP = 12;
@@ -209,16 +209,17 @@ export default function WatchlistScreen() {
             marginBottom: GAP,
           }}
         >
-          <Pressable
+          <LinkPressable
+            href={`/show/${item.show._id}`}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              guardedPush(`/show/${item.show._id}`);
             }}
-            className="active:opacity-80"
+            className="active:opacity-80 hover:opacity-80 web:transition-opacity"
           >
             <Poster
               uri={item.show.posterUrl}
               width={itemWidth}
+              alt={item.show.title ?? undefined}
             />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
@@ -229,7 +230,7 @@ export default function WatchlistScreen() {
             <Text className="mt-0.5 text-xs text-text-tertiary">
               {statusLabels[item.state.status]}
             </Text>
-          </Pressable>
+          </LinkPressable>
         </View>
       );
     },

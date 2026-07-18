@@ -9,11 +9,13 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import type { Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
+import { LinkPressable } from "./LinkPressable";
 import { getHomeDisplayMetaLine, getHomeDisplayMetaLabels } from "../lib/homeDisplayMeta";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -28,6 +30,9 @@ export type SignatureRailItem = {
   genreLabel?: string | null;
   signal?: string | null;
   rank?: number | null;
+  // Known show destination; when set the card renders as a real link on web.
+  // Items that still need ingest omit it and keep the onPressItem fallback.
+  href?: Href;
 };
 
 type LayoutKind = "feature" | "poster";
@@ -173,6 +178,65 @@ function FeatureCard({
   const shouldShowImage = Boolean(imageUrl && !imageFailed);
   const shouldShowFallback = !imageUrl || imageFailed || !imageLoaded;
 
+  const cardProps = {
+    accessibilityRole: "button" as const,
+    accessibilityLabel: getSignatureRailItemAccessibilityLabel(
+      item,
+      fallbackMetaLabel,
+    ),
+    testID: `feature-card-${item.key}`,
+    style: styles.featureCard,
+    className: "active:opacity-90 hover:opacity-90 web:transition-opacity",
+  };
+
+  const cardBody = (
+    <>
+      {shouldShowImage ? (
+        <Image
+          testID={`feature-image-${item.key}`}
+          source={{ uri: imageUrl ?? undefined }}
+          style={styles.featureImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          priority={index === 0 ? "high" : "normal"}
+          onLoad={() => setImageLoaded(true)}
+          onError={() => setImageFailed(true)}
+        />
+      ) : null}
+      {shouldShowFallback ? (
+        <FeatureArtworkFallback item={item} accent={accent} />
+      ) : null}
+
+      <LinearGradient
+        colors={["rgba(13,15,20,0.0)", "rgba(13,15,20,0.6)", "rgba(13,15,20,0.96)"]}
+        locations={[0, 0.55, 1]}
+        style={[StyleSheet.absoluteFill, styles.pointerNone]}
+      />
+
+      <View style={styles.featureContent}>
+        <Text
+          className="text-[16px] font-black leading-[20px] text-white"
+          numberOfLines={2}
+        >
+          {item.title}
+        </Text>
+
+        {meta.length > 0 ? (
+          <View style={styles.metaRow}>
+            {meta.map((label, idx) => (
+              <View key={label} style={styles.metaItem}>
+                {idx > 0 ? <View style={styles.metaSep} /> : null}
+                <Text className="text-[11px] font-semibold text-white/72">
+                  {label}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+
   return (
     <Animated.View
       entering={
@@ -182,64 +246,27 @@ function FeatureCard({
       }
       style={{ width }}
     >
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onPress(item);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={getSignatureRailItemAccessibilityLabel(
-          item,
-          fallbackMetaLabel,
-        )}
-        testID={`feature-card-${item.key}`}
-        style={styles.featureCard}
-        className="active:opacity-90"
-      >
-        {shouldShowImage ? (
-          <Image
-            testID={`feature-image-${item.key}`}
-            source={{ uri: imageUrl ?? undefined }}
-            style={styles.featureImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            priority={index === 0 ? "high" : "normal"}
-            onLoad={() => setImageLoaded(true)}
-            onError={() => setImageFailed(true)}
-          />
-        ) : null}
-        {shouldShowFallback ? (
-          <FeatureArtworkFallback item={item} accent={accent} />
-        ) : null}
-
-        <LinearGradient
-          colors={["rgba(13,15,20,0.0)", "rgba(13,15,20,0.6)", "rgba(13,15,20,0.96)"]}
-          locations={[0, 0.55, 1]}
-          style={[StyleSheet.absoluteFill, styles.pointerNone]}
-        />
-
-        <View style={styles.featureContent}>
-          <Text
-            className="text-[16px] font-black leading-[20px] text-white"
-            numberOfLines={2}
-          >
-            {item.title}
-          </Text>
-
-          {meta.length > 0 ? (
-            <View style={styles.metaRow}>
-              {meta.map((label, idx) => (
-                <View key={label} style={styles.metaItem}>
-                  {idx > 0 ? <View style={styles.metaSep} /> : null}
-                  <Text className="text-[11px] font-semibold text-white/72">
-                    {label}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
-      </Pressable>
+      {item.href ? (
+        // A known href owns navigation (real link on web); the press handler
+        // then only fires the haptic instead of the ingest-and-push fallback.
+        <LinkPressable
+          href={item.href}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          {...cardProps}
+        >
+          {cardBody}
+        </LinkPressable>
+      ) : (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onPress(item);
+          }}
+          {...cardProps}
+        >
+          {cardBody}
+        </Pressable>
+      )}
     </Animated.View>
   );
 }
@@ -363,6 +390,33 @@ function PosterCard({
   const shouldShowImage = Boolean(posterUrl && !imageFailed);
   const shouldShowFallback = !posterUrl || imageFailed || !imageLoaded;
 
+  const cardProps = {
+    accessibilityRole: "button" as const,
+    accessibilityLabel: getSignatureRailItemAccessibilityLabel(item, undefined, {
+      compactSignal: true,
+    }),
+    className: "active:opacity-85 hover:opacity-90 web:transition-opacity",
+  };
+
+  const cardBody = (
+    <View style={styles.posterFrame}>
+      {shouldShowImage ? (
+        <Image
+          testID={`poster-image-${item.key}`}
+          source={{ uri: posterUrl ?? undefined }}
+          style={styles.posterImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          onLoad={() => setImageLoaded(true)}
+          onError={() => setImageFailed(true)}
+        />
+      ) : null}
+      {shouldShowFallback ? (
+        <PosterFallback item={item} accent={accent} metaLine={metaLine} />
+      ) : null}
+    </View>
+  );
+
   return (
     <Animated.View
       entering={
@@ -372,34 +426,27 @@ function PosterCard({
       }
       style={{ width: POSTER_WIDTH }}
     >
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onPress(item);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={getSignatureRailItemAccessibilityLabel(item, undefined, {
-          compactSignal: true,
-        })}
-        className="active:opacity-85"
-      >
-        <View style={styles.posterFrame}>
-          {shouldShowImage ? (
-            <Image
-              testID={`poster-image-${item.key}`}
-              source={{ uri: posterUrl ?? undefined }}
-              style={styles.posterImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              onLoad={() => setImageLoaded(true)}
-              onError={() => setImageFailed(true)}
-            />
-          ) : null}
-          {shouldShowFallback ? (
-            <PosterFallback item={item} accent={accent} metaLine={metaLine} />
-          ) : null}
-        </View>
-      </Pressable>
+      {item.href ? (
+        // A known href owns navigation (real link on web); the press handler
+        // then only fires the haptic instead of the ingest-and-push fallback.
+        <LinkPressable
+          href={item.href}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          {...cardProps}
+        >
+          {cardBody}
+        </LinkPressable>
+      ) : (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onPress(item);
+          }}
+          {...cardProps}
+        >
+          {cardBody}
+        </Pressable>
+      )}
     </Animated.View>
   );
 }

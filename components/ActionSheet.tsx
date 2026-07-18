@@ -76,7 +76,7 @@ export function ActionSheet({
                   option.onPress();
                   onClose();
                 }}
-                className="flex-row items-center gap-3 rounded-xl px-4 py-4 active:bg-dark-hover"
+                className="flex-row items-center gap-3 rounded-xl px-4 py-4 web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
               >
                 {option.icon && (
                   <Ionicons
@@ -102,7 +102,7 @@ export function ActionSheet({
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 onClose();
               }}
-              className="items-center rounded-xl bg-dark-card py-4 active:bg-dark-hover"
+              className="items-center rounded-xl bg-dark-card py-4 web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
             >
               <Text className="text-base font-semibold text-text-primary">
                 Cancel

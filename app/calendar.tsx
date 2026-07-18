@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -15,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "../components/EmptyState";
 import { FlashList } from "../components/FlashList";
-import { guardedPush } from "../lib/navigation";
+import { LinkPressable } from "../components/LinkPressable";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
@@ -205,85 +206,107 @@ function ReleaseRow({ row }: { row: ReleaseDiaryEventRow }) {
   const badge = getReleaseRowBadge(item);
   const provider = getReleaseRowProvider(item);
   const episodeLine = getReleaseRowEpisodeLine(item);
+  const showId = item.show?._id;
 
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={getReleaseRowAccessibilityLabel(row)}
-      onPress={() => {
-        lightHaptic();
-        if (item.show?._id) {
-          guardedPush(`/show/${item.show._id}`);
-        }
-      }}
-      className="active:opacity-85"
-    >
-      <View className="flex-row px-6">
-        <DayRail label={row.dayLabel} />
-        <View
-          className="flex-1 flex-row gap-3 py-3"
-          style={row.isLastOfDay ? undefined : styles.rowDivider}
-        >
-          <View style={styles.thumb}>
-            {imageUrl ? (
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.thumbImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                transition={150}
+  const body = (
+    <View className="flex-row px-6">
+      <DayRail label={row.dayLabel} />
+      <View
+        className="flex-1 flex-row gap-3 py-3"
+        style={row.isLastOfDay ? undefined : styles.rowDivider}
+      >
+        <View style={styles.thumb}>
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.thumbImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+            />
+          ) : (
+            <View style={styles.thumbFallback}>
+              <Ionicons
+                name="tv-outline"
+                size={18}
+                color="#4B5563"
+                accessible={false}
+                accessibilityElementsHidden
+                aria-hidden={true}
+                importantForAccessibility="no"
               />
-            ) : (
-              <View style={styles.thumbFallback}>
-                <Ionicons
-                  name="tv-outline"
-                  size={18}
-                  color="#4B5563"
-                  accessible={false}
-                  accessibilityElementsHidden
-                  aria-hidden={true}
-                  importantForAccessibility="no"
-                />
-              </View>
-            )}
+            </View>
+          )}
+        </View>
+
+        <View className="min-w-0 flex-1 justify-center">
+          <View className="flex-row items-center justify-between gap-3">
+            <Text
+              className="flex-1 text-[15px] font-semibold text-text-primary"
+              numberOfLines={1}
+            >
+              {item.show?.title}
+            </Text>
+            {provider.logoUrl ? (
+              <Image
+                source={{ uri: provider.logoUrl }}
+                style={styles.providerLogo}
+                contentFit="cover"
+                {...(provider.name
+                  ? {
+                      accessibilityLabel: provider.name,
+                      ...(Platform.OS === "web"
+                        ? { title: provider.name }
+                        : null),
+                    }
+                  : { accessible: false })}
+              />
+            ) : provider.name ? (
+              <Text className="text-[11px] font-semibold text-text-tertiary">
+                {provider.name}
+              </Text>
+            ) : null}
           </View>
 
-          <View className="min-w-0 flex-1 justify-center">
-            <View className="flex-row items-center justify-between gap-3">
-              <Text
-                className="flex-1 text-[15px] font-semibold text-text-primary"
-                numberOfLines={1}
-              >
-                {item.show?.title}
-              </Text>
-              {provider.logoUrl ? (
-                <Image
-                  source={{ uri: provider.logoUrl }}
-                  style={styles.providerLogo}
-                  contentFit="cover"
-                  accessible={false}
-                />
-              ) : provider.name ? (
-                <Text className="text-[11px] font-semibold text-text-tertiary">
-                  {provider.name}
-                </Text>
-              ) : null}
-            </View>
-
-            <View className="mt-1 flex-row items-center gap-2">
-              <Text
-                className="text-[12px] font-semibold text-brand-300"
-                numberOfLines={1}
-                style={styles.episodeLine}
-              >
-                {episodeLine}
-              </Text>
-              {badge ? <EventBadge label={badge.label} tone={badge.tone} /> : null}
-            </View>
+          <View className="mt-1 flex-row items-center gap-2">
+            <Text
+              className="text-[12px] font-semibold text-brand-300"
+              numberOfLines={1}
+              style={styles.episodeLine}
+            >
+              {episodeLine}
+            </Text>
+            {badge ? <EventBadge label={badge.label} tone={badge.tone} /> : null}
           </View>
         </View>
       </View>
-    </Pressable>
+    </View>
+  );
+
+  // A show that hasn't been ingested yet has no detail page to link to.
+  if (!showId) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={getReleaseRowAccessibilityLabel(row)}
+        onPress={lightHaptic}
+        className="active:opacity-85"
+      >
+        {body}
+      </Pressable>
+    );
+  }
+
+  return (
+    <LinkPressable
+      href={`/show/${showId}`}
+      accessibilityRole="button"
+      accessibilityLabel={getReleaseRowAccessibilityLabel(row)}
+      onPress={lightHaptic}
+      className="web:transition-colors hover:bg-white/5 active:opacity-85"
+    >
+      {body}
+    </LinkPressable>
   );
 }
 

@@ -1,4 +1,4 @@
-import { Pressable, Switch, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, Switch, Text, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -45,6 +45,16 @@ export function ListForm({
         placeholderTextColor="#5A6070"
         autoFocus={autoFocus}
         maxLength={100}
+        // Web only: Enter submits. Native keeps the plain return key —
+        // submitting from the keyboard would skip the description field.
+        {...(Platform.OS === "web"
+          ? {
+              returnKeyType: "done" as const,
+              onSubmitEditing: () => {
+                if (canSubmit) onSubmit();
+              },
+            }
+          : null)}
         className="rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-[16px] text-text-primary"
       />
       <TextInput

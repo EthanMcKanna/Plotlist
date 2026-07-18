@@ -5,11 +5,12 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import * as Sharing from "expo-sharing";
 
 import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
+import { LinkPressable } from "../../components/LinkPressable";
 import { GlassSurface } from "../../components/NativeGlass";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Screen } from "../../components/Screen";
@@ -20,6 +21,7 @@ import { clearAuthTokens, getStoredSignInPhone } from "../../lib/authStorage";
 import { uploadAvatarImage } from "../../lib/avatarUpload";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
+import { confirmAction, notifyError } from "../../lib/dialogs";
 import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
@@ -42,25 +44,22 @@ function SettingsRow({
   iconColor = "#9BA1B0",
   label,
   onPress,
+  href,
   destructive = false,
   loading = false,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   iconColor?: string;
   label: string;
-  onPress: () => void;
+  onPress?: () => void;
+  href?: Href;
   destructive?: boolean;
   loading?: boolean;
 }) {
-  return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
-      disabled={loading}
-      className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover"
-    >
+  const rowClassName =
+    "flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors";
+  const content = (
+    <>
       <Ionicons
         name={icon}
         size={20}
@@ -80,6 +79,35 @@ function SettingsRow({
       ) : (
         <Ionicons name="chevron-forward" size={16} color="#5A6070" />
       )}
+    </>
+  );
+  // Navigation rows render a real link on web (cmd/middle-click work);
+  // action rows stay plain Pressables.
+  if (href) {
+    return (
+      <LinkPressable
+        href={href}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onPress?.();
+        }}
+        disabled={loading}
+        className={rowClassName}
+      >
+        {content}
+      </LinkPressable>
+    );
+  }
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress?.();
+      }}
+      disabled={loading}
+      className={rowClassName}
+    >
+      {content}
     </Pressable>
   );
 }
@@ -241,9 +269,9 @@ export default function SettingsScreen() {
     } catch (error) {
       const msg = String(error);
       if (msg.toLowerCase().includes("username already taken")) {
-        Alert.alert("Username taken", "That username is already in use. Try another one.");
+        notifyError("Username taken", "That username is already in use. Try another one.");
       } else {
-        Alert.alert("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
+        notifyError("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
       }
     } finally {
       setSaving(false);
@@ -289,7 +317,7 @@ export default function SettingsScreen() {
         message: "Plotlist export",
       });
     } catch (error) {
-      Alert.alert("Export failed", String(error));
+      notifyError("Export failed", String(error));
     } finally {
       setExporting(false);
     }
@@ -305,27 +333,23 @@ export default function SettingsScreen() {
   };
 
   const handleDelete = async () => {
-    Alert.alert(
-      "Delete account",
-      "This will permanently delete your account and all data. This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteAccount({});
-              await signOut();
-              await clearAuthTokens();
-              router.replace("/sign-in");
-            } catch (error) {
-              Alert.alert("Delete failed", String(error));
-            }
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: "Delete account",
+      message:
+        "This will permanently delete your account and all data. This action cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteAccount({});
+          await signOut();
+          await clearAuthTokens();
+          router.replace("/sign-in");
+        } catch (error) {
+          notifyError("Delete failed", String(error));
+        }
+      },
+    });
   };
 
   const handlePickAvatar = async () => {
@@ -344,7 +368,7 @@ export default function SettingsScreen() {
         height: asset.height,
       });
     } catch (error) {
-      Alert.alert("Could not open photo library", String(error));
+      notifyError("Could not open photo library", String(error));
     }
   };
 
@@ -360,7 +384,7 @@ export default function SettingsScreen() {
       await updateProfile({ avatarStorageId: storageId });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Upload failed", String(error));
+      notifyError("Upload failed", String(error));
     } finally {
       setUploading(false);
     }
@@ -375,32 +399,28 @@ export default function SettingsScreen() {
       const copy = getContactSyncAlertCopy(result);
       Alert.alert(copy.title, copy.message);
     } catch (error) {
-      Alert.alert("Sync failed", String(error));
+      notifyError("Sync failed", String(error));
     } finally {
       setSyncingContacts(false);
     }
   };
 
   const handleClearContacts = async () => {
-    Alert.alert(
-      "Clear synced contacts",
-      "This removes your contact match snapshot from Plotlist. You can sync again anytime.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await clearSync({});
-              await setContactsSyncDismissed(false);
-            } catch (error) {
-              Alert.alert("Could not clear contacts", String(error));
-            }
-          },
-        },
-      ],
-    );
+    confirmAction({
+      title: "Clear synced contacts",
+      message:
+        "This removes your contact match snapshot from Plotlist. You can sync again anytime.",
+      confirmLabel: "Clear",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await clearSync({});
+          await setContactsSyncDismissed(false);
+        } catch (error) {
+          notifyError("Could not clear contacts", String(error));
+        }
+      },
+    });
   };
 
   return (
@@ -423,6 +443,8 @@ export default function SettingsScreen() {
               handlePickAvatar();
             }}
             disabled={uploading}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
             className="relative"
           >
             {avatarUrl ? (
@@ -453,7 +475,11 @@ export default function SettingsScreen() {
             </View>
           </Pressable>
           <Text className="text-xs text-text-tertiary">
-            {uploading ? "Uploading..." : "Tap to change photo"}
+            {uploading
+              ? "Uploading..."
+              : Platform.OS === "web"
+                ? "Click to change photo"
+                : "Tap to change photo"}
           </Text>
         </View>
 
@@ -514,7 +540,7 @@ export default function SettingsScreen() {
               icon={me?.isPrivate ? "lock-closed-outline" : "shield-outline"}
               iconColor="#38bdf8"
               label="Privacy & blocked accounts"
-              onPress={() => router.push("/settings/privacy")}
+              href="/settings/privacy"
             />
           </GlassSurface>
           <Text className="mt-2 text-xs leading-4 text-text-tertiary">
@@ -532,7 +558,7 @@ export default function SettingsScreen() {
               icon="tv-outline"
               iconColor="#38bdf8"
               label="My streaming services"
-              onPress={() => router.push("/settings/streaming")}
+              href="/settings/streaming"
             />
           </GlassSurface>
           <Text className="mt-2 text-xs leading-4 text-text-tertiary">
@@ -589,7 +615,7 @@ export default function SettingsScreen() {
                   icon="call-outline"
                   iconColor="#38bdf8"
                   label="Verify your number to be found by friends"
-                  onPress={() => router.push("/settings/verify-phone")}
+                  href="/settings/verify-phone"
                 />
               </GlassSurface>
               <Text className="mb-1 mt-2 text-xs leading-4 text-text-tertiary">
@@ -625,7 +651,7 @@ export default function SettingsScreen() {
               icon="sparkles-outline"
               iconColor="#0ea5e9"
               label="Replay the welcome tour"
-              onPress={() => router.push("/onboarding/welcome")}
+              href="/onboarding/welcome"
             />
             <SettingsRow
               icon="chatbubble-ellipses-outline"
@@ -643,19 +669,19 @@ export default function SettingsScreen() {
             <SettingsRow
               icon="document-text-outline"
               label="Terms of Service"
-              onPress={() => router.push("/legal/terms")}
+              href="/legal/terms"
             />
             <View className="mx-4 h-px bg-dark-border" />
             <SettingsRow
               icon="lock-closed-outline"
               label="Privacy Policy"
-              onPress={() => router.push("/legal/privacy")}
+              href="/legal/privacy"
             />
             <View className="mx-4 h-px bg-dark-border" />
             <SettingsRow
               icon="people-outline"
               label="Community Guidelines"
-              onPress={() => router.push("/legal/guidelines")}
+              href="/legal/guidelines"
             />
           </GlassSurface>
         </View>
@@ -670,7 +696,7 @@ export default function SettingsScreen() {
                   icon="shield-checkmark-outline"
                   iconColor="#0ea5e9"
                   label="Admin reports"
-                  onPress={() => router.push("/admin/reports")}
+                  href="/admin/reports"
                 />
                 <View className="mx-4 h-px bg-dark-border" />
               </>

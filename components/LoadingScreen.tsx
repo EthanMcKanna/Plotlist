@@ -3,6 +3,7 @@ import { Image } from "expo-image";
 import {
   Animated,
   Easing,
+  Platform,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -19,7 +20,57 @@ const APP_ICON = require("../assets/icon.png");
 const TILE_RATIO = 0.38;
 const RADIUS_RATIO = 0.2237;
 
+// Web boot curtain: browsers have no native splash to hand off from, so the
+// mobile app-icon tile reads as a phone app flashing on every page load.
+// Instead: a plain dark surface whose wordmark only fades in when boot takes
+// long enough to notice — fast loads show nothing but the page background.
+// Mirrors the static pre-JS shell injected into dist/index.html by
+// scripts/postprocess-web-export.mjs.
+function WebLoadingScreen() {
+  // If the static shell's wordmark already faded in (slow load), start
+  // visible so the shell → React handoff doesn't blink.
+  const bootWordmarkVisible = useRef(
+    typeof document !== "undefined" &&
+      (() => {
+        const el = document.getElementById("plotlist-boot-wordmark");
+        if (!el) return false;
+        return parseFloat(getComputedStyle(el).opacity || "0") > 0.05;
+      })(),
+  ).current;
+  const wordmark = useRef(
+    new Animated.Value(bootWordmarkVisible ? 1 : 0),
+  ).current;
+
+  useEffect(() => {
+    if (bootWordmarkVisible) return;
+    const animation = Animated.timing(wordmark, {
+      toValue: 1,
+      duration: 300,
+      delay: 250,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [bootWordmarkVisible, wordmark]);
+
+  return (
+    <View style={styles.root}>
+      <Animated.Text style={[styles.name, styles.webName, { opacity: wordmark }]}>
+        Plotlist
+      </Animated.Text>
+    </View>
+  );
+}
+
 export function LoadingScreen() {
+  if (Platform.OS === "web") {
+    return <WebLoadingScreen />;
+  }
+  return <NativeLoadingScreen />;
+}
+
+function NativeLoadingScreen() {
   const { width, height } = useWindowDimensions();
   const iconSize = Math.round(Math.min(width, height) * TILE_RATIO);
   const wordmark = useRef(new Animated.Value(0)).current;
@@ -82,6 +133,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     textAlign: "center",
+  },
+  webName: {
+    position: "relative",
   },
   root: {
     alignItems: "center",

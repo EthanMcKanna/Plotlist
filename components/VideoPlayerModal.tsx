@@ -1,4 +1,4 @@
-import { Modal, Pressable, Text, View } from "react-native";
+import { Modal, Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,7 +16,77 @@ const EMBED_URL = (videoId: string) =>
 // YouTube requires a valid Referer for embedded playback (fixes error 153)
 const ORIGIN = "https://com.emckanna.Plotlist";
 
-export function VideoPlayerModal({
+// Web: react-native-webview has no browser implementation (it renders an
+// unsupported-platform stub), so trailers play in a real <iframe> presented
+// as a centered 16:9 lightbox — Escape and backdrop click both close it.
+function WebVideoLightbox({
+  visible,
+  onClose,
+  videoKey,
+  title,
+}: VideoPlayerModalProps) {
+  const { width, height } = useWindowDimensions();
+  const playerWidth = Math.min(width - 48, ((height - 160) * 16) / 9, 1080);
+  const playerHeight = (playerWidth * 9) / 16;
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        onPress={onClose}
+        className="flex-1 items-center justify-center bg-black/80 px-6"
+      >
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
+          style={{ width: playerWidth }}
+        >
+          <View className="mb-2 flex-row items-center justify-between">
+            <Text
+              className="flex-1 pr-3 text-base font-semibold text-white"
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            <Pressable
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close trailer"
+              className="h-9 w-9 items-center justify-center rounded-full bg-white/10 web:transition-colors hover:bg-white/20 active:bg-white/25"
+            >
+              <Ionicons name="close" size={20} color="#fff" />
+            </Pressable>
+          </View>
+          <View
+            className="overflow-hidden rounded-2xl bg-black"
+            style={{ width: playerWidth, height: playerHeight }}
+          >
+            <iframe
+              src={EMBED_URL(videoKey)}
+              title={title}
+              width={playerWidth}
+              height={playerHeight}
+              style={{ border: 0, display: "block" }}
+              allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+              allowFullScreen
+            />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+export function VideoPlayerModal(props: VideoPlayerModalProps) {
+  if (Platform.OS === "web") {
+    return <WebVideoLightbox {...props} />;
+  }
+  return <NativeVideoPlayerModal {...props} />;
+}
+
+function NativeVideoPlayerModal({
   visible,
   onClose,
   videoKey,

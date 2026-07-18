@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { FlashList } from "../../components/FlashList";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassPressable } from "../../components/NativeGlass";
 import { PageTitle } from "../../components/PageTitle";
 import { Poster } from "../../components/Poster";
+import { notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
 import { useAction } from "../../lib/plotlist/react";
@@ -176,7 +177,7 @@ export default function PersonScreen() {
         guardedPush(`/show/${nextShowId}`);
       } catch (error) {
         console.error("Failed to open show from person page:", error);
-        Alert.alert("Error", "Failed to load show details. Please try again.");
+        notifyError("Error", "Failed to load show details. Please try again.");
       }
     },
     [ingestShow],

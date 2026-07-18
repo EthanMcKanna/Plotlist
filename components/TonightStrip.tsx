@@ -6,7 +6,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
-import { guardedPush } from "../lib/navigation";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
@@ -16,6 +15,7 @@ import { queryClient } from "../lib/queryClient";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
+import { LinkPressable } from "./LinkPressable";
 
 export type ReleaseGroup = { airDate: string; airDateTs: number; items?: any[] };
 export type HomeSchedulePreview = {
@@ -353,7 +353,7 @@ export function TonightStrip({
         accent={ACCENT}
         icon="radio"
         actionLabel="Calendar"
-        onAction={() => guardedPush("/calendar")}
+        actionHref="/calendar"
       />
 
       <HorizontalRail
@@ -378,16 +378,14 @@ export function TonightStrip({
 
 function CalendarTailCard() {
   return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        guardedPush("/calendar");
-      }}
+    <LinkPressable
+      href="/calendar"
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
       accessibilityRole="button"
       accessibilityLabel="Open the full release calendar"
       testID="home-schedule-calendar-card"
       style={[styles.card, styles.tailCard]}
-      className="active:opacity-85"
+      className="active:opacity-85 hover:opacity-90 web:transition-opacity"
     >
       <View style={styles.tailIcon}>
         <Ionicons
@@ -406,7 +404,7 @@ function CalendarTailCard() {
       <Text className="mt-0.5 text-[11px] font-semibold text-text-tertiary">
         Everything coming up
       </Text>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -425,6 +423,91 @@ function ScheduleCard({
   const headline = getScheduleCardHeadline(item);
   const metaLine = getScheduleCardMetaLine(item);
 
+  const cardProps = {
+    accessibilityRole: "button" as const,
+    accessibilityLabel: getScheduleCardAccessibilityLabel({ item, dateLabel }),
+    style: styles.card,
+    className: "active:opacity-90 hover:opacity-90 web:transition-opacity",
+  };
+
+  const cardBody = (
+    <>
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.image}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+        />
+      ) : (
+        <HomeArtworkFallback
+          testID={`schedule-artwork-fallback-${item.show?._id ?? "show"}`}
+          title={item.show?.title}
+          subtitle={getScheduleCardVisibleSubline(item)}
+          accent={ACCENT}
+          compact
+          copyVisible={false}
+          markVisible={false}
+          haloVisible={false}
+          ornamentsVisible={false}
+        />
+      )}
+
+      {/* Same scrim recipe as the continue banners: readable chips up top,
+          art in the middle, deep floor under the copy. */}
+      <LinearGradient
+        colors={[
+          "rgba(13,15,20,0.34)",
+          "rgba(13,15,20,0.02)",
+          "rgba(13,15,20,0.42)",
+          "rgba(13,15,20,0.92)",
+        ]}
+        locations={[0, 0.3, 0.62, 1]}
+        style={[StyleSheet.absoluteFill, styles.pointerNone]}
+      />
+
+      <View
+        testID={`schedule-date-chip-${item.show?._id ?? "show"}`}
+        style={[styles.dateBadge, isTonight ? styles.dateBadgeTonight : null]}
+      >
+        <Text
+          className={
+            isTonight
+              ? "text-[10px] font-black text-white"
+              : "text-[10px] font-bold text-white/85"
+          }
+          style={{ letterSpacing: isTonight ? 0.4 : 0.2 }}
+        >
+          {dateLabel}
+        </Text>
+      </View>
+
+      <View style={styles.bottomContent}>
+        {item.show?.title ? (
+          <Text
+            className="text-[10px] font-semibold text-white/60 uppercase"
+            style={{ letterSpacing: 1 }}
+            numberOfLines={1}
+          >
+            {item.show?.title}
+          </Text>
+        ) : null}
+        <Text className="mt-0.5 text-[14px] font-black text-white" numberOfLines={1}>
+          {headline}
+        </Text>
+        {metaLine ? (
+          <Text
+            className="mt-0.5 text-[11px] font-semibold text-white/60"
+            numberOfLines={1}
+          >
+            {metaLine}
+          </Text>
+        ) : null}
+      </View>
+    </>
+  );
+
   return (
     <Animated.View
       entering={
@@ -434,92 +517,26 @@ function ScheduleCard({
       }
       style={{ width: CARD_WIDTH }}
     >
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          if (item.show?._id) {
-            guardedPush(`/show/${item.show._id}`);
-          }
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={getScheduleCardAccessibilityLabel({ item, dateLabel })}
-        style={styles.card}
-        className="active:opacity-90"
-      >
-        {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.image}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={200}
-          />
-        ) : (
-          <HomeArtworkFallback
-            testID={`schedule-artwork-fallback-${item.show?._id ?? "show"}`}
-            title={item.show?.title}
-            subtitle={getScheduleCardVisibleSubline(item)}
-            accent={ACCENT}
-            compact
-            copyVisible={false}
-            markVisible={false}
-            haloVisible={false}
-            ornamentsVisible={false}
-          />
-        )}
-
-        {/* Same scrim recipe as the continue banners: readable chips up top,
-            art in the middle, deep floor under the copy. */}
-        <LinearGradient
-          colors={[
-            "rgba(13,15,20,0.34)",
-            "rgba(13,15,20,0.02)",
-            "rgba(13,15,20,0.42)",
-            "rgba(13,15,20,0.92)",
-          ]}
-          locations={[0, 0.3, 0.62, 1]}
-          style={[StyleSheet.absoluteFill, styles.pointerNone]}
-        />
-
-        <View
-          testID={`schedule-date-chip-${item.show?._id ?? "show"}`}
-          style={[styles.dateBadge, isTonight ? styles.dateBadgeTonight : null]}
+      {item.show?._id ? (
+        <LinkPressable
+          href={`/show/${item.show._id}`}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+          {...cardProps}
         >
-          <Text
-            className={
-              isTonight
-                ? "text-[10px] font-black text-white"
-                : "text-[10px] font-bold text-white/85"
-            }
-            style={{ letterSpacing: isTonight ? 0.4 : 0.2 }}
-          >
-            {dateLabel}
-          </Text>
-        </View>
-
-        <View style={styles.bottomContent}>
-          {item.show?.title ? (
-            <Text
-              className="text-[10px] font-semibold text-white/60 uppercase"
-              style={{ letterSpacing: 1 }}
-              numberOfLines={1}
-            >
-              {item.show?.title}
-            </Text>
-          ) : null}
-          <Text className="mt-0.5 text-[14px] font-black text-white" numberOfLines={1}>
-            {headline}
-          </Text>
-          {metaLine ? (
-            <Text
-              className="mt-0.5 text-[11px] font-semibold text-white/60"
-              numberOfLines={1}
-            >
-              {metaLine}
-            </Text>
-          ) : null}
-        </View>
-      </Pressable>
+          {cardBody}
+        </LinkPressable>
+      ) : (
+        // No show id yet (stale preview): keep the plain pressable so the
+        // haptic still answers the tap without navigating anywhere.
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
+          {...cardProps}
+        >
+          {cardBody}
+        </Pressable>
+      )}
     </Animated.View>
   );
 }

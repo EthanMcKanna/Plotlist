@@ -137,7 +137,15 @@ export async function verifyAppleIdentityToken(
   if (payload.iss !== APPLE_ISSUER) {
     invalidToken();
   }
-  if (payload.aud !== getServerEnv().APPLE_BUNDLE_ID) {
+  // Native tokens carry the app bundle ID as their audience; web tokens
+  // (Sign in with Apple JS) carry the Services ID.
+  const env = getServerEnv();
+  const allowedAudiences = new Set(
+    [env.APPLE_BUNDLE_ID, env.APPLE_WEB_CLIENT_ID].filter(
+      (value): value is string => Boolean(value),
+    ),
+  );
+  if (typeof payload.aud !== "string" || !allowedAudiences.has(payload.aud)) {
     invalidToken();
   }
   if (typeof payload.exp !== "number" || payload.exp < nowSeconds - CLOCK_SKEW_SECONDS) {

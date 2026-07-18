@@ -5,6 +5,7 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
+      ".claude/**",
       ".expo/**",
       ".vercel/**",
       ".wrangler/**",
@@ -22,6 +23,11 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
+      parserOptions: {
+        // Git worktrees under .claude/ carry their own tsconfigs, which
+        // breaks typescript-eslint's project-root inference — pin it.
+        tsconfigRootDir: import.meta.dirname,
+      },
       globals: {
         ...globals.browser,
         ...globals.node,

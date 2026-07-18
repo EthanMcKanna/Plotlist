@@ -4,7 +4,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   Text,
   View,
 } from "react-native";
@@ -21,6 +20,7 @@ import {
   FriendActivityRow,
 } from "../components/FriendsActivity";
 import { GlassPressable } from "../components/NativeGlass";
+import { HorizontalRail } from "../components/HorizontalRail";
 import { Screen } from "../components/Screen";
 import { ShimmerBlock } from "../components/ShowDetailSkeleton";
 import { api } from "../lib/plotlist/api";
@@ -28,7 +28,7 @@ import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsAct
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { useContactSync } from "../lib/useContactSync";
-import { SHOW_BACK_BUTTON } from "../lib/webLayout";
+import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
 
 const PAGE_SIZE = 40;
 
@@ -47,6 +47,7 @@ function ActivityRowSkeleton() {
 
 export default function FriendsScreen() {
   const { isAuthenticated } = useAuth();
+  const isDesktopWeb = useIsDesktopWeb();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const hasProfile = Boolean(me?._id);
 
@@ -134,15 +135,11 @@ export default function FriendsScreen() {
             <Text className="mb-2 text-xs font-bold uppercase tracking-widest text-text-tertiary">
               Add friends
             </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
-            >
+            <HorizontalRail contentContainerStyle={{ gap: 12, paddingBottom: 8 }}>
               {people.map((person, idx) => (
                 <PersonChip key={person.user._id} person={person} index={idx} />
               ))}
-            </ScrollView>
+            </HorizontalRail>
           </>
         ) : null}
       </View>
@@ -179,6 +176,24 @@ export default function FriendsScreen() {
               What people you follow are watching
             </Text>
           </View>
+          {isDesktopWeb ? (
+            // Pointer users have no pull-to-refresh; give them a button.
+            <Pressable
+              onPress={handleRefresh}
+              disabled={refreshing}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh"
+              hitSlop={8}
+              {...({ title: "Refresh" } as object)}
+              className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card web:transition-colors hover:bg-dark-hover"
+            >
+              {refreshing ? (
+                <ActivityIndicator size="small" color="#9BA1B0" />
+              ) : (
+                <Ionicons name="refresh" size={17} color="#9BA1B0" />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -187,7 +202,8 @@ export default function FriendsScreen() {
             accessibilityRole="button"
             accessibilityLabel="Find people"
             hitSlop={8}
-            className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card active:bg-dark-hover"
+            {...(Platform.OS === "web" ? { title: "Find people" } : null)}
+            className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
           >
             <Ionicons name="person-add-outline" size={17} color="#9BA1B0" />
           </Pressable>

@@ -6,6 +6,7 @@ import * as Haptics from "expo-haptics";
 import { usePaginatedQuery, useQuery } from "../../../lib/plotlist/react";
 
 import { EmptyState } from "../../../components/EmptyState";
+import { PageTitle } from "../../../components/PageTitle";
 import { Poster } from "../../../components/Poster";
 import { Screen } from "../../../components/Screen";
 import { SegmentedControl } from "../../../components/SegmentedControl";
@@ -120,6 +121,7 @@ export default function PublicWatchlistScreen() {
 
   return (
     <Screen webMaxWidth={WEB_PAGE_MAX_WIDTH}>
+      {profile?.user ? <PageTitle title={`${profileName}'s Watchlist`} /> : null}
       <View className="flex-1 px-6 pt-6">
         <Text className="text-2xl font-semibold text-text-primary">Watchlist</Text>
         <Text className="mt-1 text-sm text-text-tertiary">

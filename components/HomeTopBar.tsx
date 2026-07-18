@@ -1,7 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, {
   Extrapolation,
@@ -12,6 +11,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "./Avatar";
+import { LinkPressable } from "./LinkPressable";
 
 type HomeTopBarProps = {
   scrollY: SharedValue<number>;
@@ -138,19 +138,17 @@ export function HomeTopBar({
       </Animated.View>
 
       <View style={styles.row}>
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push("/profile");
-          }}
+        <LinkPressable
+          href="/profile"
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           testID="home-topbar-profile"
           style={styles.profileButton}
           accessibilityRole="button"
           accessibilityLabel="Open profile"
-          className="active:opacity-80"
+          className="active:opacity-80 hover:opacity-80 web:transition-opacity"
         >
           <Avatar uri={avatarUrl} label={firstName ?? "Me"} size={36} />
-        </Pressable>
+        </LinkPressable>
 
         <View style={[styles.middle, styles.pointerNone]}>
           <Animated.View
@@ -173,16 +171,15 @@ export function HomeTopBar({
 
         {/* Search lives on the tab bar; the header keeps a single quiet
             action so its chrome matches the avatar's scale. */}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push("/notifications");
-          }}
+        <LinkPressable
+          href="/notifications"
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           testID="home-topbar-notifications"
           accessibilityRole="button"
           accessibilityLabel={getHomeTopBarNotificationsAccessibilityLabel(notificationCount)}
+          {...(Platform.OS === "web" ? { title: "Notifications" } : null)}
           style={styles.notificationsButton}
-          className="active:opacity-70"
+          className="active:opacity-70 hover:opacity-70 web:transition-opacity"
         >
           <Ionicons
             name="notifications-outline"
@@ -200,7 +197,7 @@ export function HomeTopBar({
               </Text>
             </View>
           ) : null}
-        </Pressable>
+        </LinkPressable>
       </View>
     </View>
   );

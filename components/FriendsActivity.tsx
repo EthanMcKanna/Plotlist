@@ -8,13 +8,14 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInUp } from "react-native-reanimated";
 import { HorizontalRail } from "./HorizontalRail";
 
 import { Avatar } from "./Avatar";
 import { HomeSectionHeader } from "./HomeSectionHeader";
+import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 import { formatRelativeTime } from "../lib/format";
 import {
@@ -22,7 +23,6 @@ import {
   getFriendWatchedPhrase,
   type FriendActivityEntry,
 } from "../lib/friendsActivity";
-import { guardedPush } from "../lib/navigation";
 import { useMutation } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import type { Id } from "../lib/plotlist/types";
@@ -155,35 +155,16 @@ export function FriendActivityRow({
   const isReview = entry.kind === "review";
   const isWatched = entry.kind === "watched";
 
-  const openTarget = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (entry.kind === "review") {
-      router.push(`/review/${entry.reviewId}`);
-      return;
-    }
-    if (entry.kind === "follow") {
-      router.push(`/profile/${entry.followedUser._id}`);
-      return;
-    }
-    if (entry.kind === "list") {
-      guardedPush(`/list/${entry.listId}`);
-      return;
-    }
-    guardedPush(`/show/${entry.show._id}`);
-  };
-
-  const openProfile = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/profile/${entry.actor._id}`);
-  };
-
-  const openLogComments = () => {
-    if (entry.kind !== "watched" || !entry.logId) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(
-      `/comments?targetType=log&targetId=${encodeURIComponent(entry.logId)}`,
-    );
-  };
+  // Every row target is a static destination, so the pressables render as
+  // real links on web via LinkPressable.
+  const targetHref: Href =
+    entry.kind === "review"
+      ? `/review/${entry.reviewId}`
+      : entry.kind === "follow"
+        ? `/profile/${entry.followedUser._id}`
+        : entry.kind === "list"
+          ? `/list/${entry.listId}`
+          : `/show/${entry.show._id}`;
 
   let headline: ReactNode;
   if (entry.kind === "follow") {
@@ -232,21 +213,23 @@ export function FriendActivityRow({
       className="flex-row items-center gap-3 py-3"
       style={isLast ? undefined : styles.rowDivider}
     >
-      <Pressable
-        onPress={openProfile}
+      <LinkPressable
+        href={`/profile/${entry.actor._id}`}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
         accessibilityRole="button"
         accessibilityLabel={`Open ${name}'s profile`}
         hitSlop={6}
-        className="active:opacity-80"
+        className="active:opacity-80 hover:opacity-80 web:transition-opacity"
       >
         <Avatar uri={entry.avatarUrl} label={name} size={40} />
-      </Pressable>
+      </LinkPressable>
 
-      <Pressable
-        onPress={openTarget}
+      <LinkPressable
+        href={targetHref}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
         accessibilityRole="button"
         accessibilityLabel={getFriendActivityRowLabel(entry)}
-        className="min-w-0 flex-1 flex-row items-center gap-3 active:opacity-85"
+        className="min-w-0 flex-1 flex-row items-center gap-3 active:opacity-85 hover:bg-white/5 web:transition-colors"
       >
         <View className="min-w-0 flex-1">
           <Text className="text-[14px] leading-[19px] text-text-secondary" numberOfLines={2}>
@@ -317,18 +300,23 @@ export function FriendActivityRow({
         ) : (
           <Poster uri={entry.show.posterUrl} width={40} />
         )}
-      </Pressable>
+      </LinkPressable>
 
       {isWatched && entry.logId ? (
-        <Pressable
-          onPress={openLogComments}
+        <LinkPressable
+          href={`/comments?targetType=log&targetId=${encodeURIComponent(entry.logId)}`}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           accessibilityRole="button"
           accessibilityLabel="View comments on this watch"
           hitSlop={8}
-          className="active:opacity-70"
+          // hitSlop is a no-op on web, so the 16px glyph gets a real hit area
+          // there (and a tooltip, since the control is icon-only).
+          style={Platform.OS === "web" ? styles.commentButtonWeb : undefined}
+          {...(Platform.OS === "web" ? { title: "View comments" } : null)}
+          className="active:opacity-70 hover:opacity-70 web:transition-opacity"
         >
           <Ionicons name="chatbubble-outline" size={16} color="#5A6070" />
-        </Pressable>
+        </LinkPressable>
       ) : null}
     </View>
   );
@@ -474,11 +462,7 @@ export function FriendsActivity({
         icon="people"
         actionLabel={visibleActivity.length > 0 ? "All activity" : undefined}
         actionLabelVisible={false}
-        onAction={
-          visibleActivity.length > 0
-            ? () => router.push("/friends")
-            : undefined
-        }
+        actionHref={visibleActivity.length > 0 ? "/friends" : undefined}
       />
 
       {visibleActivity.length > 0 ? (
@@ -553,12 +537,10 @@ export function PersonChip({
       }
       style={styles.personCard}
     >
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push(`/profile/${person.user._id}`);
-        }}
-        className="active:opacity-85"
+      <LinkPressable
+        href={`/profile/${person.user._id}`}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        className="active:opacity-85 hover:opacity-85 web:transition-opacity"
         accessibilityRole="button"
         accessibilityLabel={`Open ${label}`}
         style={styles.personPress}
@@ -584,7 +566,7 @@ export function PersonChip({
             {subtitle}
           </Text>
         ) : null}
-      </Pressable>
+      </LinkPressable>
 
       <Pressable
         onPress={() => {
@@ -657,6 +639,12 @@ const styles = StyleSheet.create({
   },
   starRow: {
     gap: 1,
+  },
+  commentButtonWeb: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 32,
+    minWidth: 32,
   },
   emptyCard: {
     backgroundColor: "#161A22",

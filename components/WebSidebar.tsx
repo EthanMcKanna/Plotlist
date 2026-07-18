@@ -1,9 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { router, usePathname } from "expo-router";
+import { Link, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "../lib/plotlist/api";
 import { useQuery } from "../lib/plotlist/react";
+import { WEB_ACTIVE_NAV_EVENT } from "../lib/useScrollToTopOnTabPress";
 import {
   WEB_RAIL_WIDTH,
   WEB_SIDEBAR_WIDTH,
@@ -93,16 +94,24 @@ function SidebarRow({
   badge?: string | null;
 }) {
   return (
-    <Pressable
-      onPress={() => router.navigate(item.href as never)}
-      accessibilityRole="link"
-      accessibilityLabel={item.label}
-      aria-current={active ? "page" : undefined}
-      testID={`web-sidebar-${item.key}`}
-      className={`flex-row items-center rounded-xl transition-colors ${
-        compact ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
-      } ${active ? "bg-white/10" : "hover:bg-white/5 active:bg-white/10"}`}
-    >
+    <Link href={item.href as never} asChild>
+      <Pressable
+        onPress={() => {
+          // Re-clicking the active item scrolls the screen to top, like a
+          // re-tapped native tab.
+          if (active && typeof window !== "undefined") {
+            window.dispatchEvent(new Event(WEB_ACTIVE_NAV_EVENT));
+          }
+        }}
+        accessibilityLabel={item.label}
+        aria-current={active ? "page" : undefined}
+        testID={`web-sidebar-${item.key}`}
+        // DOM tooltip for the icon-only rail; RNW passes `title` through.
+        {...(compact ? { title: item.label } : null)}
+        className={`flex-row items-center rounded-xl web:transition-colors ${
+          compact ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
+        } ${active ? "bg-white/10" : "hover:bg-white/5 active:bg-white/10"}`}
+      >
       <View style={styles.iconSlot}>
         <Ionicons
           name={active ? item.activeIcon : item.icon}
@@ -119,19 +128,20 @@ function SidebarRow({
           </View>
         ) : null}
       </View>
-      {compact ? null : (
-        <Text
-          numberOfLines={1}
-          className={`flex-1 text-[15px] ${
-            active
-              ? "font-semibold text-text-primary"
-              : "font-medium text-text-secondary"
-          }`}
-        >
-          {item.label}
-        </Text>
-      )}
-    </Pressable>
+        {compact ? null : (
+          <Text
+            numberOfLines={1}
+            className={`flex-1 text-[15px] ${
+              active
+                ? "font-semibold text-text-primary"
+                : "font-medium text-text-secondary"
+            }`}
+          >
+            {item.label}
+          </Text>
+        )}
+      </Pressable>
+    </Link>
   );
 }
 
@@ -153,19 +163,19 @@ export function WebSidebar({ mode }: { mode: WebNavMode }) {
       ]}
       testID="web-sidebar"
     >
-      <Pressable
-        onPress={() => router.navigate("/home")}
-        accessibilityRole="link"
-        accessibilityLabel="Plotlist home"
-        className={`mb-6 flex-row items-center ${compact ? "justify-center" : "gap-2.5 px-3"}`}
-      >
-        <AppLogo size={30} />
-        {compact ? null : (
-          <Text className="text-[20px] font-black tracking-tight text-text-primary">
-            Plotlist
-          </Text>
-        )}
-      </Pressable>
+      <Link href="/home" asChild>
+        <Pressable
+          accessibilityLabel="Plotlist home"
+          className={`mb-6 flex-row items-center ${compact ? "justify-center" : "gap-2.5 px-3"}`}
+        >
+          <AppLogo size={30} />
+          {compact ? null : (
+            <Text className="text-[20px] font-black tracking-tight text-text-primary">
+              Plotlist
+            </Text>
+          )}
+        </Pressable>
+      </Link>
 
       <View className="gap-1">
         {PRIMARY_ITEMS.map((item) => (
@@ -185,39 +195,40 @@ export function WebSidebar({ mode }: { mode: WebNavMode }) {
 
       <View className="flex-1" />
 
-      <Pressable
-        onPress={() => router.navigate("/profile")}
-        accessibilityRole="link"
-        accessibilityLabel="Your profile"
-        testID="web-sidebar-profile"
-        className={`flex-row items-center rounded-xl ${
-          compact ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
-        } ${meActive ? "bg-white/10" : "hover:bg-white/5 active:bg-white/10"}`}
-      >
+      <Link href="/profile" asChild>
+        <Pressable
+          accessibilityLabel="Your profile"
+          testID="web-sidebar-profile"
+          {...(compact ? { title: "Your profile" } : null)}
+          className={`flex-row items-center rounded-xl web:transition-colors ${
+            compact ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
+          } ${meActive ? "bg-white/10" : "hover:bg-white/5 active:bg-white/10"}`}
+        >
         <Avatar
           uri={me?.avatarUrl ?? null}
           label={me?.displayName ?? me?.name ?? "Me"}
           size={28}
         />
-        {compact ? null : (
-          <View className="min-w-0 flex-1">
-            <Text
-              numberOfLines={1}
-              className="text-[14px] font-semibold text-text-primary"
-            >
-              {me?.displayName ?? me?.name ?? "You"}
-            </Text>
-            {me?.username ? (
+          {compact ? null : (
+            <View className="min-w-0 flex-1">
               <Text
                 numberOfLines={1}
-                className="text-[12px] text-text-tertiary"
+                className="text-[14px] font-semibold text-text-primary"
               >
-                @{me.username}
+                {me?.displayName ?? me?.name ?? "You"}
               </Text>
-            ) : null}
-          </View>
-        )}
-      </Pressable>
+              {me?.username ? (
+                <Text
+                  numberOfLines={1}
+                  className="text-[12px] text-text-tertiary"
+                >
+                  @{me.username}
+                </Text>
+              ) : null}
+            </View>
+          )}
+        </Pressable>
+      </Link>
     </View>
   );
 }

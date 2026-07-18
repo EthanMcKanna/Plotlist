@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { guardedPush } from "../lib/navigation";
+import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 
 export function ShowRow({
@@ -18,21 +18,12 @@ export function ShowRow({
   subtitle?: string;
   onPress?: () => void;
 }) {
-  const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (onPress) {
-      onPress();
-    } else {
-      guardedPush(`/show/${id}`);
-    }
-  };
+  const className =
+    "flex-row items-center gap-4 rounded-2xl border border-dark-border bg-dark-card p-3 hover:bg-dark-hover active:bg-dark-hover web:transition-colors";
 
-  return (
-    <Pressable
-      onPress={handlePress}
-      className="flex-row items-center gap-4 rounded-2xl border border-dark-border bg-dark-card p-3 active:bg-dark-hover"
-    >
-      <Poster uri={posterUrl ?? undefined} size="sm" />
+  const body = (
+    <>
+      <Poster uri={posterUrl ?? undefined} size="sm" alt={title} />
       <View className="flex-1">
         <Text className="text-base font-semibold text-text-primary">
           {title}
@@ -44,6 +35,30 @@ export function ShowRow({
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onPress();
+        }}
+        className={className}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+
+  return (
+    <LinkPressable
+      href={`/show/${id}`}
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+      className={className}
+    >
+      {body}
+    </LinkPressable>
   );
 }

@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
 
 import { api } from "../lib/plotlist/api";
 import type { Id } from "../lib/plotlist/types";
 import { useMutation } from "../lib/plotlist/react";
 import { Avatar } from "./Avatar";
+import { LinkPressable } from "./LinkPressable";
 import { TasteMatchSummary } from "./TasteMatchSummary";
 
 type TasteMatchData = {
@@ -88,7 +88,6 @@ export const UserRow = memo(function UserRow({
   showFollowButton = true,
   taste = null,
 }: UserRowProps) {
-  const router = useRouter();
   const follow = useMutation(api.follows.follow);
   const unfollow = useMutation(api.follows.unfollow);
   const [isFollowing, setIsFollowing] = useState(Boolean(isFollowingProp));
@@ -102,25 +101,36 @@ export const UserRow = memo(function UserRow({
 
   const handlePressProfile = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/profile/${userId}`);
-  }, [router, userId]);
+  }, []);
 
   const handleToggleFollow = useCallback(async () => {
     if (isPending) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsPending(true);
 
+    // Web flips the label optimistically (no haptic feedback there, so the
+    // click needs an instant response); native keeps its settle-after-server
+    // behavior. The catch below restores the previous state either way.
+    const optimistic = Platform.OS === "web";
+    const wasFollowing = isFollowing;
+    const wasRequested = isRequested;
     try {
-      if (isFollowing || isRequested) {
+      if (wasFollowing || wasRequested) {
+        if (optimistic) {
+          setIsFollowing(false);
+          setIsRequested(false);
+        }
         // Unfollow also withdraws a pending follow request.
         await unfollow({ userIdToUnfollow: userId });
         setIsFollowing(false);
         setIsRequested(false);
       } else {
+        if (optimistic) setIsFollowing(true);
         const result = (await follow({ userIdToFollow: userId })) as
           | { status?: string }
           | null;
         if (result?.status === "requested") {
+          setIsFollowing(false);
           setIsRequested(true);
         } else {
           setIsFollowing(true);
@@ -128,6 +138,8 @@ export const UserRow = memo(function UserRow({
       }
     } catch (error) {
       console.warn("Failed to update follow", error);
+      setIsFollowing(wasFollowing);
+      setIsRequested(wasRequested);
     } finally {
       setIsPending(false);
     }
@@ -147,9 +159,10 @@ export const UserRow = memo(function UserRow({
   return (
     <View className="rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
       <View className="flex-row items-center justify-between">
-        <Pressable
+        <LinkPressable
+          href={`/profile/${userId}`}
           onPress={handlePressProfile}
-          className="flex-1 flex-row items-center gap-3 pr-3 active:opacity-80"
+          className="flex-1 flex-row items-center gap-3 pr-3 web:transition-opacity active:opacity-80 hover:opacity-90"
         >
           <Avatar uri={avatarUrl} label={nameLabel} size={44} />
           <View className="flex-1">
@@ -167,15 +180,15 @@ export const UserRow = memo(function UserRow({
               </Text>
             ) : null}
           </View>
-        </Pressable>
+        </LinkPressable>
         {showFollowButton ? (
           <Pressable
             onPress={handleToggleFollow}
             disabled={isPending}
-            className={`items-center justify-center rounded-full px-4 py-2 ${
+            className={`items-center justify-center rounded-full px-4 py-2 web:transition ${
               isFollowing || isRequested
-                ? "border border-dark-border bg-dark-card"
-                : "bg-brand-500"
+                ? "border border-dark-border bg-dark-card hover:bg-dark-hover"
+                : "bg-brand-500 hover:opacity-90"
             } ${isPending ? "opacity-60" : ""}`}
           >
             <Text

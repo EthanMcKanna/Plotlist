@@ -8,14 +8,16 @@ import {
   type ComponentType,
 } from "react";
 import {
-  Alert,
+  ActivityIndicator,
   Platform,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, type Href } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Animated, {
   useAnimatedScrollHandler,
@@ -23,6 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { useAction, useQuery } from "../../lib/plotlist/react";
 import { api } from "../../lib/plotlist/api";
@@ -728,7 +731,7 @@ export function HomeSurface({
     async (key: string, fallbackTitle: string) => {
       const catalog = data.getCatalogForKey(key);
       if (!catalog) {
-        Alert.alert("Could not open show", `Missing catalog data for ${fallbackTitle}.`);
+        notifyError("Could not open show", `Missing catalog data for ${fallbackTitle}.`);
         return;
       }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -738,7 +741,7 @@ export function HomeSurface({
         return;
       }
       if (!catalog.externalId) {
-        Alert.alert("Could not open show", "This catalog item is missing an id.");
+        notifyError("Could not open show", "This catalog item is missing an id.");
         return;
       }
       try {
@@ -757,7 +760,7 @@ export function HomeSurface({
         });
         guardedPush(`/show/${nextShowId}`);
       } catch (error) {
-        Alert.alert("Could not add show", String(error));
+        notifyError("Could not add show", String(error));
       }
     },
     [data, ingestFromCatalog],
@@ -768,6 +771,23 @@ export function HomeSurface({
       void openShowFromKey(item.key, item.title);
     },
     [openShowFromKey],
+  );
+
+  // On web, rail cards whose show already exists in the catalog render as
+  // real links (cmd/middle-click work); items that still need ingest keep
+  // the onPressItem fallback. Native output is untouched.
+  const withShowHrefs = useCallback(
+    (items: SignatureRailItem[]) => {
+      if (Platform.OS !== "web") return items;
+      return items.map((item) => {
+        const catalog = data.getCatalogForKey(item.key);
+        const knownId = catalog?._id ?? catalog?.showId;
+        return knownId
+          ? { ...item, href: `/show/${knownId}` as Href }
+          : item;
+      });
+    },
+    [data],
   );
 
   const handleSyncContacts = useCallback(async () => {
@@ -936,7 +956,7 @@ export function HomeSurface({
             accent={FOR_YOU_ACCENT}
             icon="sparkles"
             layout="poster"
-            items={forYouItems}
+            items={withShowHrefs(forYouItems)}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
@@ -956,7 +976,7 @@ export function HomeSurface({
                 accent={FOR_YOU_ACCENT}
                 icon="color-wand"
                 layout="poster"
-                items={rail.items}
+                items={withShowHrefs(rail.items)}
                 featureCardWidth={featureCardWidth}
                 onPressItem={handlePressRailItem}
               />
@@ -986,7 +1006,7 @@ export function HomeSurface({
             accent={HEAT_ACCENT}
             icon="flame"
             layout="poster"
-            items={pulseHeatItems}
+            items={withShowHrefs(pulseHeatItems)}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
@@ -1014,7 +1034,7 @@ export function HomeSurface({
             accent={FRESH_ACCENT}
             icon="sparkles"
             layout="poster"
-            items={freshItems}
+            items={withShowHrefs(freshItems)}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
@@ -1042,7 +1062,7 @@ export function HomeSurface({
             accent={CRITICS_ACCENT}
             icon="star"
             layout="poster"
-            items={criticsItems}
+            items={withShowHrefs(criticsItems)}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
@@ -1070,7 +1090,7 @@ export function HomeSurface({
             accent={QUICK_ACCENT}
             icon="timer"
             layout="poster"
-            items={quickItems}
+            items={withShowHrefs(quickItems)}
             featureCardWidth={featureCardWidth}
             onPressItem={handlePressRailItem}
           />
@@ -1130,15 +1150,39 @@ export function HomeSurface({
   };
 
   // Desktop web replaces the floating mobile top bar (avatar + bell live in
-  // the sidebar there) with an inline greeting header.
+  // the sidebar there) with an inline greeting header. Pull-to-refresh does
+  // not exist for mouse users, so the header carries a refresh button.
   const desktopHeader = isDesktopWeb ? (
-    <View className="px-6 pb-2 pt-8">
-      <Text className="text-[28px] font-black tracking-tight text-text-primary">
+    <View className="flex-row items-center justify-between gap-4 px-6 pb-2 pt-8">
+      <Text className="flex-1 text-[28px] font-black tracking-tight text-text-primary">
         {getHomeTopBarGreetingLine(
           new Date(surfaceNow),
           data.me?.displayName ?? data.me?.name ?? null,
         )}
       </Text>
+      <Pressable
+        onPress={() => void handleRefresh()}
+        disabled={refreshing}
+        accessibilityRole="button"
+        accessibilityLabel="Refresh home"
+        accessibilityState={{ disabled: refreshing, busy: refreshing }}
+        {...(Platform.OS === "web" ? { title: "Refresh" } : null)}
+        className="h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 web:transition-colors active:opacity-80"
+      >
+        {refreshing ? (
+          <ActivityIndicator size="small" color="#9BA1B0" />
+        ) : (
+          <Ionicons
+            name="refresh"
+            size={18}
+            color="#9BA1B0"
+            accessible={false}
+            accessibilityElementsHidden
+            aria-hidden={true}
+            importantForAccessibility="no"
+          />
+        )}
+      </Pressable>
     </View>
   ) : null;
 

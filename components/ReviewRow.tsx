@@ -1,7 +1,7 @@
-import { Pressable, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
+import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 import { Avatar } from "./Avatar";
 import { SpoilerShield } from "./SpoilerShield";
@@ -40,18 +40,17 @@ export function ReviewRowCompact({
   createdAt?: number;
   spoiler?: boolean;
 }) {
-  const router = useRouter();
   const label = authorName ?? "Someone";
 
   return (
-    <Pressable
+    <LinkPressable
+      href={`/review/${id}`}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push(`/review/${id}`);
       }}
       accessibilityRole="button"
       accessibilityLabel={`Review by ${label}, ${rating} out of 5 stars`}
-      className="flex-row gap-3 py-3 active:opacity-80"
+      className="flex-row gap-3 py-3 web:transition-opacity active:opacity-80 hover:opacity-80"
     >
       <Avatar uri={authorAvatarUrl} label={label} size={32} />
       <View className="flex-1">
@@ -90,7 +89,7 @@ export function ReviewRowCompact({
           </View>
         ) : null}
       </View>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -121,7 +120,6 @@ export function ReviewRow({
   seasonNumber?: number | null;
   episodeNumber?: number | null;
 }) {
-  const router = useRouter();
   const titleLabel = authorName ?? showTitle ?? "Review";
   const subtitleLabel = authorName && showTitle ? showTitle : authorUsername ? `@${authorUsername}` : null;
   const hasText = Boolean(reviewText);
@@ -130,12 +128,12 @@ export function ReviewRow({
   // Rating-only: compact single-line row
   if (!hasText) {
     return (
-      <Pressable
+      <LinkPressable
+        href={`/review/${id}`}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push(`/review/${id}`);
         }}
-        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-3 py-2.5 active:bg-dark-hover"
+        className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-3 py-2.5 web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
       >
         {authorName ? (
           <Avatar uri={authorAvatarUrl} label={authorName} size={32} />
@@ -163,18 +161,18 @@ export function ReviewRow({
             {formatRelativeTime(createdAt)}
           </Text>
         ) : null}
-      </Pressable>
+      </LinkPressable>
     );
   }
 
   // Full review card
   return (
-    <Pressable
+    <LinkPressable
+      href={`/review/${id}`}
       onPress={() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push(`/review/${id}`);
       }}
-      className="flex-row gap-4 rounded-2xl border border-dark-border bg-dark-card p-3 active:bg-dark-hover"
+      className="flex-row gap-4 rounded-2xl border border-dark-border bg-dark-card p-3 web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
     >
       {authorName ? (
         <Avatar uri={authorAvatarUrl} label={authorName} size={40} />
@@ -222,6 +220,6 @@ export function ReviewRow({
           </SpoilerShield>
         </View>
       </View>
-    </Pressable>
+    </LinkPressable>
   );
 }

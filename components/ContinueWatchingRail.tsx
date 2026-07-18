@@ -29,6 +29,7 @@ import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { HomeArtworkFallback } from "./HomeArtworkFallback";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
+import { LinkPressable } from "./LinkPressable";
 import { RailSkeleton } from "./RailSkeleton";
 
 export type ContinueWatchingItem = {
@@ -507,9 +508,7 @@ export function ContinueWatchingRail({
         accent={ACCENT}
         icon="play"
         actionLabel="All shows"
-        onAction={() => {
-          guardedPush("/continue");
-        }}
+        actionHref="/continue"
       />
       <HorizontalRail
         accessibilityLabel="Continue watching rail"
@@ -556,17 +555,14 @@ export function ContinueWatchingCard({
   const showProgressBar = !item.isUpcoming && (item.totalEpisodes ?? 0) > 0;
   const showMarkWatched = !item.isUpcoming && !complete;
 
-  const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (complete) {
-      guardedPush({ pathname: "/show/[id]", params: { id: item.showId } });
-      return;
-    }
-    guardedPush({
-      pathname: "/show/[id]",
-      params: buildEpisodeDeepLinkParams(item, item.showId),
-    });
-  }, [complete, item]);
+  // Caught-up cards land on the show page; active ones carry the episode
+  // deep-link params so the sheet opens instantly (query params on web).
+  const cardHref = complete
+    ? { pathname: "/show/[id]" as const, params: { id: item.showId } }
+    : {
+        pathname: "/show/[id]" as const,
+        params: buildEpisodeDeepLinkParams(item, item.showId),
+      };
 
   return (
     <Animated.View
@@ -578,12 +574,13 @@ export function ContinueWatchingCard({
       style={{ width: cardWidth }}
     >
       <View style={[styles.cardWrap, { width: cardWidth }]}>
-        <Pressable
-          onPress={handlePress}
+        <LinkPressable
+          href={cardHref}
+          onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
           accessibilityRole="button"
           accessibilityLabel={getContinueWatchingAccessibilityLabel(item)}
           style={[styles.card, { height: cardHeight, width: cardWidth }]}
-          className="active:opacity-90"
+          className="active:opacity-90 hover:opacity-90 web:transition-opacity"
         >
           {imageUrl ? (
             <Image
@@ -677,7 +674,7 @@ export function ContinueWatchingCard({
               />
             </View>
           ) : null}
-        </Pressable>
+        </LinkPressable>
 
         {showMarkWatched ? (
           <Pressable
@@ -685,9 +682,12 @@ export function ContinueWatchingCard({
               onMarkWatched(item);
             }}
             style={styles.checkButton}
-            className="active:opacity-70"
+            className="active:opacity-70 hover:opacity-90 web:transition-opacity"
             accessibilityRole="button"
             accessibilityLabel={getContinueWatchingMarkWatchedLabel(item)}
+            {...(Platform.OS === "web"
+              ? { title: getContinueWatchingMarkWatchedLabel(item) }
+              : null)}
             hitSlop={4}
           >
             <View

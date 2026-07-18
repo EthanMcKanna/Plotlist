@@ -1,7 +1,10 @@
 import type { ComponentProps } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import type { Href } from "expo-router";
 import * as Haptics from "expo-haptics";
+
+import { LinkPressable } from "./LinkPressable";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 type TextProps = ComponentProps<typeof Text>;
@@ -30,6 +33,8 @@ type HomeSectionHeaderProps = {
   actionIcon?: IconName;
   /** Whether to render the action label visibly. Accessibility always keeps it. */
   actionLabelVisible?: boolean;
+  /** Static destination for the action; renders a real link on web. */
+  actionHref?: Href;
   /** Tap handler for the action affordance. */
   onAction?: () => void;
   /** Fires haptics + onAction when the kicker is tapped. */
@@ -90,16 +95,42 @@ export function HomeSectionHeader({
   actionLabel,
   actionIcon,
   actionLabelVisible = true,
+  actionHref,
   onAction,
   hapticOnAction = true,
 }: HomeSectionHeaderProps) {
   const handleAction = () => {
-    if (!onAction) return;
+    if (!onAction && !actionHref) return;
     if (hapticOnAction) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    onAction();
+    // With actionHref set, navigation belongs to the LinkPressable — onAction
+    // stays a pre-navigation side effect.
+    onAction?.();
   };
+
+  const actionStyle = [
+    styles.actionButton,
+    !actionLabelVisible ? styles.iconOnlyActionButton : null,
+  ];
+  const actionContent = actionLabel ? (
+    <>
+      {actionLabelVisible ? (
+        <Text className="text-[13px] font-semibold text-text-secondary">
+          {actionLabel}
+        </Text>
+      ) : null}
+      <Ionicons
+        name={actionIcon ?? "arrow-forward"}
+        size={actionLabelVisible ? 14 : 17}
+        color="#9BA1B0"
+        accessible={false}
+        accessibilityElementsHidden
+        aria-hidden={true}
+        importantForAccessibility="no"
+      />
+    </>
+  ) : null;
 
   return (
     <View className="px-6">
@@ -129,34 +160,32 @@ export function HomeSectionHeader({
           ) : null}
         </View>
 
-        {actionLabel && onAction ? (
-          <Pressable
+        {actionLabel && actionHref ? (
+          <LinkPressable
+            href={actionHref}
             onPress={handleAction}
-            style={[
-              styles.actionButton,
-              !actionLabelVisible ? styles.iconOnlyActionButton : null,
-            ]}
-            className="active:opacity-70"
+            style={actionStyle}
+            className="active:opacity-70 hover:opacity-80 web:transition-opacity"
             accessibilityRole="button"
             accessibilityLabel={getHomeSectionHeaderActionAccessibilityLabel(
               actionLabel,
               title,
             )}
           >
-            {actionLabelVisible ? (
-              <Text className="text-[13px] font-semibold text-text-secondary">
-                {actionLabel}
-              </Text>
-            ) : null}
-            <Ionicons
-              name={actionIcon ?? "arrow-forward"}
-              size={actionLabelVisible ? 14 : 17}
-              color="#9BA1B0"
-              accessible={false}
-              accessibilityElementsHidden
-              aria-hidden={true}
-              importantForAccessibility="no"
-            />
+            {actionContent}
+          </LinkPressable>
+        ) : actionLabel && onAction ? (
+          <Pressable
+            onPress={handleAction}
+            style={actionStyle}
+            className="active:opacity-70 hover:opacity-80 web:transition-opacity"
+            accessibilityRole="button"
+            accessibilityLabel={getHomeSectionHeaderActionAccessibilityLabel(
+              actionLabel,
+              title,
+            )}
+          >
+            {actionContent}
           </Pressable>
         ) : null}
       </View>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -17,6 +18,7 @@ import { TextField } from "./TextField";
 import { api } from "../lib/plotlist/api";
 import { getUserFacingApiErrorMessage } from "../lib/api/client";
 import { uploadAvatarImage } from "../lib/avatarUpload";
+import { notifyError } from "../lib/dialogs";
 import { sanitizeUsername, validateUsername } from "../lib/username";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 
@@ -40,6 +42,9 @@ export function OnboardingProfileStep({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [skipping, setSkipping] = useState(false);
+  // Web shows server-side username rejections inline under the field
+  // (Alert.alert is a no-op there); native keeps its alert.
+  const [serverUsernameError, setServerUsernameError] = useState<string | null>(null);
 
   useEffect(() => {
     if (me && displayName === "") {
@@ -64,9 +69,13 @@ export function OnboardingProfileStep({
     } catch (error) {
       const msg = String(error);
       if (msg.toLowerCase().includes("username already taken")) {
-        Alert.alert("Username taken", "That username is already in use. Try another one.");
+        if (Platform.OS === "web") {
+          setServerUsernameError("That username is already in use. Try another one.");
+        } else {
+          Alert.alert("Username taken", "That username is already in use. Try another one.");
+        }
       } else {
-        Alert.alert("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
+        notifyError("Could not save", getUserFacingApiErrorMessage(error) ?? msg);
       }
     } finally {
       setSaving(false);
@@ -79,7 +88,7 @@ export function OnboardingProfileStep({
     try {
       await onSkip();
     } catch (error) {
-      Alert.alert("Could not skip", String(error));
+      notifyError("Could not skip", String(error));
     } finally {
       setSkipping(false);
     }
@@ -104,7 +113,7 @@ export function OnboardingProfileStep({
       });
       await updateProfile({ avatarStorageId: storageId });
     } catch (error) {
-      Alert.alert("Upload failed", String(error));
+      notifyError("Upload failed", String(error));
     } finally {
       setUploading(false);
     }
@@ -198,13 +207,20 @@ export function OnboardingProfileStep({
           <TextField
             label="Username"
             value={username}
-            onChangeText={(raw: string) => setUsername(sanitizeUsername(raw))}
+            onChangeText={(raw: string) => {
+              setUsername(sanitizeUsername(raw));
+              if (serverUsernameError) setServerUsernameError(null);
+            }}
             placeholder={me?.username ?? "username"}
             autoCapitalize="none"
             autoComplete="username"
             prefix="@"
             maxLength={20}
-            error={username.length > 0 ? usernameError : undefined}
+            error={
+              (username.length > 0 ? usernameError : undefined) ??
+              serverUsernameError ??
+              undefined
+            }
             hint={
               !usernameError && username.length > 0
                 ? "Letters, numbers, and underscores only"

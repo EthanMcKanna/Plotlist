@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
   Keyboard,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
@@ -25,7 +25,14 @@ import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
-import { SHOW_BACK_BUTTON, usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
+import { confirmAction, notifyError } from "../../lib/dialogs";
+import {
+  SHOW_BACK_BUTTON,
+  useIsDesktopWeb,
+  usePosterGridLayout,
+  useWebSheetStyle,
+  WEB_PAGE_MAX_WIDTH,
+} from "../../lib/webLayout";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -60,6 +67,43 @@ function formatListMeta(list: any) {
   return parts.join(" · ");
 }
 
+// Desktop web only: list card actions are long-press-only on touch, so mice
+// get a hover-revealed ellipsis that opens the same action sheet. Native (and
+// touch web) renders the card untouched.
+function CardHoverActions({
+  onOpenActions,
+  children,
+}: {
+  onOpenActions: () => void;
+  children: ReactNode;
+}) {
+  const isDesktopWeb = useIsDesktopWeb();
+  const [hovered, setHovered] = useState(false);
+  if (!isDesktopWeb) {
+    return <>{children}</>;
+  }
+  const hoverProps = {
+    onMouseEnter: () => setHovered(true),
+    onMouseLeave: () => setHovered(false),
+  } as Record<string, unknown>;
+  return (
+    <View {...hoverProps}>
+      {children}
+      {hovered ? (
+        <Pressable
+          onPress={onOpenActions}
+          accessibilityRole="button"
+          accessibilityLabel="List actions"
+          {...({ title: "List actions" } as Record<string, unknown>)}
+          className="absolute right-2 top-2 h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/70 hover:bg-dark-hover web:transition-colors"
+        >
+          <Ionicons name="ellipsis-horizontal" size={16} color="#F1F3F7" />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export default function ListsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -72,6 +116,10 @@ export default function ListsScreen() {
     minColumns: 2,
     targetItemWidth: 280,
   });
+  // Edit sheet: bottom sheet on phones and iPad, centered dialog on
+  // desktop web.
+  const isDesktopWeb = useIsDesktopWeb();
+  const editSheetStyle = useWebSheetStyle(520);
   const me = useQuery(api.users.me);
   const meId = me?._id;
   const listArgs = isAuthenticated && meId ? { userId: meId } : "skip";
@@ -200,12 +248,18 @@ export default function ListsScreen() {
 
   const handleCreate = useCallback(async () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign in required", "Create a list after signing in.");
+      // Web sends signed-out users straight to sign-in; the native alert
+      // stays exactly as it was.
+      if (Platform.OS === "web") {
+        router.push("/sign-in");
+      } else {
+        Alert.alert("Sign in required", "Create a list after signing in.");
+      }
       return;
     }
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      Alert.alert("Missing title", "Give your list a name.");
+      notifyError("Missing title", "Give your list a name.");
       return;
     }
     setCreating(true);
@@ -225,11 +279,11 @@ export default function ListsScreen() {
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      Alert.alert("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
+      notifyError("Could not create list", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setCreating(false);
     }
-  }, [commentsEnabled, createList, description, isAuthenticated, isPublic, title]);
+  }, [commentsEnabled, createList, description, isAuthenticated, isPublic, router, title]);
 
   const openEdit = useCallback((list: any) => {
     setEditingList(list);
@@ -243,7 +297,7 @@ export default function ListsScreen() {
     if (!editingList) return;
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
-      Alert.alert("Missing title", "Give your list a name.");
+      notifyError("Missing title", "Give your list a name.");
       return;
     }
     setSavingEdit(true);
@@ -258,7 +312,7 @@ export default function ListsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditingList(null);
     } catch (error) {
-      Alert.alert("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
+      notifyError("Could not save changes", getUserFacingApiErrorMessage(error) ?? String(error));
     } finally {
       setSavingEdit(false);
     }
@@ -266,24 +320,19 @@ export default function ListsScreen() {
 
   const handleDelete = useCallback(
     (list: any) => {
-      Alert.alert(
-        "Delete list",
-        `Are you sure you want to delete "${list.title}"? This cannot be undone.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-              deleteList({ listId: list._id }).catch((error: unknown) => {
-                Alert.alert("Could not delete list", String(error));
-              });
-            },
-          },
-        ],
-      );
+      confirmAction({
+        title: "Delete list",
+        message: `Are you sure you want to delete "${list.title}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        destructive: true,
+        onConfirm: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          deleteList({ listId: list._id }).catch((error: unknown) => {
+            notifyError("Could not delete list", String(error));
+          });
+        },
+      });
     },
     [deleteList],
   );
@@ -293,7 +342,7 @@ export default function ListsScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       unfollowList({ listId: list._id }).catch((error: unknown) => {
-        Alert.alert("Could not unfollow list", String(error));
+        notifyError("Could not unfollow list", String(error));
       });
     },
     [unfollowList],
@@ -345,52 +394,83 @@ export default function ListsScreen() {
   }, [followedActionsList, handleUnfollow]);
 
   const renderOwnList = useCallback(
-    (item: any) => (
-      <FanPreviewCard
-        key={item._id}
-        title={item.title}
-        accent={item.isPublic ? LIST_ACCENTS.public : LIST_ACCENTS.private}
-        posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
-        meta={formatListMeta(item)}
-        cornerIcon={item.isPublic ? undefined : "lock-closed"}
-        width={listCardWidth}
-        height={LIST_CARD_HEIGHT}
-        accessibilityLabel={`Open list ${item.title}`}
-        onPress={() => openList(item)}
-        onLongPress={() => {
-          if (typeof item._id !== "string" || item._id.startsWith("optimistic:")) return;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          setSelectedList(item);
-          setActionsVisible(true);
-        }}
-      />
-    ),
+    (item: any) => {
+      // Optimistic inserts have no real id yet — no link, no actions.
+      const hasRealId =
+        typeof item._id === "string" && !item._id.startsWith("optimistic:");
+      return (
+        <CardHoverActions
+          key={item._id}
+          onOpenActions={() => {
+            if (!hasRealId) return;
+            setSelectedList(item);
+            setActionsVisible(true);
+          }}
+        >
+          <FanPreviewCard
+            title={item.title}
+            accent={item.isPublic ? LIST_ACCENTS.public : LIST_ACCENTS.private}
+            posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
+            meta={formatListMeta(item)}
+            cornerIcon={item.isPublic ? undefined : "lock-closed"}
+            width={listCardWidth}
+            height={LIST_CARD_HEIGHT}
+            accessibilityLabel={`Open list ${item.title}`}
+            {...(hasRealId ? { href: `/list/${item._id}` as Href } : null)}
+            onPress={
+              hasRealId
+                ? () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                : () => openList(item)
+            }
+            onLongPress={() => {
+              if (!hasRealId) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              setSelectedList(item);
+              setActionsVisible(true);
+            }}
+          />
+        </CardHoverActions>
+      );
+    },
     [listCardWidth, openList],
   );
 
   const renderFollowedList = useCallback(
-    (item: any) => (
-      <FanPreviewCard
-        key={item._id}
-        title={item.title}
-        accent={LIST_ACCENTS.followed}
-        posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
-        meta={[
-          item.ownerName ? `by ${item.ownerName}` : null,
-          formatListMeta(item) || null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-        width={listCardWidth}
-        height={LIST_CARD_HEIGHT}
-        accessibilityLabel={`Open list ${item.title}${item.ownerName ? ` by ${item.ownerName}` : ""}`}
-        onPress={() => openList(item)}
-        onLongPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          setFollowedActionsList(item);
-        }}
-      />
-    ),
+    (item: any) => {
+      const hasRealId =
+        typeof item._id === "string" && !item._id.startsWith("optimistic:");
+      return (
+        <CardHoverActions
+          key={item._id}
+          onOpenActions={() => setFollowedActionsList(item)}
+        >
+          <FanPreviewCard
+            title={item.title}
+            accent={LIST_ACCENTS.followed}
+            posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
+            meta={[
+              item.ownerName ? `by ${item.ownerName}` : null,
+              formatListMeta(item) || null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+            width={listCardWidth}
+            height={LIST_CARD_HEIGHT}
+            accessibilityLabel={`Open list ${item.title}${item.ownerName ? ` by ${item.ownerName}` : ""}`}
+            {...(hasRealId ? { href: `/list/${item._id}` as Href } : null)}
+            onPress={
+              hasRealId
+                ? () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                : () => openList(item)
+            }
+            onLongPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              setFollowedActionsList(item);
+            }}
+          />
+        </CardHoverActions>
+      );
+    },
     [listCardWidth, openList],
   );
 
@@ -557,7 +637,9 @@ export default function ListsScreen() {
         onRequestClose={() => setEditingList(null)}
       >
         <KeyboardAvoidingView
-          className="flex-1 justify-end bg-black/50"
+          className={`flex-1 bg-black/50 ${
+            isDesktopWeb ? "justify-center px-6" : "justify-end"
+          }`}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <Pressable
@@ -568,12 +650,20 @@ export default function ListsScreen() {
             className="absolute inset-0"
           />
           <View
-            className="rounded-t-3xl border border-dark-border bg-dark-card px-4 pt-4"
-            style={{ paddingBottom: insets.bottom + 24 }}
+            className={`border border-dark-border bg-dark-card px-4 pt-4 ${
+              isDesktopWeb ? "rounded-3xl" : "rounded-t-3xl"
+            }`}
+            style={[
+              { paddingBottom: isDesktopWeb ? 24 : insets.bottom + 24 },
+              editSheetStyle,
+            ]}
           >
-            <View className="mb-4 items-center">
-              <View className="h-1 w-10 rounded-full bg-dark-border" />
-            </View>
+            {/* Grabber is a bottom-sheet affordance; dialogs drop it. */}
+            {isDesktopWeb ? null : (
+              <View className="mb-4 items-center">
+                <View className="h-1 w-10 rounded-full bg-dark-border" />
+              </View>
+            )}
             <Text className="mb-4 px-2 text-lg font-semibold text-text-primary">
               Edit list
             </Text>

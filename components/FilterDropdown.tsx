@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Dimensions, Modal, Pressable, Text, View } from "react-native";
+import { Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -45,19 +45,26 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
   const sheetStyle = useWebSheetStyle(440);
 
   const closeSheet = useCallback(() => {
-    sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
+    if (!isDesktopWeb) {
+      sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
+    }
     backdropOpacity.value = withTiming(0, { duration: 250 });
     setTimeout(() => setSheetVisible(false), 260);
-  }, [sheetTranslateY, backdropOpacity]);
+  }, [isDesktopWeb, sheetTranslateY, backdropOpacity]);
 
   useEffect(() => {
     if (sheetVisible) {
-      sheetTranslateY.value = withTiming(0, { duration: 300 });
+      // Desktop web shows a centered dialog that fades in; phones and iPad
+      // keep the slide-from-bottom sheet.
+      sheetTranslateY.value = isDesktopWeb ? 0 : withTiming(0, { duration: 300 });
       backdropOpacity.value = withTiming(1, { duration: 200 });
     }
-  }, [sheetVisible, sheetTranslateY, backdropOpacity]);
+  }, [sheetVisible, isDesktopWeb, sheetTranslateY, backdropOpacity]);
 
   const panGesture = Gesture.Pan()
+    // Mouse drags on desktop web must not drag the dialog around; touch
+    // drag-dismiss stays on phones and iPad.
+    .enabled(!isDesktopWeb)
     .onUpdate((e) => {
       if (e.translationY > 0) {
         sheetTranslateY.value = e.translationY;
@@ -80,6 +87,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
   const sheetAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetTranslateY.value }],
+    opacity: isDesktopWeb ? backdropOpacity.value : 1,
   }));
 
   const backdropAnimStyle = useAnimatedStyle(() => ({
@@ -104,7 +112,7 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
     <>
       <Pressable
         onPress={handleOpen}
-        className="flex-row items-center justify-between rounded-xl border border-dark-border bg-dark-card px-4 py-3 active:bg-dark-hover"
+        className="flex-row items-center justify-between rounded-xl border border-dark-border bg-dark-card px-4 py-3 web:transition-colors hover:bg-dark-hover active:bg-dark-hover"
       >
         <View className="flex-row items-center gap-2">
           <Text className="text-sm font-semibold text-text-primary">
@@ -128,7 +136,12 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
         onRequestClose={closeSheet}
         statusBarTranslucent
       >
-        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: isDesktopWeb ? "center" : "flex-end",
+          }}
+        >
           {/* Backdrop */}
           <Animated.View
             style={[
@@ -148,7 +161,13 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
 
           {/* Sheet */}
           <Animated.View
-            style={[sheetAnimStyle, sheetStyle, isWideLayout && { marginBottom: 24 }]}
+            style={[
+              sheetAnimStyle,
+              sheetStyle,
+              // Wide iPad keeps its floating bottom sheet (pre-dialog look);
+              // desktop web is centered so no bottom float.
+              isWideLayout && !isDesktopWeb ? { marginBottom: 24 } : null,
+            ]}
           >
             <GestureDetector gesture={panGesture}>
               <Animated.View>
@@ -207,17 +226,24 @@ export function FilterDropdown({ options, value, onChange }: FilterDropdownProps
                         <Pressable
                           key={option.value}
                           onPress={() => handleSelect(option)}
-                          style={{
-                            marginBottom: 4,
-                            backgroundColor: isSelected
-                              ? "rgba(42, 46, 56, 0.8)"
-                              : "transparent",
-                            borderRadius: 14,
-                            paddingVertical: 14,
-                            paddingHorizontal: 18,
-                            flexDirection: "row",
-                            alignItems: "center",
-                          }}
+                          style={(state) => [
+                            {
+                              marginBottom: 4,
+                              backgroundColor: isSelected
+                                ? "rgba(42, 46, 56, 0.8)"
+                                : "transparent",
+                              borderRadius: 14,
+                              paddingVertical: 14,
+                              paddingHorizontal: 18,
+                              flexDirection: "row",
+                              alignItems: "center",
+                            },
+                            Platform.OS === "web" &&
+                            (state as { hovered?: boolean }).hovered &&
+                            !isSelected
+                              ? { backgroundColor: "rgba(42, 46, 56, 0.5)" }
+                              : null,
+                          ]}
                         >
                           <Text
                             style={{

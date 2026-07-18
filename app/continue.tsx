@@ -1,13 +1,14 @@
 import { useCallback, useRef } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
@@ -23,14 +24,14 @@ import {
 } from "../components/ContinueWatchingRail";
 import { HomeSectionHeader } from "../components/HomeSectionHeader";
 import { HorizontalRail } from "../components/HorizontalRail";
+import { LinkPressable } from "../components/LinkPressable";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import { formatShortDate } from "../lib/format";
-import { guardedPush } from "../lib/navigation";
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
-import { SHOW_BACK_BUTTON } from "../lib/webLayout";
+import { SHOW_BACK_BUTTON, WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
 
 const ACCENT = "#0EA5E9";
 const NEW_ACCENT = "#34D399";
@@ -109,23 +110,24 @@ function ShowRow({
   subtitle,
   subtitleColor,
   trailing,
-  onPress,
+  href,
   accessibilityLabel,
 }: {
   entry: ContinueEntry;
   subtitle: string;
   subtitleColor?: string;
   trailing?: React.ReactNode;
-  onPress: () => void;
+  href: Href;
   accessibilityLabel: string;
 }) {
   // The trailing action stays a sibling of the row press target — nesting a
   // Pressable inside another renders nested <button>s on web, which is
   // invalid HTML and breaks hydration.
   return (
-    <View style={styles.row}>
-      <Pressable
-        onPress={onPress}
+    <View style={styles.row} className="web:transition-colors hover:bg-dark-hover">
+      <LinkPressable
+        href={href}
+        onPress={lightHaptic}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         style={styles.rowPress}
@@ -156,7 +158,7 @@ function ShowRow({
             {subtitle}
           </Text>
         </View>
-      </Pressable>
+      </LinkPressable>
       {trailing}
     </View>
   );
@@ -268,18 +270,23 @@ export default function ContinueScreen() {
     [setStatus],
   );
 
-  const openShow = useCallback((entry: ContinueEntry) => {
-    lightHaptic();
-    guardedPush({ pathname: "/show/[id]", params: { id: entry.showId } });
-  }, []);
+  const showHref = useCallback(
+    (entry: ContinueEntry): Href => ({
+      pathname: "/show/[id]",
+      params: { id: entry.showId },
+    }),
+    [],
+  );
 
-  const openShowAtNext = useCallback((entry: ContinueEntry) => {
-    lightHaptic();
-    guardedPush({
+  // Deep-links straight to the next-up episode sheet; the extra params ride
+  // along as query strings on web.
+  const showAtNextHref = useCallback(
+    (entry: ContinueEntry): Href => ({
       pathname: "/show/[id]",
       params: buildEpisodeDeepLinkParams(entry, entry.showId),
-    });
-  }, []);
+    }),
+    [],
+  );
 
   if (!authLoading && !isAuthenticated) {
     return (
@@ -332,7 +339,7 @@ export default function ContinueScreen() {
   );
 
   return (
-    <Screen scroll>
+    <Screen scroll webMaxWidth={WEB_PAGE_MAX_WIDTH}>
       <View style={{ paddingBottom: insets.bottom + 48 }}>
         <View className="px-6 pb-1 pt-1">
           {SHOW_BACK_BUTTON ? (
@@ -414,7 +421,7 @@ export default function ContinueScreen() {
                       subtitleColor={
                         typeof entry.nextAirDate === "number" ? RETURNING_ACCENT : undefined
                       }
-                      onPress={() => openShow(entry)}
+                      href={showHref(entry)}
                       accessibilityLabel={`Open ${entry.show.title}. ${getReturningSubtitle(entry)}`}
                     />
                   ))}
@@ -438,15 +445,20 @@ export default function ContinueScreen() {
                       entry={entry}
                       subtitle={getGapSubtitle(entry)}
                       subtitleColor={GAP_ACCENT}
-                      onPress={() => openShow(entry)}
+                      href={showHref(entry)}
                       accessibilityLabel={`Open ${entry.show.title}. ${getGapSubtitle(entry)}`}
                       trailing={
                         <Pressable
                           onPress={() => handleFillGap(entry)}
                           style={styles.rowAction}
-                          className="active:opacity-70"
+                          className="web:transition-opacity hover:opacity-90 active:opacity-70"
                           accessibilityRole="button"
                           accessibilityLabel={`Mark ${entry.show.title} S${entry.firstGapSeasonNumber} E${entry.firstGapEpisodeNumber} watched`}
+                          {...(Platform.OS === "web"
+                            ? {
+                                title: `Mark S${entry.firstGapSeasonNumber} E${entry.firstGapEpisodeNumber} watched`,
+                              }
+                            : null)}
                           hitSlop={6}
                         >
                           <Ionicons name="checkmark" size={17} color="#FFFFFF" />
@@ -472,13 +484,13 @@ export default function ContinueScreen() {
                       key={String(entry.showId)}
                       entry={entry}
                       subtitle={getPausedSubtitle(entry)}
-                      onPress={() => openShowAtNext(entry)}
+                      href={showAtNextHref(entry)}
                       accessibilityLabel={`Open ${entry.show.title}. ${getPausedSubtitle(entry)}`}
                       trailing={
                         <Pressable
                           onPress={() => handleResume(entry)}
                           style={styles.resumeAction}
-                          className="active:opacity-70"
+                          className="web:transition-opacity hover:opacity-90 active:opacity-70"
                           accessibilityRole="button"
                           accessibilityLabel={`Resume watching ${entry.show.title}`}
                           hitSlop={6}
@@ -513,7 +525,7 @@ export default function ContinueScreen() {
                           ? `Stopped after ${entry.totalWatched} episode${(entry.totalWatched ?? 0) === 1 ? "" : "s"}`
                           : "Never started"
                       }
-                      onPress={() => openShow(entry)}
+                      href={showHref(entry)}
                       accessibilityLabel={`Open ${entry.show.title}`}
                     />
                   ))}

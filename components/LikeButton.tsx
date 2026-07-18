@@ -1,4 +1,4 @@
-import { Alert, Pressable, StyleSheet, Text } from "react-native";
+import { Alert, Platform, Pressable, StyleSheet, Text } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
@@ -11,6 +11,7 @@ import Animated, {
 
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
+import { promptSignIn } from "../lib/dialogs";
 
 const LIKED_COLOR = "#F43F5E";
 const IDLE_COLOR = "#9BA1B0";
@@ -97,7 +98,11 @@ export function LikeButton({
 
   const handlePress = () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign in required", "Sign in to like this.");
+      if (Platform.OS === "web") {
+        promptSignIn("Sign in to like this.");
+      } else {
+        Alert.alert("Sign in required", "Sign in to like this.");
+      }
       return;
     }
     const willLike = !isLiked;
@@ -130,7 +135,7 @@ export function LikeButton({
           : `Like. ${count} ${count === 1 ? "like" : "likes"}`
       }
       style={styles.container}
-      className="active:opacity-80"
+      className="web:transition-opacity active:opacity-80 hover:opacity-80"
     >
       <Animated.View style={heartStyle}>
         <Ionicons

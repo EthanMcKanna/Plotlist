@@ -20,6 +20,8 @@ export function SecondaryButton({
   return (
     <GlassPressable
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       className={className}
       radius={999}
       variant="control"

@@ -1,4 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { Href } from "expo-router";
+import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 
 export function getSearchResultRowAccessibilityLabel({
@@ -26,6 +28,7 @@ export function SearchResultRow({
   posterUrl,
   onPress,
   actionLabel,
+  href,
 }: {
   title: string;
   year?: number | null;
@@ -33,20 +36,25 @@ export function SearchResultRow({
   posterUrl?: string | null;
   onPress: () => void;
   actionLabel?: string;
+  /** When the show already exists locally, render a real link on web;
+   * ingest-first rows omit it and keep the plain Pressable path. */
+  href?: Href;
 }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={getSearchResultRowAccessibilityLabel({
-        title,
-        year,
-        actionLabel,
-      })}
-      style={styles.container}
-      className="flex-row items-center gap-3 active:bg-dark-hover"
-    >
-      <Poster uri={posterUrl ?? undefined} width={52} />
+  const sharedProps = {
+    accessibilityRole: "button" as const,
+    accessibilityLabel: getSearchResultRowAccessibilityLabel({
+      title,
+      year,
+      actionLabel,
+    }),
+    style: styles.container,
+    className:
+      "flex-row items-center gap-3 hover:bg-dark-hover active:bg-dark-hover web:transition-colors",
+  };
+
+  const body = (
+    <>
+      <Poster uri={posterUrl ?? undefined} width={52} alt={title} />
       <View className="min-w-0 flex-1">
         <Text
           className="text-[15px] font-semibold leading-5 text-text-primary"
@@ -68,6 +76,20 @@ export function SearchResultRow({
           </Text>
         ) : null}
       </View>
+    </>
+  );
+
+  if (href) {
+    return (
+      <LinkPressable href={href} onPress={onPress} {...sharedProps}>
+        {body}
+      </LinkPressable>
+    );
+  }
+
+  return (
+    <Pressable onPress={onPress} {...sharedProps}>
+      {body}
     </Pressable>
   );
 }

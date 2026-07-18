@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,6 +24,7 @@ import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation } from "../lib/plotlist/react";
 import { commentAuthorLabel, type CommentTargetType } from "../lib/comments";
+import { notify, notifyError } from "../lib/dialogs";
 import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 function CommentsThread({
@@ -45,9 +45,9 @@ function CommentsThread({
       if (!reportCommentId) return;
       try {
         await report({ targetType: "comment", targetId: reportCommentId, reason });
-        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+        notify("Report submitted", "Thanks — we'll take a look.");
       } catch {
-        Alert.alert("Couldn't submit report", "Check your connection and try again.");
+        notifyError("Couldn't submit report", "Check your connection and try again.");
       }
     },
     [report, reportCommentId],
@@ -104,9 +104,9 @@ export default function CommentsScreen() {
       if (!targetType || !targetId) return;
       try {
         await report({ targetType, targetId, reason });
-        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+        notify("Report submitted", "Thanks — we'll take a look.");
       } catch {
-        Alert.alert("Couldn't submit report", "Check your connection and try again.");
+        notifyError("Couldn't submit report", "Check your connection and try again.");
       }
     },
     [report, targetId, targetType],

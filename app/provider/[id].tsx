@@ -14,6 +14,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "../../components/NativeGlass";
+import { PageTitle } from "../../components/PageTitle";
 import { Poster } from "../../components/Poster";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
@@ -178,9 +179,11 @@ export default function ProviderScreen() {
         >
           <Pressable
             onPress={() => handlePress(item)}
-            className="active:opacity-80"
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${item.title}`}
+            className="active:opacity-80 hover:opacity-90 web:transition-opacity"
           >
-            <Poster uri={item.posterUrl} width={itemWidth} />
+            <Poster uri={item.posterUrl} width={itemWidth} alt={item.title} />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
@@ -217,6 +220,7 @@ export default function ProviderScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
+      <PageTitle title={provider.label} />
       {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
         className="pb-4 border-b border-dark-border"
@@ -249,6 +253,7 @@ export default function ProviderScreen() {
               source={{ uri: provider.logoUrl }}
               style={{ width: 36, height: 36, borderRadius: 9 }}
               contentFit="cover"
+              accessibilityLabel={`${provider.label} logo`}
             />
             <View className="flex-1">
               <Text className="text-xl font-black text-text-primary">

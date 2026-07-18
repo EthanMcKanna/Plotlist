@@ -28,6 +28,7 @@ function readErrorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   return "Something went wrong. Please try again.";
 }
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -65,7 +66,10 @@ import { formatPhoneNumber, normalizePhoneNumber } from "../../lib/phone";
 import { useAuthActions } from "../../lib/plotlist/auth";
 import { useAction } from "../../lib/plotlist/react";
 import { CURATED_SHOWS } from "../../lib/curatedShows";
-import { useWebSheetStyle } from "../../lib/webLayout";
+import {
+  useIsDesktopWeb,
+  useWebSheetStyle,
+} from "../../lib/webLayout";
 
 
 // ── Layout constants ──────────────────────────────────────────────
@@ -81,6 +85,14 @@ const R2 = [SHOWS[6], SHOWS[7], SHOWS[8], SHOWS[9], SHOWS[10], SHOWS[13], SHOWS[
 const R3 = [SHOWS[11], SHOWS[15], SHOWS[16], SHOWS[17], SHOWS[18], SHOWS[3], SHOWS[1]];
 const WALL_H = 8 + 3 * PH + 2 * GAP;
 const HAPTIC_TICK = 40;
+
+// Honor the OS-level reduced-motion preference: the poster wall renders as a
+// static wall instead of looping.
+const prefersReducedMotion =
+  Platform.OS === "web" &&
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function brandGlow(opacity: number, radius: number): ViewStyle {
   if (Platform.OS === "web") {
@@ -116,6 +128,10 @@ function PosterRow({
   const tx = useSharedValue(start);
 
   useEffect(() => {
+    if (prefersReducedMotion) {
+      tx.value = start;
+      return;
+    }
     tx.value = withRepeat(
       withSequence(
         withTiming(start, { duration: 0 }),
@@ -505,7 +521,7 @@ const CodeCells = forwardRef<
         onBlur={() => setFocused(false)}
         keyboardType="number-pad"
         textContentType="oneTimeCode"
-        autoComplete="sms-otp"
+        autoComplete={Platform.OS === "web" ? "one-time-code" : "sms-otp"}
         maxLength={CODE_LEN}
         style={styles.hiddenInput}
       />
@@ -521,6 +537,7 @@ export default function SignInScreen() {
   // Desktop web centers the auth form as a fixed-width column; phones keep
   // the full-bleed bottom sheet (the style is null off desktop).
   const webFormStyle = useWebSheetStyle(460);
+  const isDesktopWeb = useIsDesktopWeb();
   const DismissContainer = Platform.OS === "web" ? View : Pressable;
   const dismissContainerProps =
     Platform.OS === "web" ? {} : { onPress: Keyboard.dismiss };
@@ -551,8 +568,29 @@ export default function SignInScreen() {
   const appleButtonProps = getAppleButtonProps();
   const phoneValid = normalizePhoneNumber(phone) !== null;
 
+  // Desktop web: autoFocus fires before the launch overlay settles, so
+  // re-assert focus once the phone step is actually interactive (skip if
+  // the user has already focused something themselves).
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
+    if (!isDesktopWeb || step !== "phone") return;
+    const focusIfIdle = () => {
+      const active = typeof document !== "undefined" ? document.activeElement : null;
+      if (!active || active === document.body) {
+        phoneInputRef.current?.focus();
+      }
+    };
+    // Boot timing varies (overlay fade, bundle warmup) — retry on a short
+    // schedule, bailing at each tick if the user focused something.
+    const handles = [150, 700, 1600, 3000].map((ms) =>
+      setTimeout(focusIfIdle, ms),
+    );
+    return () => handles.forEach(clearTimeout);
+  }, [isDesktopWeb, step]);
+
+  useEffect(() => {
+    // iOS uses the native sheet; web uses Apple's JS popup flow. Android
+    // stays phone-only.
+    if (Platform.OS !== "ios" && Platform.OS !== "web") return;
     let cancelled = false;
     void isAppleSignInAvailable().then((available) => {
       if (cancelled) return;
@@ -743,7 +781,11 @@ export default function SignInScreen() {
 
       <View className="flex-1" style={{ pointerEvents: "box-none" }}>
         <View
-          className="flex-1 justify-end"
+          className={
+            // On tall wide viewports the form reads as a centered dialog;
+            // phones and narrow web keep the bottom-sheet placement.
+            isDesktopWeb ? "flex-1 justify-center" : "flex-1 justify-end"
+          }
           style={{ pointerEvents: "box-none" }}
         >
           <DismissContainer {...dismissContainerProps}>
@@ -853,7 +895,9 @@ export default function SignInScreen() {
                     </View>
                     <TextInput
                       ref={phoneInputRef}
-                      autoFocus={phoneWantsFocusRef.current}
+                      // Desktop web has no surprise-keyboard concern, so the
+                      // field is always ready to type into.
+                      autoFocus={phoneWantsFocusRef.current || isDesktopWeb}
                       value={phone}
                       onChangeText={(t) => {
                         setPhone(formatPhoneNumber(t));
@@ -869,7 +913,9 @@ export default function SignInScreen() {
                       autoComplete="tel"
                       selectionColor="#38bdf8"
                       style={styles.phoneInput}
-                      onSubmitEditing={handleSend}
+                      onSubmitEditing={
+                        Platform.OS === "web" ? handleSend : undefined
+                      }
                     />
                   </GlassSurface>
 
@@ -890,7 +936,23 @@ export default function SignInScreen() {
                     We&apos;ll text you a one-time code.
                   </Animated.Text>
 
-                  {appleAvailable ? (
+                  {appleAvailable && Platform.OS === "web" ? (
+                    // Web: Apple's JS popup flow, straight from the phone
+                    // pane — the native pane's AppleAuthenticationButton
+                    // doesn't exist in the browser.
+                    <Pressable
+                      onPress={loading ? undefined : handleAppleSignIn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign in with Apple"
+                      className="mt-4 h-[52px] flex-row items-center justify-center gap-2 rounded-full bg-white web:transition-opacity hover:opacity-90 active:opacity-80"
+                      style={{ opacity: loading ? 0.6 : 1 }}
+                    >
+                      <Ionicons name="logo-apple" size={20} color="#000000" />
+                      <Text className="text-[16px] font-semibold text-black">
+                        Sign in with Apple
+                      </Text>
+                    </Pressable>
+                  ) : appleAvailable ? (
                     <Pressable
                       onPress={goToApple}
                       accessibilityRole="button"

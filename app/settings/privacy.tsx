@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -8,6 +8,7 @@ import { GlassSurface } from "../../components/NativeGlass";
 import { Screen } from "../../components/Screen";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { api } from "../../lib/plotlist/api";
+import { confirmAction, notifyError } from "../../lib/dialogs";
 import {
   DEFAULT_PROFILE_VISIBILITY,
   resolveProfileVisibility,
@@ -106,7 +107,7 @@ export default function PrivacySettingsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       setIsPrivate(!next);
-      Alert.alert("Could not update", String(error));
+      notifyError("Could not update", String(error));
     } finally {
       setSavingPrivate(false);
     }
@@ -115,16 +116,14 @@ export default function PrivacySettingsScreen() {
   const handleTogglePrivate = (next: boolean) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (!next && (incomingRequestCount ?? 0) > 0) {
-      Alert.alert(
-        "Switch to public?",
-        `Your ${incomingRequestCount} pending follow request${
+      confirmAction({
+        title: "Switch to public?",
+        message: `Your ${incomingRequestCount} pending follow request${
           incomingRequestCount === 1 ? "" : "s"
         } will be approved automatically.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Switch to public", onPress: () => void applyPrivateAccount(false) },
-        ],
-      );
+        confirmLabel: "Switch to public",
+        onConfirm: () => void applyPrivateAccount(false),
+      });
       return;
     }
     void applyPrivateAccount(next);
@@ -137,7 +136,7 @@ export default function PrivacySettingsScreen() {
     setVisibility(next);
     void updatePrivacy({ profileVisibility: { [section]: value } }).catch((error) => {
       setVisibility(previous);
-      Alert.alert("Could not update", String(error));
+      notifyError("Could not update", String(error));
     });
   };
 
@@ -197,7 +196,7 @@ export default function PrivacySettingsScreen() {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   router.push("/follow-requests");
                 }}
-                className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover"
+                className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
               >
                 <Ionicons name="person-add-outline" size={20} color="#38bdf8" />
                 <Text className="flex-1 text-base font-medium text-text-primary">
@@ -246,7 +245,7 @@ export default function PrivacySettingsScreen() {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 router.push("/settings/blocked");
               }}
-              className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover"
+              className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
             >
               <Ionicons name="remove-circle-outline" size={20} color="#EF4444" />
               <Text className="flex-1 text-base font-medium text-text-primary">

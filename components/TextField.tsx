@@ -19,6 +19,9 @@ export function TextField({
   prefix,
   hint,
   error,
+  autoFocus,
+  returnKeyType,
+  onSubmitEditing,
 }: {
   label: string;
   value: string;
@@ -36,6 +39,9 @@ export function TextField({
   prefix?: string;
   hint?: string;
   error?: string;
+  autoFocus?: boolean;
+  returnKeyType?: TextInputProps["returnKeyType"];
+  onSubmitEditing?: TextInputProps["onSubmitEditing"];
 }) {
   return (
     <View className={className}>
@@ -71,6 +77,9 @@ export function TextField({
           autoComplete={autoComplete}
           maxLength={maxLength}
           editable={editable}
+          autoFocus={autoFocus}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
           className={`flex-1 py-3 text-[16px] text-text-primary ${
             prefix ? "pl-1 pr-4" : "px-4"
           } ${multiline ? "min-h-[96px]" : ""}`}

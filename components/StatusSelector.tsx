@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Dimensions, Modal, Pressable, Text, View } from "react-native";
+import { Dimensions, Modal, Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -151,19 +151,26 @@ export function StatusSelector({
   }, []);
 
   const closeSheet = useCallback(() => {
-    sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
+    if (!isDesktopWeb) {
+      sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
+    }
     backdropOpacity.value = withTiming(0, { duration: 250 });
     setTimeout(() => setSheetVisible(false), 260);
-  }, [sheetTranslateY, backdropOpacity]);
+  }, [isDesktopWeb, sheetTranslateY, backdropOpacity]);
 
   useEffect(() => {
     if (sheetVisible) {
-      sheetTranslateY.value = withTiming(0, { duration: 300 });
+      // Desktop web shows a centered dialog that fades in; phones and iPad
+      // keep the slide-from-bottom sheet.
+      sheetTranslateY.value = isDesktopWeb ? 0 : withTiming(0, { duration: 300 });
       backdropOpacity.value = withTiming(1, { duration: 200 });
     }
-  }, [sheetVisible, sheetTranslateY, backdropOpacity]);
+  }, [sheetVisible, isDesktopWeb, sheetTranslateY, backdropOpacity]);
 
   const panGesture = Gesture.Pan()
+    // Mouse drags on desktop web must not drag the dialog around; touch
+    // drag-dismiss stays on phones and iPad.
+    .enabled(!isDesktopWeb)
     .onUpdate((e) => {
       if (e.translationY > 0) {
         sheetTranslateY.value = e.translationY;
@@ -186,6 +193,7 @@ export function StatusSelector({
 
   const sheetAnimStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetTranslateY.value }],
+    opacity: isDesktopWeb ? backdropOpacity.value : 1,
   }));
 
   const backdropAnimStyle = useAnimatedStyle(() => ({
@@ -227,6 +235,7 @@ export function StatusSelector({
     <>
       {/* ─── Main CTA Button ─── */}
       <AnimatedPressable
+        accessibilityRole="button"
         onPress={handlePress}
         onLongPress={handleLongPress}
         onPressIn={() => {
@@ -290,7 +299,12 @@ export function StatusSelector({
         onRequestClose={closeSheet}
         statusBarTranslucent
       >
-        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: isDesktopWeb ? "center" : "flex-end",
+          }}
+        >
           {/* Backdrop */}
           <Animated.View
             style={[
@@ -313,7 +327,13 @@ export function StatusSelector({
 
           {/* Sheet */}
           <Animated.View
-            style={[sheetAnimStyle, sheetStyle, isWideLayout && { marginBottom: 24 }]}
+            style={[
+              sheetAnimStyle,
+              sheetStyle,
+              // Wide iPad keeps its floating bottom sheet (pre-dialog look);
+              // desktop web is centered so no bottom float.
+              isWideLayout && !isDesktopWeb ? { marginBottom: 24 } : null,
+            ]}
           >
             <GestureDetector gesture={panGesture}>
               <Animated.View>
@@ -379,7 +399,17 @@ export function StatusSelector({
                         <Pressable
                           key={status}
                           onPress={() => handleSelectStatus(status)}
-                          style={{ marginBottom: 4 }}
+                          style={(state) => [
+                            { marginBottom: 4 },
+                            Platform.OS === "web" &&
+                            (state as { hovered?: boolean }).hovered &&
+                            !isActive
+                              ? {
+                                  backgroundColor: "rgba(42, 46, 56, 0.5)",
+                                  borderRadius: 14,
+                                }
+                              : null,
+                          ]}
                         >
                           <View
                             style={{

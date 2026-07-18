@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { FlashList } from "../../components/FlashList";
@@ -7,6 +7,7 @@ import { useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/rea
 
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
+import { confirmAction, notifyError } from "../../lib/dialogs";
 import { formatDate } from "../../lib/format";
 
 export default function ReportsAdminScreen() {
@@ -68,7 +69,7 @@ export default function ReportsAdminScreen() {
                           setResolvingId(item._id);
                           await resolve({ reportId: item._id, action: "dismiss" });
                         } catch (error) {
-                          Alert.alert("Could not resolve", String(error));
+                          notifyError("Could not resolve", String(error));
                         } finally {
                           setResolvingId(null);
                         }
@@ -94,29 +95,24 @@ export default function ReportsAdminScreen() {
                       </Pressable>
                     ) : (
                     <Pressable
-                      onPress={async () => {
+                      onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        Alert.alert(
-                          "Delete content",
-                          "This will permanently delete the reported content.",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Delete",
-                              style: "destructive",
-                              onPress: async () => {
-                                try {
-                                  setResolvingId(item._id);
-                                  await resolve({ reportId: item._id, action: "delete" });
-                                } catch (error) {
-                                  Alert.alert("Could not delete", String(error));
-                                } finally {
-                                  setResolvingId(null);
-                                }
-                              },
-                            },
-                          ],
-                        );
+                        confirmAction({
+                          title: "Delete content",
+                          message: "This will permanently delete the reported content.",
+                          confirmLabel: "Delete",
+                          destructive: true,
+                          onConfirm: async () => {
+                            try {
+                              setResolvingId(item._id);
+                              await resolve({ reportId: item._id, action: "delete" });
+                            } catch (error) {
+                              notifyError("Could not delete", String(error));
+                            } finally {
+                              setResolvingId(null);
+                            }
+                          },
+                        });
                       }}
                       className="flex-1 items-center rounded-full bg-red-600 py-2"
                       disabled={resolvingId === item._id}

@@ -1,7 +1,12 @@
+import { Platform } from "react-native";
+
 // Rapid double-taps fire onPress twice before the first push starts its
 // transition, stacking duplicate screens. All programmatic pushes go through
 // this module-level lock so only the first tap in the window navigates.
-const NAV_LOCK_MS = 700;
+// Web navigation is instant (no push transition), so the window only needs
+// to absorb a double-click — 700ms there makes legitimate fast
+// click → back → click sequences feel dead.
+const NAV_LOCK_MS = Platform.OS === "web" ? 300 : 700;
 
 let lockedUntil = 0;
 

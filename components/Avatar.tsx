@@ -23,6 +23,7 @@ export function Avatar({
   const avatar = uri ? (
     <Image
       source={{ uri }}
+      accessibilityLabel={label ?? "User avatar"}
       style={{ width: size, height: size, borderRadius: size / 2 }}
       contentFit="cover"
     />

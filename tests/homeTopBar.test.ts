@@ -14,7 +14,10 @@ jest.mock("expo-blur", () => ({
 jest.mock("expo-router", () => ({
   router: {
     push: jest.fn(),
+    navigate: jest.fn(),
   },
+  Link: ({ children }: { children?: unknown }) => children ?? null,
+  useFocusEffect: () => undefined,
 }));
 
 jest.mock("react-native-safe-area-context", () => ({
@@ -35,6 +38,8 @@ import {
 } from "../components/HomeTopBar";
 
 import { router } from "expo-router";
+
+import { resetNavigationLock } from "../lib/navigationLock";
 
 describe("home top bar copy", () => {
   it("uses a real display name when one exists", () => {
@@ -100,8 +105,14 @@ describe("home top bar copy", () => {
     ).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
 
-    fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-notifications" }));
-    fireEvent.press(screen.UNSAFE_getByProps({ testID: "home-topbar-profile" }));
+    // Presses route through guardedPush now, so release the shared
+    // navigation lock around each one (see TonightStrip.test.tsx). Target
+    // the host element — the LinkPressable composite's own onPress prop is
+    // only the haptic side effect.
+    resetNavigationLock();
+    fireEvent.press(screen.getByTestId("home-topbar-notifications"));
+    resetNavigationLock();
+    fireEvent.press(screen.getByTestId("home-topbar-profile"));
 
     expect(router.push).toHaveBeenCalledWith("/notifications");
     expect(router.push).toHaveBeenCalledWith("/profile");

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,7 @@ import { FlashList } from "../components/FlashList";
 import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
+import { notifyError } from "../lib/dialogs";
 import { useMutation, usePaginatedQuery } from "../lib/plotlist/react";
 import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
@@ -111,7 +112,7 @@ export default function FollowRequestsScreen() {
         await accept({ requesterId });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
-        Alert.alert("Could not approve request", String(error));
+        notifyError("Could not approve request", String(error));
       } finally {
         setBusyId(null);
       }
@@ -125,7 +126,7 @@ export default function FollowRequestsScreen() {
       try {
         await decline({ requesterId });
       } catch (error) {
-        Alert.alert("Could not decline request", String(error));
+        notifyError("Could not decline request", String(error));
       } finally {
         setBusyId(null);
       }

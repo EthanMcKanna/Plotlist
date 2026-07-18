@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,8 +17,9 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassPressable } from "../../components/NativeGlass";
+import { LinkPressable } from "../../components/LinkPressable";
+import { PageTitle } from "../../components/PageTitle";
 import { Poster } from "../../components/Poster";
-import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
 import { facetByKey, FACET_GROUPS } from "../../lib/plotlist/facets";
 import {
@@ -150,7 +152,9 @@ export default function FacetScreen() {
 
   const { hero, rest } = useMemo(() => splitFacetFeature(items), [items]);
 
-  const handlePress = useCallback((item: FacetItem) => {
+  // Press side effect only — seeds the show query so the detail hero paints
+  // immediately; the LinkPressable owns the navigation.
+  const seedShow = useCallback((item: FacetItem) => {
     const show = item?.show;
     const showId = show?._id;
     if (!showId) return;
@@ -160,7 +164,6 @@ export default function FacetScreen() {
       queryClient.setQueryData(showQueryKey, { ...show, extendedDetails: null });
       void queryClient.invalidateQueries({ queryKey: showQueryKey });
     }
-    guardedPush(`/show/${showId}`);
   }, []);
 
   const renderItem = useCallback(
@@ -174,8 +177,18 @@ export default function FacetScreen() {
             marginBottom: GAP,
           }}
         >
-          <Pressable onPress={() => handlePress(item)} className="active:opacity-80">
-            <Poster uri={item.show.posterUrl ?? undefined} width={itemWidth} />
+          <LinkPressable
+            href={`/show/${item.show._id}`}
+            onPress={() => seedShow(item)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${item.show.title}`}
+            className="active:opacity-80 hover:opacity-90 web:transition-opacity"
+          >
+            <Poster
+              uri={item.show.posterUrl ?? undefined}
+              width={itemWidth}
+              alt={item.show.title}
+            />
             <Text
               className="mt-2 text-xs font-medium text-text-primary"
               numberOfLines={2}
@@ -187,11 +200,11 @@ export default function FacetScreen() {
                 {item.show.year}
               </Text>
             ) : null}
-          </Pressable>
+          </LinkPressable>
         </View>
       );
     },
-    [handlePress, itemWidth, numColumns],
+    [seedShow, itemWidth, numColumns],
   );
 
   const listHeader = useMemo(() => {
@@ -203,12 +216,13 @@ export default function FacetScreen() {
         : null;
     return (
       <View className="pb-5">
-        <Pressable
-          onPress={() => handlePress(hero)}
+        <LinkPressable
+          href={`/show/${hero.show._id}`}
+          onPress={() => seedShow(hero)}
           accessibilityRole="button"
           accessibilityLabel={`Open ${hero.show.title}, featured in ${facet?.title}`}
           style={styles.heroCard}
-          className="active:opacity-90"
+          className="active:opacity-90 hover:opacity-90 web:transition-opacity"
         >
           <Image
             source={{ uri: hero.show.backdropUrl ?? undefined }}
@@ -270,7 +284,7 @@ export default function FacetScreen() {
               ) : null}
             </View>
           </View>
-        </Pressable>
+        </LinkPressable>
 
         <View className="mt-6 mb-1 flex-row items-center gap-2">
           <Text className="text-[11px] font-bold uppercase text-text-tertiary">
@@ -280,7 +294,7 @@ export default function FacetScreen() {
         </View>
       </View>
     );
-  }, [facet?.title, group, handlePress, hero]);
+  }, [facet?.title, group, seedShow, hero]);
 
   if (!facet || !group) {
     return (
@@ -292,6 +306,7 @@ export default function FacetScreen() {
 
   return (
     <View className="flex-1 bg-dark-bg">
+      <PageTitle title={facet.title} />
       {/* Header (band is full-bleed; inner content tracks the page column) */}
       <View
         className="pb-4 border-b border-dark-border"
@@ -358,29 +373,51 @@ export default function FacetScreen() {
               contentContainerStyle={styles.relatedRow}
               accessibilityLabel={`More ${group.title} categories`}
             >
-              {relatedFacets.map((related) => (
-                <Pressable
-                  key={related.key}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.replace(`/facet/${related.key}`);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Browse ${related.title}`}
-                  style={[
-                    styles.relatedChip,
-                    {
-                      backgroundColor: withAlpha(group.accent, 0.1),
-                      borderColor: withAlpha(group.accent, 0.3),
-                    },
-                  ]}
-                  className="active:opacity-75"
-                >
+              {relatedFacets.map((related) => {
+                const chipStyle = [
+                  styles.relatedChip,
+                  {
+                    backgroundColor: withAlpha(group.accent, 0.1),
+                    borderColor: withAlpha(group.accent, 0.3),
+                  },
+                ];
+                const chipText = (
                   <Text className="text-[12px] font-semibold text-text-secondary">
                     {related.title}
                   </Text>
-                </Pressable>
-              ))}
+                );
+                // Web pushes a real link so Back steps through categories;
+                // native keeps replace so chips don't stack screens.
+                if (Platform.OS === "web") {
+                  return (
+                    <LinkPressable
+                      key={related.key}
+                      href={`/facet/${related.key}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Browse ${related.title}`}
+                      style={chipStyle}
+                      className="active:opacity-75 hover:opacity-90 web:transition-opacity"
+                    >
+                      {chipText}
+                    </LinkPressable>
+                  );
+                }
+                return (
+                  <Pressable
+                    key={related.key}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      router.replace(`/facet/${related.key}`);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Browse ${related.title}`}
+                    style={chipStyle}
+                    className="active:opacity-75"
+                  >
+                    {chipText}
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           ) : null}
         </View>

@@ -8,6 +8,8 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { StyleSheet, View } from "react-native";
 
+import { Platform } from "react-native";
+
 import { AuthErrorBoundary } from "../components/AuthErrorBoundary";
 import { AuthGate } from "../components/AuthGate";
 import { NotificationsBridge } from "../components/NotificationsBridge";
@@ -31,6 +33,16 @@ function RootLayout() {
       navigationIntegration.registerNavigationContainer(navigationRef);
     }
   }, [navigationRef]);
+
+  // Web ships a static boot shell in dist/index.html (dark page + wordmark)
+  // so the pre-JS paint matches the launch overlay; drop it once React has
+  // committed its first frame. LaunchOverlay also removes it on its first
+  // layout — whichever runs first wins, both are idempotent.
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      document.getElementById("plotlist-boot")?.remove();
+    }
+  }, []);
 
   return (
     <QueryProvider>

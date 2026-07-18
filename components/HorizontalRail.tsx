@@ -41,6 +41,7 @@ export function HorizontalRail({
   const isDesktopWeb = useIsDesktopWeb();
   const scrollRef = useRef<ScrollView>(null);
   const [hovered, setHovered] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -107,15 +108,24 @@ export function HorizontalRail({
       recomputeArrows();
     },
     onMouseLeave: () => setHovered(false),
+    // Keyboard users tab into the rail's cards; React focus events bubble,
+    // so the wrapper sees focus-within and reveals the arrows like hover.
+    onFocus: () => {
+      setFocusWithin(true);
+      recomputeArrows();
+    },
+    onBlur: () => setFocusWithin(false),
   } as Record<string, unknown>;
+
+  const arrowsVisible = hovered || focusWithin;
 
   return (
     <View style={styles.wrap} {...hoverProps}>
       {rail}
-      {hovered && canScrollLeft ? (
+      {arrowsVisible && canScrollLeft ? (
         <RailArrow direction={-1} onPress={scrollByPage} />
       ) : null}
-      {hovered && canScrollRight ? (
+      {arrowsVisible && canScrollRight ? (
         <RailArrow direction={1} onPress={scrollByPage} />
       ) : null}
     </View>
@@ -129,6 +139,7 @@ export function RailArrowsBox({ children }: { children: ReactNode }) {
   const isDesktopWeb = useIsDesktopWeb();
   const wrapRef = useRef<View>(null);
   const [hovered, setHovered] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -173,14 +184,16 @@ export function RailArrowsBox({ children }: { children: ReactNode }) {
     [getScrollNode, recomputeArrows],
   );
 
+  const arrowsVisible = hovered || focusWithin;
+
   // Track scrolls while hovered so wheel/trackpad scrolling updates arrows.
   useEffect(() => {
-    if (!hovered) return;
+    if (!arrowsVisible) return;
     const node = getScrollNode();
     if (!node) return;
     node.addEventListener("scroll", recomputeArrows, { passive: true });
     return () => node.removeEventListener("scroll", recomputeArrows);
-  }, [hovered, getScrollNode, recomputeArrows]);
+  }, [arrowsVisible, getScrollNode, recomputeArrows]);
 
   if (!isDesktopWeb) {
     return <>{children}</>;
@@ -192,15 +205,22 @@ export function RailArrowsBox({ children }: { children: ReactNode }) {
       recomputeArrows();
     },
     onMouseLeave: () => setHovered(false),
+    // Keyboard users tab into the rail's cards; React focus events bubble,
+    // so the wrapper sees focus-within and reveals the arrows like hover.
+    onFocus: () => {
+      setFocusWithin(true);
+      recomputeArrows();
+    },
+    onBlur: () => setFocusWithin(false),
   } as Record<string, unknown>;
 
   return (
     <View ref={wrapRef} style={styles.wrap} {...hoverProps}>
       {children}
-      {hovered && canScrollLeft ? (
+      {arrowsVisible && canScrollLeft ? (
         <RailArrow direction={-1} onPress={scrollByPage} />
       ) : null}
-      {hovered && canScrollRight ? (
+      {arrowsVisible && canScrollRight ? (
         <RailArrow direction={1} onPress={scrollByPage} />
       ) : null}
     </View>
@@ -219,6 +239,9 @@ function RailArrow({
       onPress={() => onPress(direction)}
       accessibilityRole="button"
       accessibilityLabel={direction === 1 ? "Scroll right" : "Scroll left"}
+      {...(Platform.OS === "web"
+        ? { title: direction === 1 ? "Scroll right" : "Scroll left" }
+        : null)}
       style={[styles.arrow, direction === 1 ? styles.arrowRight : styles.arrowLeft]}
       className="opacity-85 hover:opacity-100 active:opacity-100"
     >

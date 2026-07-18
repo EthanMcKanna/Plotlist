@@ -84,7 +84,11 @@ export function SegmentedControl({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               onChange(option.value);
             }}
-            className="z-10 flex-1 items-center justify-center py-2.5"
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            className={`z-10 flex-1 items-center justify-center rounded-lg py-2.5 web:transition-colors ${
+              isActive ? "" : "hover:bg-white/5"
+            }`}
           >
             <Text
               className={`text-sm font-semibold ${

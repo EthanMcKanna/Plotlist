@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -197,6 +197,12 @@ export function OnboardingPhoneStep({
               keyboardType="phone-pad"
               textContentType="telephoneNumber"
               autoComplete="tel"
+              // Web only: Enter sends. Native keyboards keep their previous
+              // behavior (phone-pad has no return key; hardware keyboards
+              // shouldn't gain a new submit path).
+              onSubmitEditing={
+                Platform.OS === "web" ? () => void handleSend() : undefined
+              }
             />
             <PrimaryButton
               label={loading ? "Sending code…" : "Send verification code"}
@@ -213,8 +219,13 @@ export function OnboardingPhoneStep({
               placeholder="123456"
               keyboardType="number-pad"
               textContentType="oneTimeCode"
-              autoComplete="sms-otp"
+              // "sms-otp" is Android-only vocabulary; browsers expect the
+              // standard one-time-code autocomplete token.
+              autoComplete={Platform.OS === "web" ? "one-time-code" : "sms-otp"}
               maxLength={CODE_LEN}
+              onSubmitEditing={
+                Platform.OS === "web" ? () => void handleVerify() : undefined
+              }
             />
             <PrimaryButton
               label={loading ? "Verifying…" : "Verify"}

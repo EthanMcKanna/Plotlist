@@ -10,6 +10,8 @@ const serverEnvSchema = z.object({
   TWILIO_VERIFY_SERVICE_SID: z.string().min(1),
   CONTACT_HASH_SECRET: z.string().min(1),
   APPLE_BUNDLE_ID: z.string().min(1).default("com.emckanna.Plotlist"),
+  // Services ID accepted as a token audience for web Sign in with Apple.
+  APPLE_WEB_CLIENT_ID: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   OMDB_API_KEY: z.string().min(1).optional(),
   OPENAI_MODERATION_API_KEY: z.string().min(1).optional(),

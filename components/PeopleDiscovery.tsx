@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -146,16 +146,24 @@ export function PeopleDiscovery({
       hasProfile && !isSearching && hasSynced ? { limit: CONTACT_MATCH_LIMIT } : "skip",
     ) ?? [];
 
+  // SMS invites need the device address book and composer, so the invite
+  // sections are native-only even when the server has a synced snapshot.
+  const canInvite = Platform.OS !== "web";
+
   const inviteCandidates =
     useQuery(
       api.contacts.getInviteCandidates,
-      hasProfile && !isSearching && hasSynced ? { limit: INVITE_CANDIDATE_LIMIT } : "skip",
+      canInvite && hasProfile && !isSearching && hasSynced
+        ? { limit: INVITE_CANDIDATE_LIMIT }
+        : "skip",
     ) ?? [];
 
   const searchContactCandidates =
     useQuery(
       api.contacts.searchInviteCandidates,
-      hasProfile && isSearching && hasSynced ? { text: query, limit: 10 } : "skip",
+      canInvite && hasProfile && isSearching && hasSynced
+        ? { text: query, limit: 10 }
+        : "skip",
     ) ?? [];
 
   const suggestedPeopleRaw =
@@ -293,7 +301,11 @@ export function PeopleDiscovery({
         ) : (
           <EmptyState
             title="No suggestions yet"
-            description="Sync contacts or search by name or username."
+            description={
+              Platform.OS === "web"
+                ? "Search by name or username to find people."
+                : "Sync contacts or search by name or username."
+            }
           />
         )}
       </View>

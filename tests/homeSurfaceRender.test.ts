@@ -85,7 +85,11 @@ jest.mock("expo-linear-gradient", () => ({
 jest.mock("expo-router", () => ({
   router: {
     push: jest.fn(),
+    navigate: jest.fn(),
   },
+  // LinkPressable's web branch renders Link asChild — pass the child through.
+  Link: ({ children }: { children?: unknown }) => children ?? null,
+  useFocusEffect: () => undefined,
   useNavigation: () => ({
     getParent: () => ({
       addListener: () => () => undefined,

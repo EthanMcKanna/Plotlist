@@ -1,23 +1,26 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { Link, router, type Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { confirmAction, notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { useScrollToTopOnTabPress } from "../../lib/useScrollToTopOnTabPress";
+import { useIsDesktopWeb } from "../../lib/webLayout";
 
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { EmptyState } from "../../components/EmptyState";
 import { FlashList } from "../../components/FlashList";
+import { LinkPressable } from "../../components/LinkPressable";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
@@ -75,17 +78,6 @@ function lightHaptic() {
 
 function mediumHaptic() {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-}
-
-function openDiaryItem(item: DiaryItem) {
-  lightHaptic();
-  if (item.type === "review") {
-    router.push(`/review/${item.review._id}`);
-    return;
-  }
-  if (item.show?._id) {
-    guardedPush(`/show/${item.show._id}`);
-  }
 }
 
 // Seven slim bars for the trailing week; today reads brand-blue so the
@@ -181,6 +173,7 @@ function MonthHeader({ row }: { row: DiaryMonthRow }) {
 function RowShell({
   dayLabel,
   isLastOfDay,
+  href,
   onPress,
   onLongPress,
   accessibilityLabel,
@@ -188,28 +181,79 @@ function RowShell({
 }: {
   dayLabel: DiaryDayLabel | null;
   isLastOfDay: boolean;
+  // Static destination renders a real link on web; rows without one (show
+  // not ingested yet) keep the plain Pressable.
+  href?: Href | null;
   onPress: () => void;
   onLongPress?: () => void;
   accessibilityLabel: string;
   children: React.ReactNode;
 }) {
-  return (
+  const isDesktopWeb = useIsDesktopWeb();
+  const [hovered, setHovered] = useState(false);
+
+  const rowClassName = "web:transition-colors hover:bg-white/5 active:opacity-85";
+  const content = (
+    <View className="flex-row px-6">
+      <DayRail label={dayLabel} />
+      <View
+        className="flex-1 flex-row gap-3 py-3"
+        style={isLastOfDay ? undefined : styles.rowDivider}
+      >
+        {children}
+      </View>
+    </View>
+  );
+
+  const row = href ? (
+    <LinkPressable
+      href={href}
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      className={rowClassName}
+    >
+      {content}
+    </LinkPressable>
+  ) : (
     <Pressable
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       onLongPress={onLongPress}
-      className="active:opacity-85"
+      className={rowClassName}
     >
-      <View className="flex-row px-6">
-        <DayRail label={dayLabel} />
-        <View
-          className="flex-1 flex-row gap-3 py-3"
-          style={isLastOfDay ? undefined : styles.rowDivider}
-        >
-          {children}
-        </View>
-      </View>
+      {content}
     </Pressable>
+  );
+
+  if (!isDesktopWeb || !onLongPress) {
+    return row;
+  }
+
+  // Long-press isn't discoverable with a mouse, so desktop web reveals an
+  // ellipsis button on hover that opens the same action sheet.
+  return (
+    <View
+      {...({
+        onMouseEnter: () => setHovered(true),
+        onMouseLeave: () => setHovered(false),
+      } as Record<string, unknown>)}
+    >
+      {row}
+      {hovered ? (
+        <Pressable
+          onPress={onLongPress}
+          accessibilityRole="button"
+          accessibilityLabel="More options"
+          {...(Platform.OS === "web" ? { title: "More options" } : null)}
+          className="absolute bottom-0 right-4 top-0 justify-center"
+        >
+          <View className="h-8 w-8 items-center justify-center rounded-full bg-dark-card web:transition-colors hover:bg-dark-hover">
+            <Ionicons name="ellipsis-horizontal" size={16} color="#9BA1B0" />
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -226,13 +270,19 @@ const EntryRow = memo(function EntryRow({
   const text = getDiaryItemText(item);
   const rating = getDiaryItemRating(item);
   const isReview = item.type === "review";
+  const href: Href | null = isReview
+    ? `/review/${item.review._id}`
+    : item.show?._id
+      ? `/show/${item.show._id}`
+      : null;
 
   return (
     <RowShell
       dayLabel={row.dayLabel}
       isLastOfDay={row.isLastOfDay}
+      href={href}
       accessibilityLabel={`${isReview ? "Review" : "Watch entry"} for ${title}`}
-      onPress={() => openDiaryItem(item)}
+      onPress={lightHaptic}
       onLongPress={() => {
         mediumHaptic();
         onAction(
@@ -242,7 +292,7 @@ const EntryRow = memo(function EntryRow({
         );
       }}
     >
-      <Poster uri={item.show?.posterUrl} width={42} />
+      <Poster uri={item.show?.posterUrl} width={42} alt={title} />
       <View className="min-w-0 flex-1 justify-center">
         <View className="flex-row items-center justify-between gap-3">
           <Text
@@ -295,15 +345,11 @@ const BingeRow = memo(function BingeRow({ row }: { row: DiaryBingeRow }) {
     <RowShell
       dayLabel={row.dayLabel}
       isLastOfDay={row.isLastOfDay}
+      href={row.show?._id ? `/show/${row.show._id}` : null}
       accessibilityLabel={`${row.logs.length} episodes of ${row.title}`}
-      onPress={() => {
-        lightHaptic();
-        if (row.show?._id) {
-          guardedPush(`/show/${row.show._id}`);
-        }
-      }}
+      onPress={lightHaptic}
     >
-      <Poster uri={row.show?.posterUrl} width={42} />
+      <Poster uri={row.show?.posterUrl} width={42} alt={row.title} />
       <View className="min-w-0 flex-1 justify-center">
         <View className="flex-row items-center justify-between gap-3">
           <Text
@@ -404,21 +450,40 @@ function EmptyDiary() {
             Mark an episode watched, jot a note, or review a show — every moment lands
             here, day by day.
           </Text>
-          <GlassPressable
-            accessibilityLabel="Find something to watch"
-            onPress={() => {
-              lightHaptic();
-              router.push("/search");
-            }}
-            radius={8}
-            variant="prominent"
-            style={styles.emptyCta}
-            contentStyle={styles.emptyCtaContent}
-          >
-            <Text className="text-[14px] font-bold text-text-primary">
-              Find something to watch
-            </Text>
-          </GlassPressable>
+          {Platform.OS === "web" ? (
+            // Real link on web (cmd/middle-click, open in new tab); native
+            // keeps the glass pressable untouched below.
+            <Link href="/search" asChild push>
+              <GlassPressable
+                accessibilityLabel="Find something to watch"
+                onPress={lightHaptic}
+                radius={8}
+                variant="prominent"
+                style={styles.emptyCta}
+                contentStyle={styles.emptyCtaContent}
+              >
+                <Text className="text-[14px] font-bold text-text-primary">
+                  Find something to watch
+                </Text>
+              </GlassPressable>
+            </Link>
+          ) : (
+            <GlassPressable
+              accessibilityLabel="Find something to watch"
+              onPress={() => {
+                lightHaptic();
+                router.push("/search");
+              }}
+              radius={8}
+              variant="prominent"
+              style={styles.emptyCta}
+              contentStyle={styles.emptyCtaContent}
+            >
+              <Text className="text-[14px] font-bold text-text-primary">
+                Find something to watch
+              </Text>
+            </GlassPressable>
+          )}
         </View>
       </GlassSurface>
     </View>
@@ -434,6 +499,7 @@ export function LogSurface({
   now = Date.now(),
 }: LogSurfaceProps) {
   const insets = useSafeAreaInsets();
+  const isDesktopWeb = useIsDesktopWeb();
   const listRef = useRef<any>(null);
   useScrollToTopOnTabPress(listRef);
 
@@ -520,7 +586,9 @@ export function LogSurface({
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.5}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 88 }}
+        // 88 clears the floating tab bar; desktop web has side navigation
+        // instead, so a slim breathing-room pad is enough.
+        contentContainerStyle={{ paddingBottom: insets.bottom + (isDesktopWeb ? 24 : 88) }}
         ListHeaderComponent={
           <DiaryHeader
             filter={filter}
@@ -583,36 +651,34 @@ export default function LogScreen() {
 
   const handleDeleteLog = useCallback(
     (logId: Id<"watchLogs">, title: string) => {
-      Alert.alert("Delete entry", `Remove your watch entry for "${title}"?`, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteLog({ logId }).catch((error) => {
-              Alert.alert("Could not delete", String(error));
-            });
-          },
+      confirmAction({
+        title: "Delete entry",
+        message: `Remove your watch entry for "${title}"?`,
+        confirmLabel: "Delete",
+        destructive: true,
+        onConfirm: () => {
+          void deleteLog({ logId }).catch((error) => {
+            notifyError("Could not delete", String(error));
+          });
         },
-      ]);
+      });
     },
     [deleteLog],
   );
 
   const handleDeleteReview = useCallback(
     (reviewId: Id<"reviews">, title: string) => {
-      Alert.alert("Delete review", `Remove your review for "${title}"?`, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteReview({ reviewId }).catch((error) => {
-              Alert.alert("Could not delete", String(error));
-            });
-          },
+      confirmAction({
+        title: "Delete review",
+        message: `Remove your review for "${title}"?`,
+        confirmLabel: "Delete",
+        destructive: true,
+        onConfirm: () => {
+          void deleteReview({ reviewId }).catch((error) => {
+            notifyError("Could not delete", String(error));
+          });
         },
-      ]);
+      });
     },
     [deleteReview],
   );

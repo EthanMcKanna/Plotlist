@@ -14,7 +14,7 @@ import * as Haptics from "expo-haptics";
 import { FanPreviewCard } from "./FanPreviewCard";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
-import { guardedPush } from "../lib/navigation";
+import { LinkPressable } from "./LinkPressable";
 import { api } from "../lib/plotlist/api";
 import { useAction } from "../lib/plotlist/react";
 import {
@@ -28,6 +28,7 @@ import {
   missingFacetPreviewKeys,
   storeFacetPreviews,
 } from "../lib/facetPreviewStore";
+import { useIsDesktopWeb } from "../lib/webLayout";
 import { FACET_DEFS, type FacetDef, type FacetGroupKey } from "../lib/plotlist/facets";
 
 const CARD_WIDTH = 148;
@@ -45,6 +46,65 @@ export function FacetGroupPills({
   onSelect: (key: FacetGroupKey) => void;
   style?: object;
 }) {
+  const isDesktopWeb = useIsDesktopWeb();
+  const pills = GENRE_EXPLORER_GROUPS.map((candidate) => {
+    const isActive = candidate.key === selected;
+    return (
+      <Pressable
+        key={candidate.key}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onSelect(candidate.key);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isActive }}
+        accessibilityLabel={`Show ${candidate.title} categories`}
+        style={[
+          styles.pill,
+          {
+            backgroundColor: isActive
+              ? withAlpha(candidate.accent, 0.16)
+              : "rgba(255,255,255,0.06)",
+            borderColor: isActive
+              ? withAlpha(candidate.accent, 0.55)
+              : "rgba(255,255,255,0.09)",
+          },
+        ]}
+        className="active:opacity-75"
+      >
+        <Ionicons
+          name={candidate.icon}
+          size={13}
+          color={isActive ? candidate.accent : "#9BA1B0"}
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+        <Text
+          className="text-[13px] font-semibold"
+          style={{ color: isActive ? candidate.accent : "#9BA1B0" }}
+        >
+          {candidate.title}
+        </Text>
+      </Pressable>
+    );
+  });
+
+  if (isDesktopWeb) {
+    // Desktop web gets hover paging arrows when the pill row overflows. The
+    // rail's wrapper View sizes to content, so the pillScroller height
+    // constraint below isn't needed there.
+    return (
+      <HorizontalRail
+        accessibilityLabel="Category groups"
+        contentContainerStyle={[styles.pillRow, style]}
+      >
+        {pills}
+      </HorizontalRail>
+    );
+  }
+
   return (
     <ScrollView
       horizontal
@@ -55,49 +115,7 @@ export function FacetGroupPills({
       contentContainerStyle={[styles.pillRow, style]}
       accessibilityLabel="Category groups"
     >
-      {GENRE_EXPLORER_GROUPS.map((candidate) => {
-        const isActive = candidate.key === selected;
-        return (
-          <Pressable
-            key={candidate.key}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onSelect(candidate.key);
-            }}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive }}
-            accessibilityLabel={`Show ${candidate.title} categories`}
-            style={[
-              styles.pill,
-              {
-                backgroundColor: isActive
-                  ? withAlpha(candidate.accent, 0.16)
-                  : "rgba(255,255,255,0.06)",
-                borderColor: isActive
-                  ? withAlpha(candidate.accent, 0.55)
-                  : "rgba(255,255,255,0.09)",
-              },
-            ]}
-            className="active:opacity-75"
-          >
-            <Ionicons
-              name={candidate.icon}
-              size={13}
-              color={isActive ? candidate.accent : "#9BA1B0"}
-              accessible={false}
-              accessibilityElementsHidden
-              aria-hidden={true}
-              importantForAccessibility="no"
-            />
-            <Text
-              className="text-[13px] font-semibold"
-              style={{ color: isActive ? candidate.accent : "#9BA1B0" }}
-            >
-              {candidate.title}
-            </Text>
-          </Pressable>
-        );
-      })}
+      {pills}
     </ScrollView>
   );
 }
@@ -106,12 +124,10 @@ function FacetCard({
   facet,
   accent,
   posters,
-  onPress,
 }: {
   facet: FacetDef;
   accent: string;
   posters: string[];
-  onPress: (facet: FacetDef) => void;
 }) {
   return (
     <FanPreviewCard
@@ -121,19 +137,21 @@ function FacetCard({
       action="Browse"
       accessibilityLabel={`Browse ${facet.title}`}
       style={styles.cardSpacing}
-      onPress={() => onPress(facet)}
+      href={`/facet/${facet.key}`}
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
     />
   );
 }
 
-function AllCategoriesCard({ onPress }: { onPress: () => void }) {
+function AllCategoriesCard() {
   return (
-    <Pressable
-      onPress={onPress}
+    <LinkPressable
+      href="/explore"
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
       accessibilityRole="button"
       accessibilityLabel={`Browse all ${FACET_DEFS.length} categories`}
       style={[styles.card, styles.allCard]}
-      className="active:opacity-85"
+      className="active:opacity-85 hover:opacity-90 web:transition-opacity"
     >
       <View style={styles.allCardIcon}>
         <Ionicons
@@ -152,7 +170,7 @@ function AllCategoriesCard({ onPress }: { onPress: () => void }) {
       <Text className="mt-1 text-center text-[12px] font-semibold text-text-tertiary">
         {FACET_DEFS.length} ways in
       </Text>
-    </Pressable>
+    </LinkPressable>
   );
 }
 
@@ -189,31 +207,20 @@ export function GenreExplorer() {
     };
   }, [facets, getFacetPreviews]);
 
-  const handleOpenFacet = useCallback((facet: FacetDef) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    guardedPush(`/facet/${facet.key}`);
-  }, []);
-
-  const handleOpenCatalog = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    guardedPush("/explore");
-  }, []);
-
   const renderCard = useCallback(
     ({ item }: { item: FacetDef | "all" }) => {
       if (item === "all") {
-        return <AllCategoriesCard onPress={handleOpenCatalog} />;
+        return <AllCategoriesCard />;
       }
       return (
         <FacetCard
           facet={item}
           accent={group.accent}
           posters={getCachedFacetPosters(item.key)}
-          onPress={handleOpenFacet}
         />
       );
     },
-    [group.accent, handleOpenCatalog, handleOpenFacet],
+    [group.accent],
   );
 
   const cards = useMemo<Array<FacetDef | "all">>(
@@ -229,7 +236,7 @@ export function GenreExplorer() {
         subtitle="Moods, genres, and rabbit holes from across the catalog"
         accent={group.accent}
         actionLabel="All"
-        onAction={handleOpenCatalog}
+        actionHref="/explore"
       />
 
       <FacetGroupPills selected={selectedGroup} onSelect={setSelectedGroup} />

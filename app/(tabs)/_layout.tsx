@@ -9,6 +9,11 @@ import { useIsDesktopWeb } from "../../lib/webLayout";
 
 const iconSize = 22;
 
+function tabPressHaptic() {
+  if (Platform.OS === "web") return;
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}
+
 // iOS gets the real UITabBar (system Liquid Glass on iOS 26, correct
 // materials on older versions, native pop-to-top/scroll-to-top). Android and
 // web keep the JS tab bar below.
@@ -74,9 +79,7 @@ function JsTabsLayout() {
           ),
         }}
         listeners={{
-          tabPress: () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          },
+          tabPress: tabPressHaptic,
         }}
       />
       <Tabs.Screen
@@ -96,9 +99,7 @@ function JsTabsLayout() {
           ),
         }}
         listeners={{
-          tabPress: () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          },
+          tabPress: tabPressHaptic,
         }}
       />
       <Tabs.Screen
@@ -118,9 +119,7 @@ function JsTabsLayout() {
           ),
         }}
         listeners={{
-          tabPress: () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          },
+          tabPress: tabPressHaptic,
         }}
       />
       <Tabs.Screen
@@ -140,9 +139,7 @@ function JsTabsLayout() {
           ),
         }}
         listeners={{
-          tabPress: () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          },
+          tabPress: tabPressHaptic,
         }}
       />
     </Tabs>

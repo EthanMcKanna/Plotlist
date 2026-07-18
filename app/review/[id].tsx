@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -15,6 +14,8 @@ import { useMutation, useQueryState } from "../../lib/plotlist/react";
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { LikeButton } from "../../components/LikeButton";
+import { LinkPressable } from "../../components/LinkPressable";
+import { PageTitle } from "../../components/PageTitle";
 import { ActionSheet } from "../../components/ActionSheet";
 import {
   CommentsSection,
@@ -25,7 +26,7 @@ import { GlassPressable } from "../../components/NativeGlass";
 import { api } from "../../lib/plotlist/api";
 import type { Id } from "../../lib/plotlist/types";
 import { formatDate, formatEpisodeCode } from "../../lib/format";
-import { guardedPush } from "../../lib/navigation";
+import { notify, notifyError } from "../../lib/dialogs";
 import { sharePlotlistLink } from "../../lib/share";
 import { ReportModal } from "../../components/ReportModal";
 import { SpoilerShield } from "../../components/SpoilerShield";
@@ -162,8 +163,51 @@ export default function ReviewScreen() {
   const { review, author, show } = data;
   const authorName = author?.displayName ?? author?.name ?? "Someone";
 
+  const showHeaderContent = (
+    <>
+      <Poster uri={show?.posterUrl ?? undefined} size="md" alt={show?.title} />
+      <View className="flex-1 justify-center">
+        <Text className="text-xl font-bold text-text-primary" numberOfLines={2}>
+          {show?.title ?? "Unknown show"}
+        </Text>
+        {typeof review.seasonNumber === "number" &&
+        typeof review.episodeNumber === "number" ? (
+          <View className="mt-1.5 flex-row items-center gap-2">
+            <View className="rounded-full bg-brand-500/10 px-2 py-0.5">
+              <Text className="text-[11px] font-semibold text-brand-300">
+                {formatEpisodeCode(review.seasonNumber, review.episodeNumber)}
+              </Text>
+            </View>
+            {review.episodeTitle ? (
+              <Text className="flex-1 text-sm text-text-secondary" numberOfLines={1}>
+                {review.episodeTitle}
+              </Text>
+            ) : null}
+          </View>
+        ) : review.episodeTitle ? (
+          <Text className="mt-1 text-sm text-text-secondary" numberOfLines={1}>
+            {review.episodeTitle}
+          </Text>
+        ) : null}
+        <View className="mt-2">
+          <RatingStars rating={review.rating} />
+        </View>
+        <Text className="mt-2 text-xs text-text-tertiary">
+          {authorName} · {formatDate(review.createdAt)}
+        </Text>
+      </View>
+    </>
+  );
+
   return (
     <Screen>
+      <PageTitle
+        title={
+          show?.title
+            ? `${authorName}'s review of ${show.title}`
+            : `${authorName}'s review`
+        }
+      />
       <View className="flex-1">
         <ReviewHeader />
         <ScrollView
@@ -178,48 +222,19 @@ export default function ReviewScreen() {
           overScrollMode="never"
         >
           <View className="px-6 pb-10 pt-4">
-            <Pressable
-              onPress={() => {
-                if (show?._id) {
+            {show?._id ? (
+              <LinkPressable
+                href={`/show/${show._id}`}
+                onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  guardedPush(`/show/${show._id}`);
-                }
-              }}
-              disabled={!show?._id}
-              className="flex-row gap-4 active:opacity-80"
-            >
-              <Poster uri={show?.posterUrl ?? undefined} size="md" />
-              <View className="flex-1 justify-center">
-                <Text className="text-xl font-bold text-text-primary" numberOfLines={2}>
-                  {show?.title ?? "Unknown show"}
-                </Text>
-                {typeof review.seasonNumber === "number" &&
-                typeof review.episodeNumber === "number" ? (
-                  <View className="mt-1.5 flex-row items-center gap-2">
-                    <View className="rounded-full bg-brand-500/10 px-2 py-0.5">
-                      <Text className="text-[11px] font-semibold text-brand-300">
-                        {formatEpisodeCode(review.seasonNumber, review.episodeNumber)}
-                      </Text>
-                    </View>
-                    {review.episodeTitle ? (
-                      <Text className="flex-1 text-sm text-text-secondary" numberOfLines={1}>
-                        {review.episodeTitle}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : review.episodeTitle ? (
-                  <Text className="mt-1 text-sm text-text-secondary" numberOfLines={1}>
-                    {review.episodeTitle}
-                  </Text>
-                ) : null}
-                <View className="mt-2">
-                  <RatingStars rating={review.rating} />
-                </View>
-                <Text className="mt-2 text-xs text-text-tertiary">
-                  {authorName} · {formatDate(review.createdAt)}
-                </Text>
-              </View>
-            </Pressable>
+                }}
+                className="flex-row gap-4 web:transition-opacity active:opacity-80 hover:opacity-90"
+              >
+                {showHeaderContent}
+              </LinkPressable>
+            ) : (
+              <View className="flex-row gap-4">{showHeaderContent}</View>
+            )}
 
             {review.reviewText ? (
               <View className="mt-5">
@@ -307,9 +322,9 @@ export default function ReviewScreen() {
         onSubmit={async (reason) => {
           try {
             await report({ targetType: "review", targetId: review._id, reason });
-            Alert.alert("Report submitted", "Thanks for letting us know.");
+            notify("Report submitted", "Thanks for letting us know.");
           } catch (error) {
-            Alert.alert("Could not report", String(error));
+            notifyError("Could not report", String(error));
           }
         }}
       />

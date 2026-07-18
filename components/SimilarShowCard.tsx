@@ -1,9 +1,11 @@
-import { Alert, Platform, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { guardedPush } from "../lib/navigation";
+import { notifyError } from "../lib/dialogs";
 import { useAction } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
+import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 
 type SimilarShowCardProps = {
@@ -27,13 +29,9 @@ export function SimilarShowCard({
 }: SimilarShowCardProps) {
   const ingestShow = useAction(api.shows.ingestFromCatalog);
 
-  const handlePress = async () => {
+  const handleIngestPress = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
-      if (showId) {
-        guardedPush({ pathname: "/show/[id]", params: { id: showId } });
-        return;
-      }
       if (!externalId) {
         throw new Error("Missing show identifier");
       }
@@ -49,13 +47,13 @@ export function SimilarShowCard({
       guardedPush(`/show/${nextShowId}`);
     } catch (error) {
       console.error("Failed to load show:", error);
-      Alert.alert("Error", "Failed to load show details. Please try again.");
+      notifyError("Error", "Failed to load show details. Please try again.");
     }
   };
 
   const content = (
     <>
-      <Poster uri={posterUrl ?? posterPath ?? undefined} size="md" />
+      <Poster uri={posterUrl ?? posterPath ?? undefined} alt={title} size="md" />
       <Text className="mt-2 text-sm font-semibold text-text-primary" numberOfLines={2}>
         {title}
       </Text>
@@ -73,34 +71,29 @@ export function SimilarShowCard({
     </>
   );
 
-  if (Platform.OS === "web" && showId) {
+  if (showId) {
     return (
-      <a
-        href={`/show/${showId}`}
-        aria-label={`Open ${title}`}
-        style={{
-          cursor: "pointer",
-          display: "block",
-          marginRight: 16,
-          textDecoration: "none",
-          width: 128,
-        }}
+      <LinkPressable
+        href={{ pathname: "/show/[id]", params: { id: showId } }}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        accessibilityLabel={`Open ${title}`}
+        className="mr-4 w-32 web:transition-opacity active:opacity-80 hover:opacity-90"
       >
         {content}
-      </a>
+      </LinkPressable>
     );
   }
 
-  const card = (
+  // No local show id yet — the show must be ingested before it has a route,
+  // so this card can't be a plain link.
+  return (
     <Pressable
-      onPress={handlePress}
+      onPress={handleIngestPress}
       accessibilityRole="button"
       accessibilityLabel={`Open ${title}`}
-      className="mr-4 w-32 active:opacity-80"
+      className="mr-4 w-32 web:transition-opacity active:opacity-80 hover:opacity-90"
     >
       {content}
     </Pressable>
   );
-
-  return card;
 }

@@ -3,7 +3,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import type { Href } from "expo-router";
 
+import { LinkPressable } from "./LinkPressable";
 import { withAlpha } from "../lib/genreExplorer";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -35,8 +37,9 @@ function FanPoster({ uri, style }: { uri: string | null; style: object }) {
 
 // The signature "gradient wash + fanned posters" card introduced by the genre
 // explorer, shared by every surface that previews a collection of shows
-// (facet categories, lists). Purely presentational — callers own navigation,
-// haptics, and long-press behavior.
+// (facet categories, lists). Purely presentational — callers own navigation
+// (via onPress, or href for link destinations), haptics, and long-press
+// behavior.
 export function FanPreviewCard({
   title,
   accent,
@@ -48,6 +51,7 @@ export function FanPreviewCard({
   height = DEFAULT_HEIGHT,
   style,
   accessibilityLabel,
+  href,
   onPress,
   onLongPress,
 }: {
@@ -64,6 +68,9 @@ export function FanPreviewCard({
   height?: number;
   style?: object;
   accessibilityLabel: string;
+  /** When set, the card is a real link on web (LinkPressable); onPress still
+   * runs first as the side effect (haptics, analytics). */
+  href?: Href;
   onPress: () => void;
   onLongPress?: () => void;
 }) {
@@ -75,15 +82,16 @@ export function FanPreviewCard({
   // two-show list doesn't carry a permanently empty slot.
   const showEmptyFrames = posters.length === 0;
 
-  return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      style={[styles.card, { height, width }, style]}
-      className="active:opacity-85"
-    >
+  const sharedProps = {
+    onLongPress,
+    accessibilityRole: "button" as const,
+    accessibilityLabel,
+    style: [styles.card, { height, width }, style],
+    className: "active:opacity-85 hover:opacity-90 web:transition-opacity",
+  };
+
+  const body = (
+    <>
       <LinearGradient
         colors={[withAlpha(accent, 0.2), withAlpha(accent, 0.04), "transparent"]}
         start={{ x: 0.5, y: 0 }}
@@ -149,6 +157,20 @@ export function FanPreviewCard({
           />
         </View>
       ) : null}
+    </>
+  );
+
+  if (href) {
+    return (
+      <LinkPressable href={href} onPress={onPress} {...sharedProps}>
+        {body}
+      </LinkPressable>
+    );
+  }
+
+  return (
+    <Pressable onPress={onPress} {...sharedProps}>
+      {body}
     </Pressable>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
-import { usePathname } from "expo-router";
+import { router, usePathname } from "expo-router";
 
 import { useAuth } from "../lib/plotlist/react";
 import {
@@ -19,7 +19,14 @@ function isChromelessRoute(pathname: string | null) {
 // Routes whose tab title comes from loaded data via <PageTitle> — the
 // static fallback below must never overwrite those (React runs the screen's
 // effect before this shell's, so a static write here would win the race).
-const DYNAMIC_TITLE_PREFIXES = ["/show/", "/list/"];
+const DYNAMIC_TITLE_PREFIXES = [
+  "/show/",
+  "/list/",
+  "/person/",
+  "/facet/",
+  "/provider/",
+  "/review/",
+];
 
 // Static browser-tab titles by route.
 const STATIC_ROUTE_TITLES: Array<[prefix: string, title: string | null]> = [
@@ -37,8 +44,11 @@ const STATIC_ROUTE_TITLES: Array<[prefix: string, title: string | null]> = [
   ["/settings", "Settings"],
   ["/me/watchlist", "Watchlist"],
   ["/me/lists", "Lists"],
+  ["/me/stats-share", "Share your stats"],
   ["/me/stats", "Stats"],
   ["/me/favorites", "Favorites"],
+  ["/continue", "Continue"],
+  ["/admin", "Admin"],
   ["/sign-in", "Sign in"],
   ["/onboarding", "Welcome"],
   ["/legal", "Legal"],
@@ -49,6 +59,7 @@ const STATIC_ROUTE_TITLES: Array<[prefix: string, title: string | null]> = [
 
 function getStaticRouteTitle(pathname: string | null) {
   if (!pathname) return undefined;
+  if (pathname === "/") return null;
   if (DYNAMIC_TITLE_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return undefined;
   }
@@ -75,6 +86,40 @@ function WebShellInner({ children }: { children: ReactNode }) {
       document.title = title ? `${title} — Plotlist` : "Plotlist";
     }
   }, [pathname]);
+
+  // "/" (outside inputs) or Cmd/Ctrl+K jumps to search with the field
+  // focused — the search screen already focuses on a fresh `focus` param.
+  useEffect(() => {
+    if (typeof document === "undefined" || !isAuthenticated) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        typeof event.key !== "string" ||
+        event.isComposing ||
+        event.defaultPrevented
+      ) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const isSlash =
+        event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isCmdK =
+        event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey);
+      if (isCmdK || (isSlash && !isEditable)) {
+        event.preventDefault();
+        router.navigate({
+          pathname: "/search",
+          params: { focus: String(Date.now()) },
+        });
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isAuthenticated]);
 
   const showSidebar =
     (mode === "sidebar" || mode === "rail") &&

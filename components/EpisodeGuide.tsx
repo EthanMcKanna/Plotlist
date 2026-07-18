@@ -1,6 +1,7 @@
 import { memo } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   Text,
   View,
@@ -218,9 +219,22 @@ function EpisodeGuideComponent({
                     />
                     {episodes.length > 0 && isAuthenticated ? (
                       <Pressable
-                        className="active:opacity-60"
+                        className="web:transition-opacity active:opacity-60 hover:opacity-80"
                         disabled={!hasAvailableEpisodes}
                         style={{ opacity: hasAvailableEpisodes ? 1 : 0.45 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          allWatched
+                            ? `Unmark ${season.name} watched`
+                            : `Mark ${season.name} watched`
+                        }
+                        {...(Platform.OS === "web"
+                          ? {
+                              title: allWatched
+                                ? `Unmark ${season.name} watched`
+                                : `Mark ${season.name} watched`,
+                            }
+                          : null)}
                         onPress={() => {
                           if (!hasAvailableEpisodes) {
                             return;
@@ -387,8 +401,22 @@ function EpisodeGuideComponent({
                     return (
                       <Pressable
                         key={episode.id}
-                        className="active:opacity-80"
+                        className="web:transition-opacity active:opacity-80 hover:opacity-90"
                         style={{ width: 144 }}
+                        // Web: the card contains the watched-toggle button, and
+                        // HTML forbids nested <button> elements — keep the
+                        // RNW default (focusable div) there.
+                        accessibilityRole={
+                          Platform.OS === "web" ? undefined : "button"
+                        }
+                        // Web only: an aria-label for the card link. Native
+                        // keeps VoiceOver's derived announcement (title, air
+                        // date, meta) instead of overriding it.
+                        accessibilityLabel={
+                          Platform.OS === "web"
+                            ? `Open ${episodeKey}: ${episode.name}`
+                            : undefined
+                        }
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                           onSelectEpisode(season.name, season.season_number, episode);
@@ -447,6 +475,22 @@ function EpisodeGuideComponent({
                                   justifyContent: "center",
                                   width: 22,
                                 }}
+                                accessibilityRole="button"
+                                accessibilityLabel={
+                                  isWatched
+                                    ? `Unmark ${episodeKey} watched`
+                                    : `Mark ${episodeKey} watched`
+                                }
+                                // Pointer targets get a little extra reach on
+                                // web; touch hit areas are unchanged.
+                                {...(Platform.OS === "web"
+                                  ? {
+                                      title: isWatched
+                                        ? `Unmark ${episodeKey} watched`
+                                        : `Mark ${episodeKey} watched`,
+                                      hitSlop: 6,
+                                    }
+                                  : null)}
                                 onPress={(event) => {
                                   event.stopPropagation();
                                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

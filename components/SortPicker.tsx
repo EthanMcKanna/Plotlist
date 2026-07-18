@@ -20,8 +20,10 @@ export function SortPicker({ options, value, onChange }: SortPickerProps) {
           <Pressable
             key={option.value}
             onPress={() => onChange(option.value)}
-            className={`flex-1 items-center justify-center rounded-lg px-3 py-2 ${
-              isSelected ? "bg-dark-card" : ""
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            className={`flex-1 items-center justify-center rounded-lg px-3 py-2 web:transition-colors ${
+              isSelected ? "bg-dark-card" : "hover:bg-white/5"
             }`}
           >
             <Text

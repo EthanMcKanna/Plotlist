@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useMemo, type ReactElement } from "react";
+import { Platform, Text, View } from "react-native";
+import { Link, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -8,8 +8,10 @@ import { api } from "../../lib/plotlist/api";
 import { Screen } from "../../components/Screen";
 import { Avatar } from "../../components/Avatar";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
+import { LinkPressable } from "../../components/LinkPressable";
 import { formatWatchTimeLabel } from "../../lib/format";
 import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
+import { useIsDesktopWeb } from "../../lib/webLayout";
 import type { WatchInsights } from "../../lib/watchInsights";
 
 type MenuItemDef = {
@@ -29,14 +31,27 @@ function pressWithHaptic(action: () => void) {
   };
 }
 
+// Web-only real-link wrapper for pressables that can't become LinkPressable
+// (GlassPressable owns its surface); native renders the child untouched.
+function MaybeLink({ href, children }: { href: Href; children: ReactElement }) {
+  if (Platform.OS !== "web") {
+    return children;
+  }
+  return (
+    <Link href={href} asChild push>
+      {children}
+    </Link>
+  );
+}
+
 function StatButton({
   label,
   value,
-  onPress,
+  href,
 }: {
   label: string;
   value: number;
-  onPress?: () => void;
+  href?: Href;
 }) {
   const content = (
     <>
@@ -49,14 +64,15 @@ function StatButton({
     </>
   );
 
-  if (onPress) {
+  if (href) {
     return (
-      <Pressable
-        onPress={pressWithHaptic(onPress)}
-        className="flex-1 items-center py-3 active:opacity-70"
+      <LinkPressable
+        href={href}
+        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        className="flex-1 items-center py-3 web:transition-opacity active:opacity-70 hover:opacity-70"
       >
         {content}
-      </Pressable>
+      </LinkPressable>
     );
   }
   return <View className="flex-1 items-center py-3">{content}</View>;
@@ -66,11 +82,12 @@ function StatDivider() {
   return <View className="my-3 w-px self-stretch bg-dark-border" />;
 }
 
-function MenuRow({ item, isLast, onPress }: { item: MenuItemDef; isLast: boolean; onPress: () => void }) {
+function MenuRow({ item, isLast }: { item: MenuItemDef; isLast: boolean }) {
   return (
-    <Pressable
-      onPress={pressWithHaptic(onPress)}
-      className={`flex-row items-center gap-3 px-4 py-3.5 active:bg-dark-hover ${
+    <LinkPressable
+      href={item.route as Href}
+      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+      className={`flex-row items-center gap-3 px-4 py-3.5 web:transition-colors active:bg-dark-hover hover:bg-dark-hover ${
         isLast ? "" : "border-b border-dark-border"
       }`}
     >
@@ -89,12 +106,13 @@ function MenuRow({ item, isLast, onPress }: { item: MenuItemDef; isLast: boolean
         </Text>
       ) : null}
       <Ionicons name="chevron-forward" size={15} color="#5A6070" />
-    </Pressable>
+    </LinkPressable>
   );
 }
 
 export default function ProfileTab() {
   const router = useRouter();
+  const isDesktopWeb = useIsDesktopWeb();
   const me = useQuery(api.users.me);
   const avatarUrl = useQuery(
     api.storage.getUrl,
@@ -173,13 +191,15 @@ export default function ProfileTab() {
 
   return (
     <Screen scroll hasTabBar>
-      <View className="px-6 pb-24 pt-4">
+      {/* Desktop web has no floating tab bar to clear. */}
+      <View className={`px-6 pt-4 ${isDesktopWeb ? "pb-10" : "pb-24"}`}>
         {/* ── Identity ── */}
         <GlassSurface radius={16} variant="surface" contentStyle={{ padding: 20 }}>
-          <Pressable
-            onPress={pressWithHaptic(() => router.push(`/profile/${me?._id ?? ""}`))}
+          <LinkPressable
+            href={`/profile/${me?._id ?? ""}`}
+            onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
             disabled={!me}
-            className="flex-row items-center gap-4 active:opacity-80"
+            className="flex-row items-center gap-4 web:transition-opacity active:opacity-80 hover:opacity-90"
           >
             <Avatar uri={avatarUrl} label={displayName} size={72} />
             <View className="flex-1">
@@ -196,7 +216,7 @@ export default function ProfileTab() {
                 <Ionicons name="chevron-forward" size={11} color="#38bdf8" />
               </View>
             </View>
-          </Pressable>
+          </LinkPressable>
           {me?.bio ? (
             <Text className="mt-4 text-sm leading-5 text-text-secondary" numberOfLines={3}>
               {me.bio}
@@ -214,13 +234,13 @@ export default function ProfileTab() {
           <StatButton
             label="Followers"
             value={counts.followers}
-            onPress={() => router.push(`/followers/${me?._id ?? ""}`)}
+            href={`/followers/${me?._id ?? ""}`}
           />
           <StatDivider />
           <StatButton
             label="Following"
             value={counts.following}
-            onPress={() => router.push(`/following/${me?._id ?? ""}`)}
+            href={`/following/${me?._id ?? ""}`}
           />
           <StatDivider />
           <StatButton label="Shows" value={counts.shows} />
@@ -230,42 +250,50 @@ export default function ProfileTab() {
 
         {/* ── Watch stats ── */}
         {insights && insights.totals.episodes > 0 && time ? (
-          <GlassPressable
-            onPress={pressWithHaptic(() => router.push("/me/stats"))}
-            radius={16}
-            // Content-layer card: solid tinted surface, no Liquid Glass.
-            variant="surface"
-            fallbackColor="rgba(14,165,233,0.20)"
-            borderColor="rgba(125,211,252,0.28)"
-            style={{ marginTop: 12 }}
-            contentStyle={{ padding: 18 }}
-          >
-            <View className="flex-row items-center justify-between">
-              <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
-                Watch stats
-              </Text>
-              <View className="flex-row items-center gap-1">
-                <Text className="text-xs font-semibold text-sky-100">See all</Text>
-                <Ionicons name="chevron-forward" size={13} color="#E0F2FE" />
-              </View>
-            </View>
-            <View className="mt-3 flex-row items-end justify-between">
-              <View>
-                <Text className="text-3xl font-black text-white">{time.value}</Text>
-                <Text className="mt-1 text-xs text-sky-100/70">watched all time</Text>
-              </View>
-              <View className="items-end">
-                <Text className="text-sm font-semibold text-sky-100">
-                  {insights.totals.episodes.toLocaleString()} episodes
+          // On web, Link wraps the glass card in a real <a href> (cmd/middle
+          // -click work); native keeps the exact GlassPressable press flow.
+          <MaybeLink href="/me/stats">
+            <GlassPressable
+              onPress={
+                Platform.OS === "web"
+                  ? undefined
+                  : pressWithHaptic(() => router.push("/me/stats"))
+              }
+              radius={16}
+              // Content-layer card: solid tinted surface, no Liquid Glass.
+              variant="surface"
+              fallbackColor="rgba(14,165,233,0.20)"
+              borderColor="rgba(125,211,252,0.28)"
+              style={{ marginTop: 12 }}
+              contentStyle={{ padding: 18 }}
+            >
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
+                  Watch stats
                 </Text>
-                <Text className="mt-0.5 text-xs text-sky-100/70">
-                  {insights.streaks.current > 0
-                    ? `${insights.streaks.current}-day streak`
-                    : `${insights.totals.shows.toLocaleString()} shows tracked`}
-                </Text>
+                <View className="flex-row items-center gap-1">
+                  <Text className="text-xs font-semibold text-sky-100">See all</Text>
+                  <Ionicons name="chevron-forward" size={13} color="#E0F2FE" />
+                </View>
               </View>
-            </View>
-          </GlassPressable>
+              <View className="mt-3 flex-row items-end justify-between">
+                <View>
+                  <Text className="text-3xl font-black text-white">{time.value}</Text>
+                  <Text className="mt-1 text-xs text-sky-100/70">watched all time</Text>
+                </View>
+                <View className="items-end">
+                  <Text className="text-sm font-semibold text-sky-100">
+                    {insights.totals.episodes.toLocaleString()} episodes
+                  </Text>
+                  <Text className="mt-0.5 text-xs text-sky-100/70">
+                    {insights.streaks.current > 0
+                      ? `${insights.streaks.current}-day streak`
+                      : `${insights.totals.shows.toLocaleString()} shows tracked`}
+                  </Text>
+                </View>
+              </View>
+            </GlassPressable>
+          </MaybeLink>
         ) : null}
 
         {/* ── Library ── */}
@@ -279,7 +307,6 @@ export default function ProfileTab() {
                 key={item.route}
                 item={item}
                 isLast={index === libraryItems.length - 1}
-                onPress={() => router.push(item.route as any)}
               />
             ))}
           </GlassSurface>
@@ -297,7 +324,6 @@ export default function ProfileTab() {
                 route: "/settings",
               }}
               isLast
-              onPress={() => router.push("/settings")}
             />
           </GlassSurface>
         </View>

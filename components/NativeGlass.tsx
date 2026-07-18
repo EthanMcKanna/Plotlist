@@ -180,29 +180,58 @@ export function GlassPressable({
   fallbackColor?: string;
   borderColor?: string;
 }) {
+  const surface = (hovered: boolean, pressed: boolean) => (
+    <GlassSurface
+      radius={radius}
+      variant={variant}
+      glassEffectStyle={glassEffectStyle}
+      tintColor={tintColor}
+      fallbackColor={fallbackColor}
+      borderColor={borderColor}
+      interactive={!disabled}
+      style={surfaceStyle}
+      contentStyle={contentStyle}
+    >
+      {children}
+      {Platform.OS === "web" && !disabled ? (
+        // Pointer feedback for every glass control on web; never rendered
+        // on native, where glass has its own press treatment.
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            styles.webHoverOverlay,
+            { opacity: pressed ? 0.09 : hovered ? 0.055 : 0 },
+          ]}
+        />
+      ) : null}
+    </GlassSurface>
+  );
+
+  if (Platform.OS !== "web") {
+    return (
+      <Pressable
+        {...pressableProps}
+        disabled={disabled}
+        style={typeof style === "function" ? style : [styles.pressable, style]}
+      >
+        {surface(false, false)}
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       {...pressableProps}
       disabled={disabled}
-      style={
-        typeof style === "function"
-          ? style
-          : [styles.pressable, style]
-      }
+      style={typeof style === "function" ? style : [styles.pressable, style]}
     >
-      <GlassSurface
-        radius={radius}
-        variant={variant}
-        glassEffectStyle={glassEffectStyle}
-        tintColor={tintColor}
-        fallbackColor={fallbackColor}
-        borderColor={borderColor}
-        interactive={!disabled}
-        style={surfaceStyle}
-        contentStyle={contentStyle}
-      >
-        {children}
-      </GlassSurface>
+      {(state) =>
+        surface(
+          Boolean((state as { hovered?: boolean }).hovered),
+          state.pressed,
+        )
+      }
     </Pressable>
   );
 }
@@ -211,6 +240,13 @@ const styles = StyleSheet.create({
   pressable: {
     transform: [{ scale: 1 }],
   },
+  webHoverOverlay: {
+    backgroundColor: "#FFFFFF",
+    // react-native-web maps these to CSS transitions; unknown on native,
+    // but this branch never renders there.
+    transitionDuration: "120ms",
+    transitionProperty: "opacity",
+  } as ViewStyle,
   surface: {
     borderCurve: "continuous",
     borderWidth: StyleSheet.hairlineWidth,

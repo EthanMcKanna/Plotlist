@@ -6,6 +6,7 @@ import { usePaginatedQuery, useQuery } from "../../../lib/plotlist/react";
 
 import { Screen } from "../../../components/Screen";
 import { EmptyState } from "../../../components/EmptyState";
+import { PageTitle } from "../../../components/PageTitle";
 import { UserListSkeleton } from "../../../components/UserListSkeleton";
 import { UserRow } from "../../../components/UserRow";
 import { api } from "../../../lib/plotlist/api";
@@ -51,6 +52,7 @@ export default function MutualFollowersScreen() {
 
   return (
     <Screen>
+      <PageTitle title="Mutuals" />
       <View className="flex-1 px-6 pt-6">
         <Text className="text-2xl font-semibold text-text-primary">Mutuals</Text>
         <Text className="mt-1 text-sm text-text-tertiary">

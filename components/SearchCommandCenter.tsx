@@ -1,6 +1,7 @@
 import type { ComponentProps, RefObject } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -61,10 +62,16 @@ function ScopeToken({
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel={`Exit ${meta.label.toLowerCase()} search`}
-      style={[
+      {...(Platform.OS === "web"
+        ? { title: `Exit ${meta.label.toLowerCase()} search` }
+        : null)}
+      style={(state) => [
         styles.scopeToken,
         {
-          backgroundColor: withAlpha(meta.accent, 0.14),
+          backgroundColor: withAlpha(
+            meta.accent,
+            Platform.OS === "web" && (state as any).hovered ? 0.22 : 0.14,
+          ),
           borderColor: withAlpha(meta.accent, 0.42),
         },
       ]}
@@ -115,7 +122,12 @@ function ScopeAction({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      style={styles.scopeAction}
+      style={(state) => [
+        styles.scopeAction,
+        Platform.OS === "web" && (state as any).hovered
+          ? styles.scopeActionHovered
+          : null,
+      ]}
       className="active:opacity-75"
     >
       <View
@@ -218,6 +230,20 @@ export function SearchCommandCenter({
           returnKeyType="search"
           autoCorrect={false}
           autoCapitalize="none"
+          // Web: Escape clears the query; a second Escape (empty field)
+          // dismisses the scope token back to show search.
+          {...(Platform.OS === "web"
+            ? {
+                onKeyPress: (event: { nativeEvent: { key: string } }) => {
+                  if (event.nativeEvent.key !== "Escape") return;
+                  if (query.length > 0) {
+                    onClear();
+                  } else if (mode !== "shows") {
+                    onModeChange("shows");
+                  }
+                },
+              }
+            : null)}
         />
         {query.length > 0 ? (
           <View style={styles.trailingControls}>
@@ -240,7 +266,13 @@ export function SearchCommandCenter({
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Clear search"
-              style={styles.clearButton}
+              {...(Platform.OS === "web" ? { title: "Clear search" } : null)}
+              style={(state) => [
+                styles.clearButton,
+                Platform.OS === "web" && (state as any).hovered
+                  ? styles.clearButtonHovered
+                  : null,
+              ]}
               className="active:opacity-70"
             >
               <Ionicons
@@ -296,6 +328,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 32,
   },
+  clearButtonHovered: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
   container: {
     gap: 10,
   },
@@ -311,6 +346,9 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 11,
     paddingVertical: 8,
+  },
+  scopeActionHovered: {
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   scopeActionIcon: {
     alignItems: "center",

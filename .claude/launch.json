@@ -45,6 +45,15 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "dev", "--port", "3001"],
       "port": 3001
+    },
+    {
+      "name": "rewatch-worktree-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/ethanmckanna/GitHub/Plotlist/.claude/worktrees/rewatch-logging && EXPO_PUBLIC_API_URL=http://localhost:3002 npx expo start --web --port 8093"
+      ],
+      "port": 8093
     }
   ]
 }

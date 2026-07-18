@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -16,6 +17,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as Haptics from "expo-haptics";
+
+import { useIsDesktopWeb } from "../lib/webLayout";
 
 // Crop box tracks the viewport but is capped so desktop web (and resizes)
 // keep a sensible circle; phone sizes are unchanged (width - 80 < 400).
@@ -45,8 +48,13 @@ export function AvatarCropModal({
 }: Props) {
   const [cropping, setCropping] = useState(false);
   const { width: screenW, height: screenH } = useWindowDimensions();
-  const CROP_SIZE = Math.min(screenW - 80, MAX_CROP_SIZE);
+  // Centered dialog on desktop web and wide iPad windows; phones keep the
+  // fullscreen slide-up takeover.
+  const isWideLayout = useIsDesktopWeb();
+  const containerW = isWideLayout ? Math.min(screenW - 48, 560) : screenW;
+  const CROP_SIZE = Math.min(containerW - 80, MAX_CROP_SIZE);
   const OVERLAY_BORDER = Math.max(screenW, screenH);
+  const cropAreaRef = useRef<View>(null);
 
   const baseScale =
     imageWidth > 0 && imageHeight > 0
@@ -75,6 +83,30 @@ export function AvatarCropModal({
       savedTY.value = 0;
     }
   }, [visible, imageUri, scale, savedScale, translateX, translateY, savedTX, savedTY]);
+
+  // Web-only wheel-to-zoom: mice have no pinch gesture. Drives the same
+  // shared values as the pinch, with the same >=1 floor and pan clamping.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !visible) return;
+    const node = cropAreaRef.current as unknown as HTMLElement | null;
+    if (!node || typeof node.addEventListener !== "function") return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const next = Math.max(1, scale.value * Math.exp(-event.deltaY * 0.002));
+      scale.value = next;
+      savedScale.value = next;
+      const maxTX = Math.max(0, (imgW * bScale * next - cropSz) / 2);
+      const maxTY = Math.max(0, (imgH * bScale * next - cropSz) / 2);
+      const clampedX = clamp(translateX.value, -maxTX, maxTX);
+      const clampedY = clamp(translateY.value, -maxTY, maxTY);
+      translateX.value = clampedX;
+      translateY.value = clampedY;
+      savedTX.value = clampedX;
+      savedTY.value = clampedY;
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [visible, imgW, imgH, bScale, cropSz, scale, savedScale, translateX, translateY, savedTX, savedTY]);
 
   const pinch = Gesture.Pinch()
     .onUpdate((e) => {
@@ -186,89 +218,115 @@ export function AvatarCropModal({
   if (!imageUri) return null;
 
   const overlayTotal = CROP_SIZE + OVERLAY_BORDER * 2;
+  // Dialog crop area is a fixed box with the circle centered; fullscreen
+  // keeps the original screen-derived circle position.
+  const cropAreaH = CROP_SIZE + 48;
+  const circleLeft = (containerW - CROP_SIZE) / 2;
+  const circleTop = isWideLayout ? (cropAreaH - CROP_SIZE) / 2 : screenH * 0.42 - CROP_SIZE / 2;
+
+  const body = (
+    <View
+      style={
+        isWideLayout ? [styles.dialogPanel, { width: containerW }] : styles.container
+      }
+    >
+      {/* Header */}
+      <View style={[styles.header, isWideLayout ? styles.headerDialog : null]}>
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onCancel();
+          }}
+          hitSlop={12}
+          disabled={cropping}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel cropping"
+        >
+          <Text style={styles.headerButton}>Cancel</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>Crop Photo</Text>
+        <Pressable
+          onPress={handleCrop}
+          hitSlop={12}
+          disabled={cropping}
+          accessibilityRole="button"
+          accessibilityLabel="Crop and use photo"
+        >
+          {cropping ? (
+            <ActivityIndicator color="#0ea5e9" size="small" />
+          ) : (
+            <Text style={[styles.headerButton, styles.headerDone]}>Done</Text>
+          )}
+        </Pressable>
+      </View>
+
+      {/* Crop area */}
+      <View
+        ref={cropAreaRef}
+        style={[
+          styles.cropContainer,
+          isWideLayout ? { flex: 0, height: cropAreaH } : null,
+        ]}
+      >
+        <GestureDetector gesture={composed}>
+          <Animated.Image
+            source={{ uri: imageUri }}
+            style={animatedStyle}
+            resizeMode="cover"
+          />
+        </GestureDetector>
+
+        {/* Circular mask overlay */}
+        <View style={[StyleSheet.absoluteFill, styles.pointerNone]}>
+          <View
+            style={[
+              styles.maskOverlay,
+              {
+                width: overlayTotal,
+                height: overlayTotal,
+                borderRadius: overlayTotal / 2,
+                borderWidth: OVERLAY_BORDER,
+                left: circleLeft - OVERLAY_BORDER,
+                top: circleTop - OVERLAY_BORDER,
+              },
+            ]}
+          />
+          {/* Circle outline */}
+          <View
+            style={[
+              styles.circleOutline,
+              {
+                width: CROP_SIZE,
+                height: CROP_SIZE,
+                borderRadius: CROP_SIZE / 2,
+                left: circleLeft,
+                top: circleTop,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
+      {/* Footer hint */}
+      <View style={[styles.footer, isWideLayout ? styles.footerDialog : null]}>
+        <Text style={styles.footerText}>
+          {Platform.OS === "web"
+            ? "Scroll to zoom, drag to reposition"
+            : "Pinch to zoom, drag to reposition"}
+        </Text>
+      </View>
+    </View>
+  );
 
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
+      animationType={isWideLayout ? "fade" : "slide"}
+      transparent={isWideLayout}
+      presentationStyle={isWideLayout ? "overFullScreen" : "fullScreen"}
       onRequestClose={onCancel}
     >
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onCancel();
-            }}
-            hitSlop={12}
-            disabled={cropping}
-          >
-            <Text style={styles.headerButton}>Cancel</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>Crop Photo</Text>
-          <Pressable
-            onPress={handleCrop}
-            hitSlop={12}
-            disabled={cropping}
-          >
-            {cropping ? (
-              <ActivityIndicator color="#0ea5e9" size="small" />
-            ) : (
-              <Text style={[styles.headerButton, styles.headerDone]}>Done</Text>
-            )}
-          </Pressable>
-        </View>
-
-        {/* Crop area */}
-        <View style={styles.cropContainer}>
-          <GestureDetector gesture={composed}>
-            <Animated.Image
-              source={{ uri: imageUri }}
-              style={animatedStyle}
-              resizeMode="cover"
-            />
-          </GestureDetector>
-
-          {/* Circular mask overlay */}
-          <View style={[StyleSheet.absoluteFill, styles.pointerNone]}>
-            <View
-              style={[
-                styles.maskOverlay,
-                {
-                  width: overlayTotal,
-                  height: overlayTotal,
-                  borderRadius: overlayTotal / 2,
-                  borderWidth: OVERLAY_BORDER,
-                  left: (screenW - CROP_SIZE) / 2 - OVERLAY_BORDER,
-                  top: (screenH * 0.42 - CROP_SIZE / 2) - OVERLAY_BORDER,
-                },
-              ]}
-            />
-            {/* Circle outline */}
-            <View
-              style={[
-                styles.circleOutline,
-                {
-                  width: CROP_SIZE,
-                  height: CROP_SIZE,
-                  borderRadius: CROP_SIZE / 2,
-                  left: (screenW - CROP_SIZE) / 2,
-                  top: screenH * 0.42 - CROP_SIZE / 2,
-                },
-              ]}
-            />
-          </View>
-        </View>
-
-        {/* Footer hint */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            Pinch to zoom, drag to reposition
-          </Text>
-        </View>
-      </View>
+      {isWideLayout ? <View style={styles.dialogBackdrop}>{body}</View> : body}
     </Modal>
   );
 }
@@ -278,6 +336,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0D0F14",
   },
+  dialogBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    flex: 1,
+    justifyContent: "center",
+  },
+  dialogPanel: {
+    backgroundColor: "#0D0F14",
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: 24,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -285,6 +356,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 16,
+  },
+  headerDialog: {
+    paddingTop: 20,
   },
   headerButton: {
     fontSize: 17,
@@ -320,6 +394,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingBottom: 48,
     paddingTop: 16,
+  },
+  footerDialog: {
+    paddingBottom: 24,
   },
   footerText: {
     fontSize: 14,

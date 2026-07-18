@@ -29,7 +29,9 @@ export function StatCard({ icon, label, count, onPress }: StatCardProps) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onPress();
         }}
-        className="flex-1 active:opacity-80"
+        accessibilityRole="button"
+        accessibilityLabel={`${count} ${label}`}
+        className="flex-1 active:opacity-80 hover:opacity-80 web:transition-opacity"
       >
         {content}
       </Pressable>

@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -23,6 +24,7 @@ import * as Haptics from "expo-haptics";
 
 import { EmptyState } from "../../components/EmptyState";
 import { GenreExplorer } from "../../components/GenreExplorer";
+import { LinkPressable } from "../../components/LinkPressable";
 import { PeopleDiscovery } from "../../components/PeopleDiscovery";
 import { RailSkeleton } from "../../components/RailSkeleton";
 import { Screen } from "../../components/Screen";
@@ -33,6 +35,7 @@ import {
 import { SearchDiscoveryRail } from "../../components/SearchDiscoveryRail";
 import { SearchResultRow } from "../../components/SearchResultRow";
 import { api } from "../../lib/plotlist/api";
+import { notifyError } from "../../lib/dialogs";
 import {
   SEARCH_DISCOVER_SECTIONS,
   buildSearchDiscoverSections,
@@ -51,6 +54,7 @@ import {
 } from "../../lib/searchExperience";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import { queryClient } from "../../lib/queryClient";
+import { useIsDesktopWeb } from "../../lib/webLayout";
 import { FACET_DEFS } from "../../lib/plotlist/facets";
 
 const SHOW_QUERY_MIN_LENGTH = 3;
@@ -102,6 +106,11 @@ export function getSearchSectionAccent(
     DISCOVER_ACCENTS[section.key] ??
     ["#38BDF8", "#22C55E", "#F59E0B", "#F472B6"][index % 4]
   );
+}
+
+function getVibeShowId(item: any): string | null {
+  const showId = item?.show?._id ?? item?.show?.id ?? item?._id;
+  return showId ? String(showId) : null;
 }
 
 /* ─── Section Header ───────────────────────────────────────────────── */
@@ -216,11 +225,19 @@ export default function SearchScreen() {
   const hasProfile = Boolean(me?._id);
   const params = useLocalSearchParams();
   const inputRef = useRef<TextInput>(null);
+  const isDesktopWeb = useIsDesktopWeb();
+
+  // Web deep-links carry the query in the URL (?q=); start from it so reload,
+  // back, and shared links restore the search. Native params never carry q.
+  const initialQueryParam =
+    Platform.OS === "web" && typeof params.q === "string" ? params.q : "";
 
   const [mode, setMode] = useState<SearchMode>("shows");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQueryParam);
   const trimmedQuery = getTrimmedSearchQuery(query);
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState(
+    getTrimmedSearchQuery(initialQueryParam),
+  );
   const [vibeResults, setVibeResults] = useState<any[]>([]);
   const [vibeResultsQuery, setVibeResultsQuery] = useState("");
   const [isSearchingVibe, setIsSearchingVibe] = useState(false);
@@ -301,6 +318,27 @@ export default function SearchScreen() {
     else if (modeParam === "vibe") setMode("vibe");
     else if (modeParam === "shows") setMode("shows");
   }, [modeParam]);
+
+  // Web: mirror the search into the URL (?q=&mode=) so reload, back, and
+  // shared links restore it. The transient focus param (from Cmd+K / the
+  // home top bar) is dropped so it never rides along in copied URLs.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    router.setParams({
+      q: debouncedQuery.length > 0 ? debouncedQuery : undefined,
+      mode: mode === "shows" ? undefined : mode,
+      focus: undefined,
+    });
+  }, [debouncedQuery, mode, router]);
+
+  // Desktop web: search is keyboard-first, so the field is ready on arrival
+  // (native waits for the explicit focus param below).
+  const didAutoFocusRef = useRef(false);
+  useEffect(() => {
+    if (!isDesktopWeb || didAutoFocusRef.current) return;
+    didAutoFocusRef.current = true;
+    inputRef.current?.focus();
+  }, [isDesktopWeb]);
 
   // Entry points (e.g. the home top bar) pass a fresh `focus` value so the
   // keyboard opens as soon as the screen settles.
@@ -528,6 +566,11 @@ export default function SearchScreen() {
   const handleAddFromCatalog = useCallback(
     async (item: any) => {
       if (!isAuthenticated) {
+        // Web Alert is a silent stub; go straight to sign-in there instead.
+        if (Platform.OS === "web") {
+          router.push("/sign-in");
+          return;
+        }
         Alert.alert(
           "Sign in to add shows",
           "Create an account to add shows and track what you watch.",
@@ -571,17 +614,18 @@ export default function SearchScreen() {
         }
         guardedPush(`/show/${showId}`);
       } catch (error) {
-        Alert.alert("Could not add show", String(error));
+        notifyError("Could not add show", String(error));
       }
     },
     [ingestFromCatalog, isAuthenticated, router],
   );
 
   // Vibe results are always local shows (they came from our vector index),
-  // so navigation can seed the show query and push directly — no ingest.
-  const handlePressVibeResult = useCallback((item: any) => {
+  // so rows link straight to the show — no ingest. This seeds the show query
+  // so the detail hero paints immediately; LinkPressable owns the navigation.
+  const seedVibeResult = useCallback((item: any) => {
     const show = item?.show;
-    const showId = show?._id ?? show?.id ?? item?._id;
+    const showId = getVibeShowId(item);
     if (!showId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const showQueryKey = ["plotlist-rpc", "query", "shows:get", { showId }];
@@ -589,7 +633,6 @@ export default function SearchScreen() {
       queryClient.setQueryData(showQueryKey, { ...show, extendedDetails: null });
       void queryClient.invalidateQueries({ queryKey: showQueryKey });
     }
-    guardedPush(`/show/${showId}`);
   }, []);
 
   const handleVibePrompt = useCallback((prompt: string) => {
@@ -645,7 +688,8 @@ export default function SearchScreen() {
       keyboardShouldPersistTaps="always"
       webMaxWidth={960}
     >
-      <View style={{ paddingBottom: 100 }}>
+      {/* 100 clears the floating tab bar; desktop web has no tab bar. */}
+      <View style={{ paddingBottom: isDesktopWeb ? 24 : 100 }}>
         <View className="px-5 pt-2">
           <SearchCommandCenter
             mode={mode}
@@ -745,15 +789,22 @@ export default function SearchScreen() {
                       accessibilityRole="button"
                       accessibilityState={{ selected: isActive }}
                       className="rounded-full px-3 py-1.5"
-                      style={{
-                        backgroundColor: isActive
-                          ? "rgba(56,189,248,0.16)"
-                          : "rgba(255,255,255,0.06)",
-                        borderColor: isActive
-                          ? "rgba(56,189,248,0.55)"
-                          : "rgba(255,255,255,0.09)",
-                        borderWidth: StyleSheet.hairlineWidth,
-                      }}
+                      style={(state) => [
+                        {
+                          backgroundColor: isActive
+                            ? "rgba(56,189,248,0.16)"
+                            : "rgba(255,255,255,0.06)",
+                          borderColor: isActive
+                            ? "rgba(56,189,248,0.55)"
+                            : "rgba(255,255,255,0.09)",
+                          borderWidth: StyleSheet.hairlineWidth,
+                        },
+                        Platform.OS === "web" &&
+                        (state as any).hovered &&
+                        !isActive
+                          ? { backgroundColor: "rgba(255,255,255,0.1)" }
+                          : null,
+                      ]}
                     >
                       <Text
                         className="text-xs font-semibold"
@@ -868,15 +919,15 @@ export default function SearchScreen() {
                   ))}
                 </View>
 
-                <Pressable
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    guardedPush("/explore");
-                  }}
+                <LinkPressable
+                  href="/explore"
+                  onPress={() =>
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+                  }
                   accessibilityRole="button"
                   accessibilityLabel={`Browse all ${FACET_DEFS.length} categories`}
                   style={styles.browseAllRow}
-                  className="active:opacity-70"
+                  className="active:opacity-70 hover:opacity-90 web:transition-opacity"
                 >
                   <View style={styles.browseAllIcon}>
                     <Ionicons
@@ -906,7 +957,7 @@ export default function SearchScreen() {
                     aria-hidden={true}
                     importantForAccessibility="no"
                   />
-                </Pressable>
+                </LinkPressable>
               </View>
             ) : (
               <View>
@@ -933,18 +984,22 @@ export default function SearchScreen() {
                   <View style={{ opacity: isSearchingVibe ? 0.6 : 1 }}>
                     <FlashList
                       data={vibeResults}
-                      renderItem={({ item }: { item: any }) => (
-                        <View>
-                          <SearchResultRow
-                            title={item.show?.title ?? "Untitled"}
-                            year={item.show?.year}
-                            overview={item.show?.overview}
-                            posterUrl={item.show?.posterUrl}
-                            actionLabel="View"
-                            onPress={() => handlePressVibeResult(item)}
-                          />
-                        </View>
-                      )}
+                      renderItem={({ item }: { item: any }) => {
+                        const showId = getVibeShowId(item);
+                        return (
+                          <View>
+                            <SearchResultRow
+                              title={item.show?.title ?? "Untitled"}
+                              year={item.show?.year}
+                              overview={item.show?.overview}
+                              posterUrl={item.show?.posterUrl}
+                              actionLabel="View"
+                              href={showId ? `/show/${showId}` : undefined}
+                              onPress={() => seedVibeResult(item)}
+                            />
+                          </View>
+                        );
+                      }}
                       keyExtractor={(item: any) => String(item._id ?? item.show?._id)}
                       estimatedItemSize={132}
                       contentContainerStyle={listContentStyle}

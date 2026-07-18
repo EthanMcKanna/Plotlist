@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +11,7 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { Link } from "expo-router";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -44,9 +45,13 @@ const POSTER_GAP = 14;
 const WIDE_BREAKPOINT = 920;
 const CONTENT_MAX_WIDTH = 1080;
 
-function goToSignIn() {
-  router.push("/sign-in");
-}
+// Honor the OS-level reduced-motion preference: the marquee rows render as a
+// static wall instead of looping.
+const prefersReducedMotion =
+  Platform.OS === "web" &&
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ── Marquee poster rows ──────────────────────────────────────────────────
 
@@ -67,6 +72,7 @@ function MarqueeRow({
 
   useEffect(() => {
     tx.value = start;
+    if (prefersReducedMotion) return;
     tx.value = withRepeat(
       withTiming(end, { duration, easing: Easing.linear }),
       -1,
@@ -132,36 +138,38 @@ function BrandMark({ size = 30 }: { size?: number }) {
 
 function PrimaryCta({ label, large }: { label: string; large?: boolean }) {
   return (
-    <Pressable
-      onPress={goToSignIn}
-      accessibilityRole="link"
-      accessibilityLabel={label}
-      className="items-center justify-center rounded-full bg-brand-400 transition-opacity hover:opacity-90 active:opacity-80"
-      style={large ? styles.ctaLarge : styles.ctaSmall}
-    >
-      <Text
-        className="font-bold text-text-inverse"
-        style={{ fontSize: large ? 17 : 15 }}
+    <Link href="/sign-in" asChild>
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={label}
+        className="items-center justify-center rounded-full bg-brand-400 web:transition-opacity hover:opacity-90 active:opacity-80"
+        style={large ? styles.ctaLarge : styles.ctaSmall}
       >
-        {label}
-      </Text>
-    </Pressable>
+        <Text
+          className="font-bold text-text-inverse"
+          style={{ fontSize: large ? 17 : 15 }}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    </Link>
   );
 }
 
 function GhostCta({ label }: { label: string }) {
   return (
-    <Pressable
-      onPress={goToSignIn}
-      accessibilityRole="link"
-      accessibilityLabel={label}
-      className="items-center justify-center rounded-full border border-white/15 transition-colors hover:bg-white/5 active:bg-white/10"
-      style={styles.ctaSmall}
-    >
-      <Text className="text-[15px] font-semibold text-text-primary">
-        {label}
-      </Text>
-    </Pressable>
+    <Link href="/sign-in" asChild>
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={label}
+        className="items-center justify-center rounded-full border border-white/15 web:transition-colors hover:bg-white/5 active:bg-white/10"
+        style={styles.ctaSmall}
+      >
+        <Text className="text-[15px] font-semibold text-text-primary">
+          {label}
+        </Text>
+      </Pressable>
+    </Link>
   );
 }
 
@@ -857,16 +865,13 @@ function Footer() {
             { label: "Guidelines", href: "/legal/guidelines" },
             { label: "Sign in", href: "/sign-in" },
           ].map((link) => (
-            <Pressable
-              key={link.label}
-              onPress={() => router.push(link.href as never)}
-              accessibilityRole="link"
-              className="hover:opacity-80"
-            >
-              <Text className="text-[13px] font-medium text-text-tertiary">
-                {link.label}
-              </Text>
-            </Pressable>
+            <Link key={link.label} href={link.href as never} asChild>
+              <Pressable accessibilityRole="link" className="hover:opacity-80">
+                <Text className="text-[13px] font-medium text-text-tertiary">
+                  {link.label}
+                </Text>
+              </Pressable>
+            </Link>
           ))}
         </View>
         <Text className="text-[12.5px] text-text-tertiary">
@@ -883,7 +888,10 @@ export function LandingPage() {
 
   return (
     <View style={styles.root}>
-      <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={Platform.OS !== "web"}
+        bounces={false}
+      >
         <Hero isWide={isWide} />
         <View style={[styles.content, { maxWidth: CONTENT_MAX_WIDTH }]}>
           {FEATURES.map((feature, index) => (

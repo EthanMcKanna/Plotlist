@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   Text,
   TextInput,
@@ -12,9 +13,11 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { Avatar } from "./Avatar";
 import { CommentContextMenu } from "./CommentContextMenu";
+import { LinkPressable } from "./LinkPressable";
 import { ReportModal } from "./ReportModal";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
+import { confirmAction, notify, notifyError, promptSignIn } from "../lib/dialogs";
 import { guardedPush } from "../lib/navigation";
 import { formatRelativeTime } from "../lib/format";
 import { getUserFacingApiErrorMessage } from "../lib/api/client";
@@ -124,7 +127,7 @@ export function useCommentThread(
     (commentId: string) => {
       setReplyTo((current) => (current?.comment._id === commentId ? null : current));
       remove({ commentId }).catch(() => {
-        Alert.alert("Couldn't delete comment", "Check your connection and try again.");
+        notifyError("Couldn't delete comment", "Check your connection and try again.");
       });
     },
     [remove],
@@ -133,7 +136,11 @@ export function useCommentThread(
   const likeComment = useCallback(
     (commentId: string) => {
       if (!isAuthenticated) {
-        Alert.alert("Sign in required", "Sign in to like comments.");
+        if (Platform.OS === "web") {
+          promptSignIn("Sign in to like comments.");
+        } else {
+          Alert.alert("Sign in required", "Sign in to like comments.");
+        }
         return;
       }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -195,21 +202,25 @@ function CommentRow({
   }, [author?._id]);
 
   const confirmDelete = useCallback(() => {
-    Alert.alert(
-      "Delete comment?",
-      replies.length > 0 ? "Its replies will be deleted too. This can't be undone." : "This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => removeComment(comment._id) },
-      ],
-    );
+    confirmAction({
+      title: "Delete comment?",
+      message:
+        replies.length > 0 ? "Its replies will be deleted too. This can't be undone." : "This can't be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => removeComment(comment._id),
+    });
   }, [comment._id, removeComment, replies.length]);
 
   const reportComment = useCallback(() => onReport(comment._id), [comment._id, onReport]);
 
   const startReply = useCallback(() => {
     if (!isAuthenticated) {
-      Alert.alert("Sign in required", "Sign in to join the conversation.");
+      if (Platform.OS === "web") {
+        promptSignIn("Sign in to join the conversation.");
+      } else {
+        Alert.alert("Sign in required", "Sign in to join the conversation.");
+      }
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -233,20 +244,41 @@ function CommentRow({
             isReplyTarget ? "rounded-xl bg-dark-card" : ""
           }`}
         >
-          <Pressable onPress={openProfile} disabled={!author?._id} className="active:opacity-80">
+          {author?._id ? (
+            <LinkPressable
+              href={`/profile/${author._id}`}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              className="web:transition-opacity active:opacity-80 hover:opacity-80"
+            >
+              <Avatar uri={author.avatarUrl} label={label} size={depth > 0 ? 26 : 32} />
+            </LinkPressable>
+          ) : (
             <Avatar uri={author?.avatarUrl} label={label} size={depth > 0 ? 26 : 32} />
-          </Pressable>
+          )}
           <View className="flex-1">
             <View className="flex-row items-baseline gap-1.5">
-              <Pressable
-                onPress={openProfile}
-                disabled={!author?._id}
-                className="shrink active:opacity-80"
-              >
-                <Text className="text-[13px] font-semibold text-text-primary" numberOfLines={1}>
+              {author?._id ? (
+                <LinkPressable
+                  href={`/profile/${author._id}`}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  className="shrink web:transition-opacity active:opacity-80 hover:opacity-80"
+                >
+                  <Text className="text-[13px] font-semibold text-text-primary" numberOfLines={1}>
+                    {label}
+                  </Text>
+                </LinkPressable>
+              ) : (
+                <Text
+                  className="shrink text-[13px] font-semibold text-text-primary"
+                  numberOfLines={1}
+                >
                   {label}
                 </Text>
-              </Pressable>
+              )}
               <Text className="text-[11px] text-text-tertiary">
                 {pending ? "Posting…" : formatRelativeTime(comment.createdAt)}
               </Text>
@@ -264,7 +296,7 @@ function CommentRow({
                       ? `Unlike comment. ${likeCount} ${likeCount === 1 ? "like" : "likes"}`
                       : `Like comment. ${likeCount} ${likeCount === 1 ? "like" : "likes"}`
                   }
-                  className="flex-row items-center gap-1 active:opacity-70"
+                  className="flex-row items-center gap-1 web:transition-opacity active:opacity-70 hover:opacity-70"
                 >
                   <Ionicons
                     name={liked ? "heart" : "heart-outline"}
@@ -285,7 +317,7 @@ function CommentRow({
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Reply to ${label}`}
-                  className="active:opacity-70"
+                  className="web:transition-opacity active:opacity-70 hover:opacity-70"
                 >
                   <Text className="text-[12px] font-semibold text-text-tertiary">Reply</Text>
                 </Pressable>
@@ -347,7 +379,10 @@ export function CommentThreadList({
       )}
 
       {status === "CanLoadMore" ? (
-        <Pressable onPress={() => loadMore(20)} className="py-2 active:opacity-70">
+        <Pressable
+          onPress={() => loadMore(20)}
+          className="py-2 web:transition-opacity active:opacity-70 hover:opacity-70"
+        >
           <Text className="text-sm font-medium text-brand-400">View more comments</Text>
         </Pressable>
       ) : null}
@@ -403,7 +438,11 @@ export function CommentComposer({
 
   const handleSend = useCallback(async () => {
     if (!isAuthenticated) {
-      Alert.alert("Sign in required", "Sign in to join the conversation.");
+      if (Platform.OS === "web") {
+        promptSignIn("Sign in to join the conversation.");
+      } else {
+        Alert.alert("Sign in required", "Sign in to join the conversation.");
+      }
       return;
     }
     if (!trimmed || sending) {
@@ -415,7 +454,7 @@ export function CommentComposer({
       await onSubmit(trimmed);
       setText("");
     } catch (error) {
-      Alert.alert(
+      notifyError(
         "Couldn't post comment",
         getUserFacingApiErrorMessage(error) ?? "Check your connection and try again.",
       );
@@ -423,6 +462,20 @@ export function CommentComposer({
       setSending(false);
     }
   }, [isAuthenticated, onSubmit, sending, trimmed]);
+
+  // Web: Escape backs out of a pending reply without losing the draft.
+  useEffect(() => {
+    if (Platform.OS !== "web" || !replyingToLabel || !onCancelReply) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancelReply();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onCancelReply, replyingToLabel]);
 
   return (
     <View>
@@ -472,6 +525,22 @@ export function CommentComposer({
             returnKeyType="send"
             submitBehavior="submit"
             onSubmitEditing={handleSend}
+            // Web: Enter sends (RNW multiline inputs otherwise insert a
+            // newline); Shift+Enter keeps the newline for multi-line comments.
+            {...(Platform.OS === "web"
+              ? ({
+                  onKeyPress: (event: {
+                    key?: string;
+                    shiftKey?: boolean;
+                    preventDefault: () => void;
+                  }) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void handleSend();
+                    }
+                  },
+                } as object)
+              : null)}
             onContentSizeChange={(event) =>
               setContentHeight(event.nativeEvent.contentSize.height)
             }
@@ -538,9 +607,9 @@ export function CommentsSection({
       if (!reportCommentId) return;
       try {
         await report({ targetType: "comment", targetId: reportCommentId, reason });
-        Alert.alert("Report submitted", "Thanks — we'll take a look.");
+        notify("Report submitted", "Thanks — we'll take a look.");
       } catch {
-        Alert.alert("Couldn't submit report", "Check your connection and try again.");
+        notifyError("Couldn't submit report", "Check your connection and try again.");
       }
     },
     [report, reportCommentId],
@@ -616,7 +685,7 @@ export function CommentsSection({
               }}
               accessibilityRole="button"
               accessibilityLabel="View all comments"
-              className="py-2 active:opacity-70"
+              className="py-2 web:transition-opacity active:opacity-70 hover:opacity-70"
             >
               <Text className="text-sm font-medium text-brand-400">
                 View all {countLabel} comments
@@ -629,7 +698,7 @@ export function CommentsSection({
               onPress={() => loadMore(20)}
               accessibilityRole="button"
               accessibilityLabel="View more comments"
-              className="py-2 active:opacity-70"
+              className="py-2 web:transition-opacity active:opacity-70 hover:opacity-70"
             >
               <Text className="text-sm font-medium text-text-tertiary">
                 View more comments

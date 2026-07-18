@@ -1,13 +1,14 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
 
 import { Avatar } from "../../components/Avatar";
 import { EmptyState } from "../../components/EmptyState";
 import { FlashList } from "../../components/FlashList";
+import { LinkPressable } from "../../components/LinkPressable";
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
+import { notifyError } from "../../lib/dialogs";
 import { useMutation, usePaginatedQuery } from "../../lib/plotlist/react";
 
 function BlockedUserRow({
@@ -19,16 +20,15 @@ function BlockedUserRow({
   onUnblock: (userId: string) => void;
   unblocking: boolean;
 }) {
-  const router = useRouter();
   const nameLabel = item.user.displayName ?? item.user.username ?? "User";
   return (
     <View className="flex-row items-center justify-between rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
-      <Pressable
+      <LinkPressable
+        href={`/profile/${item.user._id}`}
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.push(`/profile/${item.user._id}`);
         }}
-        className="flex-1 flex-row items-center gap-3 pr-3 active:opacity-80"
+        className="flex-1 flex-row items-center gap-3 pr-3 active:opacity-80 hover:opacity-80 web:transition-opacity"
       >
         <Avatar uri={item.avatarUrl} label={nameLabel} size={44} />
         <View className="flex-1">
@@ -41,7 +41,7 @@ function BlockedUserRow({
             </Text>
           ) : null}
         </View>
-      </Pressable>
+      </LinkPressable>
       <Pressable
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -49,7 +49,7 @@ function BlockedUserRow({
         }}
         disabled={unblocking}
         className={`items-center justify-center rounded-full border border-dark-border bg-dark-card px-4 py-2 ${
-          unblocking ? "opacity-60" : "active:bg-dark-hover"
+          unblocking ? "opacity-60" : "active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
         }`}
       >
         <Text className="text-xs font-semibold text-text-primary">Unblock</Text>
@@ -76,7 +76,7 @@ export default function BlockedAccountsScreen() {
         await unblock({ userId });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
-        Alert.alert("Could not unblock", String(error));
+        notifyError("Could not unblock", String(error));
       } finally {
         setUnblockingId(null);
       }
