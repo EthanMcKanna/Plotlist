@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { FlashList } from "../../components/FlashList";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useAction, useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
@@ -563,13 +564,29 @@ export default function ProfileScreen() {
       >
       <View className="pb-24">
         {/* ── Profile Header ── */}
-        <LinearGradient
-          colors={["#0D2B3C", "#0D1821", "#0D0F14"]}
-          locations={[0, 0.45, 1]}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={{ paddingTop: insets.top + 16, paddingBottom: 16 }}
-        >
+        {/* Pro customization: a user-chosen backdrop sits behind the header
+            with a heavier scrim for text legibility; otherwise the standard
+            brand gradient renders alone. */}
+        <View style={{ paddingTop: insets.top + 16, paddingBottom: 16, overflow: "hidden" }}>
+          {profile?.user?.profileBackdropUrl ? (
+            <Image
+              source={{ uri: profile.user.profileBackdropUrl }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              transition={150}
+            />
+          ) : null}
+          <LinearGradient
+            colors={
+              profile?.user?.profileBackdropUrl
+                ? ["rgba(13,15,20,0.30)", "rgba(13,15,20,0.62)", "#0D0F14"]
+                : ["#0D2B3C", "#0D1821", "#0D0F14"]
+            }
+            locations={[0, 0.45, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
           {me ? (
             Platform.OS === "web" ? (
               // The gradient band is full-bleed; keep the options control
@@ -694,7 +711,7 @@ export default function ProfileScreen() {
               </Pressable>
             ) : null}
           </View>
-        </LinearGradient>
+        </View>
 
         <View className="px-6" style={webPageStyle}>
           {/* ── Stats Bar ── */}

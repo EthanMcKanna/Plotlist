@@ -13,6 +13,7 @@ import { Platform } from "react-native";
 import { AuthErrorBoundary } from "../components/AuthErrorBoundary";
 import { AuthGate } from "../components/AuthGate";
 import { NotificationsBridge } from "../components/NotificationsBridge";
+import { PurchasesBridge } from "../components/PurchasesBridge";
 import { QueryProvider } from "../components/QueryProvider";
 import { WebShell } from "../components/WebShell";
 import { PlotlistSessionProvider } from "../lib/plotlist/auth";
@@ -54,6 +55,7 @@ function RootLayout() {
               <AuthErrorBoundary>
                 <AuthGate>
                   <NotificationsBridge />
+                  <PurchasesBridge />
                   <WebShell>
                     <Stack
                       screenOptions={{

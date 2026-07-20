@@ -39,6 +39,7 @@ import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
 import { moderateText } from "./moderation";
+import { requirePro, userHasPro } from "./pro";
 import { ensurePhoneIdentity } from "./auth";
 import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
 import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
@@ -192,6 +193,9 @@ const updateProfileArgs = z.object({
   favoriteShowIds: z.array(z.string()).optional(),
   favoriteGenres: z.array(z.string()).optional(),
   avatarStorageId: z.string().optional(),
+  // Pro customization; null clears the backdrop. Setting requires Pro,
+  // clearing is always allowed so lapsed subscribers aren't stuck.
+  profileBackdropStorageId: z.string().nullable().optional(),
   profileVisibility: profileVisibilityArgs.optional(),
   releaseCalendarPreferences: z
     .object({
@@ -3990,6 +3994,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const libraryCounts = await getUserLibraryCounts(user.id);
     return {
       ...toClientUser(user),
+      // Server-authoritative Pro flag (webhook-maintained proUntil); the
+      // client combines this with the RevenueCat SDK for gating UX.
+      isPro: userHasPro(user),
       // Self-only boolean so onboarding can skip the phone step; the hash
       // itself still never leaves the server.
       hasVerifiedPhone: Boolean(user.phoneHash),
@@ -5227,6 +5234,9 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   "users:updateProfile": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = updateProfileArgs.parse(args ?? {});
+    if (typeof parsed.profileBackdropStorageId === "string") {
+      requirePro(user);
+    }
     await moderateText("profile", [parsed.displayName, parsed.bio, parsed.username]);
     const username = parsed.username
       ? parsed.username.toLowerCase().replace(/[^a-z0-9_]+/g, "")
@@ -5245,6 +5255,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         favoriteShowIds: parsed.favoriteShowIds ?? user.favoriteShowIds,
         favoriteGenres: parsed.favoriteGenres ?? user.favoriteGenres,
         avatarUrl: parsed.avatarStorageId ?? user.avatarUrl,
+        profileBackdropUrl:
+          parsed.profileBackdropStorageId === undefined
+            ? user.profileBackdropUrl
+            : parsed.profileBackdropStorageId,
         profileVisibility: parsed.profileVisibility
           ? resolveProfileVisibility({
               ...(user.profileVisibility ?? {}),

@@ -26,6 +26,13 @@ import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import {
+  PURCHASES_SUPPORTED,
+  presentProPaywall,
+  restoreProPurchases,
+  showManageSubscriptions,
+} from "../../lib/purchases";
+import { useProStatus } from "../../lib/useProStatus";
 import { showFeedbackForm } from "../../lib/sentry";
 import { sanitizeUsername, validateUsername } from "../../lib/username";
 
@@ -215,6 +222,52 @@ export default function SettingsScreen() {
     height: number;
   } | null>(null);
   const [signInPhoneLabel, setSignInPhoneLabel] = useState<string | null>(null);
+  const proStatus = useProStatus();
+  const [proPaywallBusy, setProPaywallBusy] = useState(false);
+  const [restoringPurchases, setRestoringPurchases] = useState(false);
+
+  const handleUpgradeToPro = async () => {
+    if (proPaywallBusy) return;
+    setProPaywallBusy(true);
+    try {
+      const outcome = await presentProPaywall();
+      if (outcome === "purchased" || outcome === "restored") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else if (outcome === "error") {
+        notifyError(
+          "Purchase failed",
+          "Something went wrong talking to the store. You weren't charged — try again in a moment.",
+        );
+      } else if (outcome === "unavailable") {
+        notifyError("Not available", "Purchases aren't available in this build.");
+      }
+    } finally {
+      setProPaywallBusy(false);
+    }
+  };
+
+  const handleRestorePurchases = async () => {
+    if (restoringPurchases) return;
+    setRestoringPurchases(true);
+    try {
+      const restored = await restoreProPurchases();
+      if (restored.isPro) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        notifyError(
+          "Nothing to restore",
+          "No previous Plotlist Pro purchase was found for this store account.",
+        );
+      }
+    } catch (error) {
+      notifyError(
+        "Restore failed",
+        String((error as Error)?.message ?? error),
+      );
+    } finally {
+      setRestoringPurchases(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -390,6 +443,75 @@ export default function SettingsScreen() {
     }
   };
 
+  const isPro = proStatus.isPro || me?.isPro === true;
+  const backdropUrl: string | null = me?.profileBackdropUrl ?? null;
+  const [backdropBusy, setBackdropBusy] = useState(false);
+
+  // Paywall placement follows the launch strategy: the locked control itself
+  // is the contextual upsell — tapping it while free opens the paywall, and a
+  // successful purchase continues straight into the picker.
+  const handleChangeBackdrop = async () => {
+    if (backdropBusy) return;
+    if (!isPro) {
+      const outcome = await presentProPaywall();
+      if (outcome === "unavailable") {
+        notifyError(
+          "Get Plotlist Pro on the app",
+          "Subscriptions are available in the iOS app for now — your Pro perks work everywhere once subscribed.",
+        );
+        return;
+      }
+      if (outcome !== "purchased" && outcome !== "restored") return;
+    }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.9,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      setBackdropBusy(true);
+      const storageId = await uploadAvatarImage({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? "image/jpeg",
+        generateUploadUrl: () => generateUploadUrl({}),
+      });
+      await updateProfile({ profileBackdropStorageId: storageId });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      // The server gate reads the webhook-maintained entitlement, which can
+      // trail an in-app purchase by a few seconds.
+      const message = String(error);
+      if (message.includes("pro_required")) {
+        notifyError(
+          "Almost there",
+          "Your Plotlist Pro purchase is still processing. Try again in a few seconds.",
+        );
+      } else {
+        notifyError("Upload failed", message);
+      }
+    } finally {
+      setBackdropBusy(false);
+    }
+  };
+
+  const handleRemoveBackdrop = () => {
+    confirmAction({
+      title: "Remove backdrop",
+      message: "Your profile goes back to the standard Plotlist header.",
+      confirmLabel: "Remove",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await updateProfile({ profileBackdropStorageId: null });
+        } catch (error) {
+          notifyError("Could not remove backdrop", String(error));
+        }
+      },
+    });
+  };
+
   const handleSyncContacts = async () => {
     try {
       setSyncingContacts(true);
@@ -483,6 +605,72 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
+        {/* ── Pro backdrop ── */}
+        <View className="mt-5">
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              void handleChangeBackdrop();
+            }}
+            disabled={backdropBusy}
+            accessibilityRole="button"
+            accessibilityLabel={
+              backdropUrl ? "Change profile backdrop" : "Add a profile backdrop"
+            }
+            className="active:opacity-80"
+          >
+            <View
+              className="overflow-hidden rounded-2xl border border-white/10"
+              style={{ height: 96 }}
+            >
+              {backdropUrl ? (
+                <Image
+                  source={{ uri: backdropUrl }}
+                  style={{ flex: 1 }}
+                  contentFit="cover"
+                  transition={150}
+                />
+              ) : (
+                <View className="flex-1 items-center justify-center bg-dark-elevated">
+                  <Ionicons name="image-outline" size={20} color="#5A6070" />
+                  <Text className="mt-1 text-xs text-text-tertiary">
+                    Add a profile backdrop
+                  </Text>
+                </View>
+              )}
+              <View className="absolute right-2 top-2 flex-row items-center gap-1 rounded-full bg-black/55 px-2 py-1">
+                {backdropBusy ? (
+                  <ActivityIndicator size={10} color="#FACC15" />
+                ) : (
+                  <Ionicons
+                    name={isPro ? "sparkles" : "lock-closed"}
+                    size={10}
+                    color="#FACC15"
+                  />
+                )}
+                <Text className="text-[10px] font-bold text-text-primary">PRO</Text>
+              </View>
+            </View>
+          </Pressable>
+          {backdropUrl ? (
+            <Pressable
+              onPress={handleRemoveBackdrop}
+              accessibilityRole="button"
+              accessibilityLabel="Remove profile backdrop"
+              className="mt-1.5 self-start active:opacity-70"
+            >
+              <Text className="text-xs font-medium text-status-danger">
+                Remove backdrop
+              </Text>
+            </Pressable>
+          ) : (
+            <Text className="mt-1.5 text-xs leading-4 text-text-tertiary">
+              Shown across the top of your public profile.
+              {isPro ? "" : " A Plotlist Pro perk."}
+            </Text>
+          )}
+        </View>
+
         {/* ── Profile fields ── */}
         <View className="mt-8">
           <SectionHeader title="Profile" />
@@ -565,6 +753,52 @@ export default function SettingsScreen() {
             Home and search filter streaming rooms and lean picks toward services you have.
           </Text>
         </View>
+
+        {/* ── Plotlist Pro ── */}
+        {/* Purchases are native-only; web billing ships separately, so the
+            section stays hidden on web (also keeps App Store review happy). */}
+        {PURCHASES_SUPPORTED ? (
+          <View className="mt-10">
+            <SectionHeader title="Plotlist Pro" />
+            <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+              {proStatus.isPro ? (
+                <SettingsRow
+                  icon="sparkles"
+                  iconColor="#FACC15"
+                  label="Manage your subscription"
+                  onPress={() => void showManageSubscriptions()}
+                />
+              ) : (
+                <SettingsRow
+                  icon="sparkles"
+                  iconColor="#FACC15"
+                  label="Upgrade to Plotlist Pro"
+                  onPress={() => void handleUpgradeToPro()}
+                  loading={proPaywallBusy}
+                />
+              )}
+              <SettingsRow
+                icon="refresh-outline"
+                label="Restore purchases"
+                onPress={() => void handleRestorePurchases()}
+                loading={restoringPurchases}
+              />
+            </GlassSurface>
+            <Text className="mt-2 text-xs leading-4 text-text-tertiary">
+              {proStatus.isPro
+                ? proStatus.expirationDate
+                  ? `Subscribed — ${proStatus.willRenew ? "renews" : "active until"} ${new Date(
+                      proStatus.expirationDate,
+                    ).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}.`
+                  : "Subscribed — thanks for supporting Plotlist."
+                : "Unlimited vibe search, all-time stats, themes, and more."}
+            </Text>
+          </View>
+        ) : null}
 
         {/* ── Notifications ── */}
         <View className="mt-10">

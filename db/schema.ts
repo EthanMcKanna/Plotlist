@@ -107,6 +107,13 @@ export const users = sqliteTable(
     notificationPreferences: jsonb("notification_preferences").$type<
       Record<string, boolean>
     >(),
+    // Plotlist Pro entitlement expiry (ms). Written only by the RevenueCat
+    // webhook; pro = proUntil > now. Deliberately public via toClientUser so
+    // profiles can show a Pro badge.
+    proUntil: timestampMs("pro_until"),
+    // Pro customization: profile backdrop image (same URL-style storage id
+    // convention as avatarUrl).
+    profileBackdropUrl: text("profile_backdrop_url"),
   },
   (table) => ({
     emailIdx: uniqueIndex("users_email_idx").on(table.email),

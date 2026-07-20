@@ -17,6 +17,7 @@ import rpcActionRoute from "../api/rpc/action";
 import rpcMutationRoute from "../api/rpc/mutation";
 import rpcQueryRoute from "../api/rpc/query";
 import uploadsBlobRoute from "../api/uploads/blob";
+import revenuecatWebhookRoute from "../api/webhooks/revenuecat";
 import { initDb } from "../api/_lib/db";
 import { runNodeRoute, type NodeStyleHandler } from "./shim";
 import { runScheduledTasks } from "./scheduled";
@@ -44,6 +45,7 @@ const routes: Record<string, NodeStyleHandler> = {
   "/api/rpc/mutation": rpcMutationRoute as NodeStyleHandler,
   "/api/rpc/action": rpcActionRoute as NodeStyleHandler,
   "/api/uploads/blob": uploadsBlobRoute as NodeStyleHandler,
+  "/api/webhooks/revenuecat": revenuecatWebhookRoute as NodeStyleHandler,
   "/api/internal/jobs/list-runnable": listRunnableJobsRoute as NodeStyleHandler,
   "/api/internal/cron/cleanup-tmdb-cache": cleanupTmdbCacheRoute as NodeStyleHandler,
   "/api/internal/cron/homepage-feed-refresh": homepageFeedRefreshRoute as NodeStyleHandler,
