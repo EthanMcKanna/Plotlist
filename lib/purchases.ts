@@ -27,10 +27,13 @@ if (Platform.OS === "ios" || Platform.OS === "android") {
 
 export const PURCHASES_SUPPORTED = purchasesModule !== null;
 
-// RevenueCat public SDK key — safe to ship in the client. `test_…` is the
-// Test Store key for sandbox development; before release replace with the
-// per-platform production keys (appl_… for iOS, goog_… for Android).
-const REVENUECAT_API_KEY = "test_OzFhOEsYeNEvClCCGqtVXKyynYm";
+// RevenueCat public SDK keys — safe to ship in the client. iOS uses the
+// production App Store app key (real StoreKit products
+// plotlist_pro_monthly/_yearly); Android still needs a Play app + goog_ key.
+const REVENUECAT_API_KEY =
+  Platform.OS === "ios"
+    ? "appl_uLTAnWstoWuqRXONUZputToYhtK"
+    : "test_OzFhOEsYeNEvClCCGqtVXKyynYm";
 
 let status: ProStatus = {
   // When the SDK can't exist in this binary there is nothing to wait for.

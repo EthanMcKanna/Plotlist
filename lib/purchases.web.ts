@@ -22,7 +22,9 @@ import { Sentry } from "./sentry";
 
 export const PURCHASES_SUPPORTED = true;
 
-// Same key as lib/purchases.ts — public, safe to ship.
+// Web stays on the Test Store key (simulated checkout) until a Stripe
+// account is connected for RevenueCat Web Billing; entitlements bought on
+// iOS still show up here via the shared customer + webhook.
 const REVENUECAT_API_KEY = "test_OzFhOEsYeNEvClCCGqtVXKyynYm";
 
 let status: ProStatus = {
