@@ -59,7 +59,7 @@ import Animated, {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api } from "../../lib/plotlist/api";
-import { confirmAction, notify, notifyError } from "../../lib/dialogs";
+import { confirmAction, notify, notifyError, promptSignIn } from "../../lib/dialogs";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
@@ -71,7 +71,10 @@ import { CastMember } from "../../components/CastMember";
 import { VideoPlayer } from "../../components/VideoPlayer";
 import { SimilarShowCard } from "../../components/SimilarShowCard";
 import { Avatar } from "../../components/Avatar";
-import { formatDate } from "../../lib/format";
+import { LinkPressable } from "../../components/LinkPressable";
+import { SpoilerShield } from "../../components/SpoilerShield";
+import { RatingHistogram } from "../../components/RatingHistogram";
+import { formatDate, formatRelativeTime } from "../../lib/format";
 import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
@@ -304,6 +307,15 @@ const PREVIEW_EPISODE_REVIEWS = [
 const PREVIEW_EPISODE_STATS = {
   averageRating: 4.7,
   reviewCount: 18,
+  count: 18,
+  histogram: [0, 0, 1, 4, 13],
+};
+
+const PREVIEW_SHOW_STATS = {
+  averageRating: 4.5,
+  reviewCount: 24,
+  count: 24,
+  histogram: [0, 1, 2, 6, 15],
 };
 
 function tmdbImageUrl(path: unknown, size = "original") {
@@ -316,7 +328,23 @@ function tmdbImageUrl(path: unknown, size = "original") {
   return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
+function normalizeEpisodePerson(person: any) {
+  return {
+    ...person,
+    profilePath: person.profilePath ?? tmdbImageUrl(person.profile_path, "w185"),
+  };
+}
+
 function normalizeEpisodeDetails(episode: any) {
+  // TMDB season payloads use guest_stars; older cached payloads may already
+  // be camelCased. Without this mapping the sheet's guest-star rail never
+  // renders for real data.
+  const guestStars = Array.isArray(episode.guestStars)
+    ? episode.guestStars
+    : Array.isArray(episode.guest_stars)
+      ? episode.guest_stars
+      : [];
+  const crew = Array.isArray(episode.crew) ? episode.crew : [];
   return {
     ...episode,
     airDate: episode.airDate ?? episode.air_date ?? null,
@@ -325,6 +353,8 @@ function normalizeEpisodeDetails(episode: any) {
     stillPath: episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780"),
     voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
     voteCount: episode.voteCount ?? episode.vote_count ?? 0,
+    crew: crew.map(normalizeEpisodePerson),
+    guestStars: guestStars.map(normalizeEpisodePerson),
   };
 }
 
@@ -607,6 +637,13 @@ export default function ShowScreen() {
   const loadMoreReviews = isShowPreview
     ? () => undefined
     : queriedLoadMoreReviews;
+  // Aggregate rating stats across ALL show-level reviews — the paginated list
+  // above only covers loaded pages, so its client-side average drifts.
+  const queriedShowStats = useQuery(
+    api.reviews.getShowStats,
+    !isShowPreview && showId ? { showId } : "skip",
+  );
+  const showRatingStats = isShowPreview ? PREVIEW_SHOW_STATS : queriedShowStats;
   const { results: queriedLists } = usePaginatedQuery(
     api.lists.listForUser,
     !isShowPreview && isAuthenticated && me?._id ? { userId: me._id } : "skip",
@@ -1150,6 +1187,17 @@ export default function ShowScreen() {
   }, [episodeCommunityReviews]);
   const hasEpisodeRatingStats =
     typeof episodeStats?.averageRating === "number" && (episodeStats.reviewCount ?? episodeStats.count ?? 0) > 0;
+  const queriedFriendWatchers = useQuery(
+    api.shows.getEpisodeFriendWatchers,
+    !isShowPreview && isAuthenticated && selectedEpisode && showId
+      ? {
+          showId,
+          seasonNumber: selectedEpisode.seasonNumber,
+          episodeNumber: selectedEpisode.episode.episodeNumber,
+        }
+      : "skip",
+  );
+  const episodeFriendWatchers = isShowPreview ? null : queriedFriendWatchers;
 
   useEffect(() => {
     let cancelled = false;
@@ -1433,6 +1481,67 @@ export default function ShowScreen() {
         return details ? episodes.length > 0 : episodeCount > 0;
       }),
     [seasonDetailsByNumber, seasonOptions],
+  );
+
+  // Prev/next targets for the episode sheet. Cross-season targets carry
+  // `pick` instead of an episode object because the adjacent season's details
+  // may not be fetched yet — goToEpisode loads them on demand.
+  const episodeNavContext = useMemo(() => {
+    if (!selectedEpisode) return null;
+    const seasonNumbers = seasonsWithEpisodes.map(
+      (season: any) => season.season_number as number,
+    );
+    const seasonIdx = seasonNumbers.indexOf(selectedEpisode.seasonNumber);
+    const episodes = seasonDetailsByNumber[selectedEpisode.seasonNumber]?.episodes ?? [];
+    const epIdx = episodes.findIndex(
+      (ep: any) => ep.episodeNumber === selectedEpisode.episode.episodeNumber,
+    );
+    const seasonMeta = seasonIdx >= 0 ? seasonsWithEpisodes[seasonIdx] : null;
+    const episodeCount =
+      episodes.length > 0 ? episodes.length : (seasonMeta?.episode_count ?? null);
+    if (epIdx < 0) {
+      // Deep-link preview before season details land — no reliable position.
+      return { episodeCount, prev: null, next: null };
+    }
+    const prev =
+      epIdx > 0
+        ? { seasonNumber: selectedEpisode.seasonNumber, episode: episodes[epIdx - 1] }
+        : seasonIdx > 0
+          ? { seasonNumber: seasonNumbers[seasonIdx - 1], pick: "last" as const }
+          : null;
+    const next =
+      epIdx < episodes.length - 1
+        ? { seasonNumber: selectedEpisode.seasonNumber, episode: episodes[epIdx + 1] }
+        : seasonIdx >= 0 && seasonIdx < seasonNumbers.length - 1
+          ? { seasonNumber: seasonNumbers[seasonIdx + 1], pick: "first" as const }
+          : null;
+    return { episodeCount, prev, next };
+  }, [selectedEpisode, seasonsWithEpisodes, seasonDetailsByNumber]);
+
+  const goToEpisode = useCallback(
+    async (target: { seasonNumber: number; episode?: any; pick?: "first" | "last" }) => {
+      let episode = target.episode ?? null;
+      if (!episode) {
+        const detailsMap = await ensureSeasonDetailsLoaded([target.seasonNumber]);
+        const episodes = detailsMap.get(target.seasonNumber)?.episodes ?? [];
+        if (episodes.length === 0) return;
+        episode = target.pick === "last" ? episodes[episodes.length - 1] : episodes[0];
+      }
+      const seasonMeta = seasonsWithEpisodes.find(
+        (season: any) => season.season_number === target.seasonNumber,
+      );
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setEpisodeReviewExpanded(false);
+      setEpisodeReviewText("");
+      setSelectedEpisode({
+        episode,
+        seasonName: seasonMeta?.name ?? `Season ${target.seasonNumber}`,
+        seasonNumber: target.seasonNumber,
+      });
+      // Fresh episode starts reading from the top.
+      sheetScrollRef.current?.scrollTo({ y: 0, animated: false });
+    },
+    [ensureSeasonDetailsLoaded, seasonsWithEpisodes],
   );
 
   // Scope entries for the log-a-watch sheet. Seasons with loaded details
@@ -2914,30 +3023,53 @@ export default function ShowScreen() {
           >
             Community Reviews
           </Text>
-          {communitySummary ? (
-            <View className="mb-2 flex-row items-center rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
-              <View className="mr-3 flex-row">
-                {communitySummary.recentReviewers.map((reviewer: any, index: number) => (
-                  <View
-                    key={reviewer.id}
-                    style={{ marginLeft: index === 0 ? 0 : -8 }}
-                    className="rounded-full border-2 border-dark-card"
-                  >
-                    <Avatar uri={reviewer.avatarUrl} label={reviewer.label} size={28} />
+          {communitySummary ? (() => {
+            // Server stats cover every review; the paginated list only covers
+            // loaded pages. Prefer the former when it has arrived.
+            const summaryAverage =
+              typeof showRatingStats?.averageRating === "number"
+                ? showRatingStats.averageRating
+                : communitySummary.averageRating;
+            const summaryCount =
+              showRatingStats?.reviewCount ??
+              showRatingStats?.count ??
+              communitySummary.reviewCount;
+            const summaryHistogram =
+              Array.isArray(showRatingStats?.histogram) && summaryCount > 0
+                ? showRatingStats.histogram
+                : null;
+            return (
+              <View className="mb-2 rounded-2xl border border-dark-border bg-dark-card px-4 py-3">
+                <View className="flex-row items-center">
+                  <View className="mr-3 flex-row">
+                    {communitySummary.recentReviewers.map((reviewer: any, index: number) => (
+                      <View
+                        key={reviewer.id}
+                        style={{ marginLeft: index === 0 ? 0 : -8 }}
+                        className="rounded-full border-2 border-dark-card"
+                      >
+                        <Avatar uri={reviewer.avatarUrl} label={reviewer.label} size={28} />
+                      </View>
+                    ))}
                   </View>
-                ))}
+                  <View className="flex-1">
+                    <Text className="text-sm font-semibold text-text-primary">
+                      {summaryAverage.toFixed(1)} out of 5
+                    </Text>
+                    <Text className="mt-1 text-xs text-text-tertiary">
+                      Based on {summaryCount} community review
+                      {summaryCount === 1 ? "" : "s"}.
+                    </Text>
+                  </View>
+                </View>
+                {summaryHistogram ? (
+                  <View className="mt-3 border-t border-dark-border/60 pt-3">
+                    <RatingHistogram histogram={summaryHistogram} />
+                  </View>
+                ) : null}
               </View>
-              <View className="flex-1">
-                <Text className="text-sm font-semibold text-text-primary">
-                  {communitySummary.averageRating.toFixed(1)} out of 5 from recent reviews
-                </Text>
-                <Text className="mt-1 text-xs text-text-tertiary">
-                  Based on {communitySummary.reviewCount} community review
-                  {communitySummary.reviewCount === 1 ? "" : "s"}.
-                </Text>
-              </View>
-            </View>
-          ) : null}
+            );
+          })() : null}
           {reviews.length > 0 ? (
             <View>
               <FlashList
@@ -3402,6 +3534,43 @@ export default function ShowScreen() {
             )?.rating ?? null;
           const selectedStillPath =
             selectedEpisode.episode.stillPath ?? selectedEpisode.episode.still_path ?? null;
+          const sheetTmdbRating =
+            typeof selectedEpisode.episode.voteAverage === "number" &&
+            selectedEpisode.episode.voteAverage > 0
+              ? selectedEpisode.episode.voteAverage
+              : null;
+          const sheetHistogram = Array.isArray(episodeStats?.histogram)
+            ? episodeStats.histogram
+            : null;
+          const sheetFriendWatchers = episodeFriendWatchers?.watchers ?? [];
+          const sheetFriendTotal = episodeFriendWatchers?.totalCount ?? 0;
+          const sheetGuestStars = (selectedEpisode.episode.guestStars ?? []).filter(
+            (person: any) => person && person.id != null && person.name,
+          );
+          // One card per crew member — TMDB lists a double-duty writer/director
+          // as separate rows per job.
+          const sheetCrew: any[] = [];
+          {
+            const byId = new Map<number, any>();
+            for (const person of selectedEpisode.episode.crew ?? []) {
+              if (!person || person.id == null || !person.name) continue;
+              const existing = byId.get(person.id);
+              if (existing) {
+                if (person.job && !existing.jobs.includes(person.job)) {
+                  existing.jobs.push(person.job);
+                }
+              } else {
+                const entry = { ...person, jobs: person.job ? [person.job] : [] };
+                byId.set(person.id, entry);
+                sheetCrew.push(entry);
+              }
+            }
+          }
+          const sheetNextEpisode = episodeNavContext?.next?.episode ?? null;
+          const episodePosition =
+            episodeNavContext?.episodeCount
+              ? `Episode ${selectedEpisode.episode.episodeNumber} of ${episodeNavContext.episodeCount}`
+              : `Episode ${selectedEpisode.episode.episodeNumber}`;
 
           return (
           <View
@@ -3536,29 +3705,66 @@ export default function ShowScreen() {
                   style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
                 />
 
-                {/* Close button */}
-                <GlassPressable
-                  accessibilityLabel="Close episode details"
-                  accessibilityRole="button"
-                  radius={16}
-                  variant="control"
-                  fallbackColor="rgba(0,0,0,0.42)"
-                  tintColor="rgba(255,255,255,0.08)"
-                  style={{ position: "absolute", right: 16, top: 16 }}
-                  surfaceStyle={{ height: 32, width: 32 }}
-                  contentStyle={{
-                    alignItems: "center",
-                    height: 32,
-                    justifyContent: "center",
-                    width: 32,
-                  }}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    closeEpisodeSheet();
+                {/* Share + close buttons */}
+                <View
+                  style={{
+                    position: "absolute",
+                    right: 16,
+                    top: 16,
+                    flexDirection: "row",
+                    gap: 8,
                   }}
                 >
-                  <Ionicons name="close" size={18} color="white" />
-                </GlassPressable>
+                  <GlassPressable
+                    accessibilityLabel="Share this episode"
+                    accessibilityRole="button"
+                    radius={16}
+                    variant="control"
+                    fallbackColor="rgba(0,0,0,0.42)"
+                    tintColor="rgba(255,255,255,0.08)"
+                    surfaceStyle={{ height: 32, width: 32 }}
+                    contentStyle={{
+                      alignItems: "center",
+                      height: 32,
+                      justifyContent: "center",
+                      width: 32,
+                    }}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      void sharePlotlistLink(
+                        `/show/${showId}?openSeason=${selectedEpisode.seasonNumber}&openEpisode=${selectedEpisode.episode.episodeNumber}`,
+                        `${show?.title ? `${show.title} ` : ""}${epCode}${
+                          selectedEpisode.episode.name
+                            ? ` – ${selectedEpisode.episode.name}`
+                            : ""
+                        } on Plotlist`,
+                      );
+                    }}
+                  >
+                    <Ionicons name="share-outline" size={16} color="white" />
+                  </GlassPressable>
+                  <GlassPressable
+                    accessibilityLabel="Close episode details"
+                    accessibilityRole="button"
+                    radius={16}
+                    variant="control"
+                    fallbackColor="rgba(0,0,0,0.42)"
+                    tintColor="rgba(255,255,255,0.08)"
+                    surfaceStyle={{ height: 32, width: 32 }}
+                    contentStyle={{
+                      alignItems: "center",
+                      height: 32,
+                      justifyContent: "center",
+                      width: 32,
+                    }}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      closeEpisodeSheet();
+                    }}
+                  >
+                    <Ionicons name="close" size={18} color="white" />
+                  </GlassPressable>
+                </View>
 
                 {/* Episode code badge */}
                 <View className="absolute bottom-4 left-5 right-5">
@@ -3612,14 +3818,147 @@ export default function ShowScreen() {
               />
 
               <View className="px-5">
-                {/* Title */}
-                <Text className="text-2xl font-bold tracking-tight text-text-primary">
-                  {selectedEpisode.episode.name}
-                </Text>
+                {/* Title, season context, and prev/next navigation */}
+                <View className="flex-row items-start gap-3">
+                  <View className="min-w-0 flex-1">
+                    <Text className="text-2xl font-bold tracking-tight text-text-primary">
+                      {selectedEpisode.episode.name}
+                    </Text>
+                    <Text className="mt-1 text-[13px] text-text-tertiary">
+                      {selectedEpisode.seasonName} · {episodePosition}
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-2 pt-1.5">
+                    <GlassPressable
+                      accessibilityLabel="Previous episode"
+                      accessibilityRole="button"
+                      disabled={!episodeNavContext?.prev}
+                      radius={16}
+                      variant="control"
+                      fallbackColor="rgba(255,255,255,0.05)"
+                      surfaceStyle={{ opacity: episodeNavContext?.prev ? 1 : 0.35 }}
+                      contentStyle={{
+                        alignItems: "center",
+                        height: 32,
+                        justifyContent: "center",
+                        width: 32,
+                      }}
+                      onPress={() => {
+                        if (!episodeNavContext?.prev) return;
+                        void goToEpisode(episodeNavContext.prev);
+                      }}
+                    >
+                      <Ionicons name="chevron-back" size={17} color="#D6DAE6" />
+                    </GlassPressable>
+                    <GlassPressable
+                      accessibilityLabel="Next episode"
+                      accessibilityRole="button"
+                      disabled={!episodeNavContext?.next}
+                      radius={16}
+                      variant="control"
+                      fallbackColor="rgba(255,255,255,0.05)"
+                      surfaceStyle={{ opacity: episodeNavContext?.next ? 1 : 0.35 }}
+                      contentStyle={{
+                        alignItems: "center",
+                        height: 32,
+                        justifyContent: "center",
+                        width: 32,
+                      }}
+                      onPress={() => {
+                        if (!episodeNavContext?.next) return;
+                        void goToEpisode(episodeNavContext.next);
+                      }}
+                    >
+                      <Ionicons name="chevron-forward" size={17} color="#D6DAE6" />
+                    </GlassPressable>
+                  </View>
+                </View>
 
-                {/* Action row: watched + rating inline */}
+                {/* Ratings strip — visible to everyone, signed in or not */}
+                {(sheetImdbLoading ||
+                  sheetImdbRating !== null ||
+                  sheetTmdbRating !== null ||
+                  hasEpisodeRatingStats) && (
+                  <View className="mt-4 flex-row flex-wrap items-center gap-2.5">
+                    {sheetImdbLoading ? (
+                      <ShimmerBlock width={82} height={36} radius={999} />
+                    ) : sheetImdbRating !== null ? (
+                      <GlassSurface
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(245,197,24,0.08)"
+                        tintColor="rgba(245,197,24,0.08)"
+                        borderColor="rgba(245,197,24,0.16)"
+                        contentStyle={{
+                          alignItems: "center",
+                          flexDirection: "row",
+                          gap: 6,
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                        }}
+                      >
+                        <ImdbLogo height={13} />
+                        <Text className="text-sm font-semibold" style={{ color: "#fcd34d" }}>
+                          {sheetImdbRating.toFixed(1)}
+                        </Text>
+                      </GlassSurface>
+                    ) : null}
+                    {sheetTmdbRating !== null ? (
+                      <GlassSurface
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(1,180,228,0.08)"
+                        tintColor="rgba(1,180,228,0.08)"
+                        borderColor="rgba(1,180,228,0.18)"
+                        contentStyle={{
+                          alignItems: "center",
+                          flexDirection: "row",
+                          gap: 6,
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                        }}
+                      >
+                        <Text
+                          className="text-[10px] font-bold"
+                          style={{ color: "#67d5f5", letterSpacing: 0.8 }}
+                        >
+                          TMDB
+                        </Text>
+                        <Text className="text-sm font-semibold" style={{ color: "#8ee0fa" }}>
+                          {sheetTmdbRating.toFixed(1)}
+                        </Text>
+                      </GlassSurface>
+                    ) : null}
+                    {hasEpisodeRatingStats ? (
+                      <GlassSurface
+                        radius={999}
+                        variant="control"
+                        fallbackColor="rgba(251,191,36,0.08)"
+                        tintColor="rgba(251,191,36,0.08)"
+                        borderColor="rgba(251,191,36,0.14)"
+                        contentStyle={{
+                          alignItems: "center",
+                          flexDirection: "row",
+                          gap: 5,
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                        }}
+                      >
+                        <Ionicons name="star" size={12} color="#fbbf24" />
+                        <Text className="text-sm font-semibold" style={{ color: "#fcd34d" }}>
+                          {episodeStats.averageRating.toFixed(1)}
+                        </Text>
+                        <Text className="text-xs text-text-tertiary">
+                          ({episodeStats.reviewCount ?? episodeStats.count})
+                        </Text>
+                      </GlassSurface>
+                    ) : null}
+                  </View>
+                )}
+
+                {/* Action row: watched + log */}
                 {isAuthenticated && (
-                  <View className="mt-5 flex-row items-center gap-3">
+                  <View className="mt-4 flex-row items-center gap-3">
                     {/* Watched toggle */}
                     <GlassPressable
                       disabled={!sheetIsAvailable}
@@ -3704,30 +4043,6 @@ export default function ShowScreen() {
                       </GlassPressable>
                     ) : null}
 
-                    {/* IMDb rating pill */}
-                    {sheetImdbLoading ? (
-                      <ShimmerBlock width={82} height={40} radius={999} />
-                    ) : sheetImdbRating !== null ? (
-                      <GlassSurface
-                        radius={999}
-                        variant="control"
-                        fallbackColor="rgba(245,197,24,0.08)"
-                        tintColor="rgba(245,197,24,0.08)"
-                        borderColor="rgba(245,197,24,0.16)"
-                        contentStyle={{
-                          alignItems: "center",
-                          flexDirection: "row",
-                          gap: 6,
-                          paddingHorizontal: 12,
-                          paddingVertical: 10,
-                        }}
-                      >
-                        <ImdbLogo height={13} />
-                        <Text className="text-sm font-semibold" style={{ color: "#fcd34d" }}>
-                          {sheetImdbRating.toFixed(1)}
-                        </Text>
-                      </GlassSurface>
-                    ) : null}
                   </View>
                 )}
 
@@ -3741,82 +4056,8 @@ export default function ShowScreen() {
                   </Text>
                 ) : null}
 
-                {/* ─── Your viewings ─── */}
-                {isAuthenticated && sheetEpLogs.length > 0 && (
-                  <GlassSurface
-                    radius={18}
-                    variant="surface"
-                    fallbackColor="rgba(22,26,34,0.66)"
-                    style={{ marginTop: 24 }}
-                    contentStyle={{ padding: 16 }}
-                  >
-                    <View className="flex-row items-center justify-between">
-                      <Text className="text-sm font-semibold text-text-secondary">
-                        Your viewings
-                      </Text>
-                      <View className="rounded-full border border-brand-500/25 bg-brand-500/10 px-2 py-0.5">
-                        <Text className="text-[11px] font-bold text-brand-300">
-                          ×{sheetEpLogs.length}
-                        </Text>
-                      </View>
-                    </View>
-                    <View className="mt-2">
-                      {sheetEpLogs.map((log: any, index: number) => (
-                        <Pressable
-                          key={log._id}
-                          accessibilityLabel={`Edit viewing from ${formatWatchedDateLabel(log)}`}
-                          className="flex-row items-center gap-3 py-2.5 active:opacity-70"
-                          style={
-                            index < sheetEpLogs.length - 1
-                              ? {
-                                  borderBottomColor: "rgba(255,255,255,0.07)",
-                                  borderBottomWidth: StyleSheet.hairlineWidth,
-                                }
-                              : undefined
-                          }
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            setLogSheetState({ editLog: log });
-                          }}
-                        >
-                          <Ionicons
-                            name={log.isRewatch ? "repeat" : "checkmark-circle-outline"}
-                            size={16}
-                            color={log.isRewatch ? "#38BDF8" : "#5A6070"}
-                          />
-                          <View className="min-w-0 flex-1">
-                            <Text className="text-[14px] font-medium text-text-primary">
-                              {formatWatchedDateLabel(log)}
-                            </Text>
-                            {log.note ? (
-                              <Text
-                                className="mt-0.5 text-[12px] text-text-tertiary"
-                                numberOfLines={1}
-                              >
-                                {log.note}
-                              </Text>
-                            ) : null}
-                          </View>
-                          {typeof log.rating === "number" ? (
-                            <View className="flex-row items-center gap-1">
-                              <Ionicons name="star" size={12} color="#FBBF24" />
-                              <Text className="text-[12px] font-semibold text-amber-300">
-                                {log.rating}
-                              </Text>
-                            </View>
-                          ) : null}
-                          {log.reaction ? (
-                            <Text style={{ fontSize: 14 }}>{log.reaction}</Text>
-                          ) : null}
-                          <Ionicons name="chevron-forward" size={14} color="#404654" />
-                        </Pressable>
-                      ))}
-                    </View>
-                  </GlassSurface>
-                )}
-
-                {/* ─── Your rating ─── */}
-                {isAuthenticated && sheetIsAvailable && (
+                {/* ─── Your activity: rating, review, and viewings in one card ─── */}
+                {isAuthenticated && (sheetIsAvailable || sheetEpLogs.length > 0) && (
                   <GlassSurface
                     radius={18}
                     variant="surface"
@@ -3829,7 +4070,7 @@ export default function ShowScreen() {
                   >
                     <View className="flex-row items-center justify-between">
                       <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
-                        Your rating
+                        Your activity
                       </Text>
                       {myEpRating > 0 && (
                         <Text className="text-sm font-medium text-text-tertiary">
@@ -3837,6 +4078,7 @@ export default function ShowScreen() {
                         </Text>
                       )}
                     </View>
+                    {sheetIsAvailable && (
                     <View className="mt-3">
                       <StarRating
                         value={myEpRating}
@@ -3890,9 +4132,10 @@ export default function ShowScreen() {
                         size={32}
                       />
                     </View>
+                    )}
 
                     {/* Episode review */}
-                    {myEpRating > 0 && (
+                    {sheetIsAvailable && myEpRating > 0 && (
                       <View className="mt-3">
                         {episodeReviewExpanded ? (
                           <View>
@@ -4035,143 +4278,346 @@ export default function ShowScreen() {
                         )}
                       </View>
                     )}
+
+                    {/* Viewing history */}
+                    {sheetEpLogs.length > 0 && (
+                      <View
+                        className={sheetIsAvailable ? "mt-4 pt-3" : "mt-2"}
+                        style={
+                          sheetIsAvailable
+                            ? {
+                                borderTopColor: "rgba(255,255,255,0.07)",
+                                borderTopWidth: StyleSheet.hairlineWidth,
+                              }
+                            : undefined
+                        }
+                      >
+                        <View className="flex-row items-center justify-between">
+                          <Text className="text-sm font-semibold text-text-secondary">
+                            Viewings
+                          </Text>
+                          <View className="rounded-full border border-brand-500/25 bg-brand-500/10 px-2 py-0.5">
+                            <Text className="text-[11px] font-bold text-brand-300">
+                              ×{sheetEpLogs.length}
+                            </Text>
+                          </View>
+                        </View>
+                        <View className="mt-1">
+                          {sheetEpLogs.map((log: any, index: number) => (
+                            <Pressable
+                              key={log._id}
+                              accessibilityLabel={`Edit viewing from ${formatWatchedDateLabel(log)}`}
+                              className="flex-row items-center gap-3 py-2.5 active:opacity-70"
+                              style={
+                                index < sheetEpLogs.length - 1
+                                  ? {
+                                      borderBottomColor: "rgba(255,255,255,0.07)",
+                                      borderBottomWidth: StyleSheet.hairlineWidth,
+                                    }
+                                  : undefined
+                              }
+                              onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setLogSheetState({ editLog: log });
+                              }}
+                            >
+                              <Ionicons
+                                name={log.isRewatch ? "repeat" : "checkmark-circle-outline"}
+                                size={16}
+                                color={log.isRewatch ? "#38BDF8" : "#5A6070"}
+                              />
+                              <View className="min-w-0 flex-1">
+                                <Text className="text-[14px] font-medium text-text-primary">
+                                  {formatWatchedDateLabel(log)}
+                                </Text>
+                                {log.note ? (
+                                  <Text
+                                    className="mt-0.5 text-[12px] text-text-tertiary"
+                                    numberOfLines={1}
+                                  >
+                                    {log.note}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              {typeof log.rating === "number" ? (
+                                <View className="flex-row items-center gap-1">
+                                  <Ionicons name="star" size={12} color="#FBBF24" />
+                                  <Text className="text-[12px] font-semibold text-amber-300">
+                                    {log.rating}
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {log.reaction ? (
+                                <Text style={{ fontSize: 14 }}>{log.reaction}</Text>
+                              ) : null}
+                              <Ionicons name="chevron-forward" size={14} color="#404654" />
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    )}
                   </GlassSurface>
                 )}
 
-                {/* ─── Community Reviews ─── */}
+                {/* ─── Friends who watched this ─── */}
+                {isAuthenticated && sheetFriendWatchers.length > 0 && (
+                  <View className="mt-6">
+                    <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Friends
+                    </Text>
+                    <GlassSurface
+                      radius={18}
+                      variant="surface"
+                      fallbackColor="rgba(22,26,34,0.66)"
+                      style={{ marginTop: 12 }}
+                      contentStyle={{ paddingHorizontal: 16, paddingVertical: 6 }}
+                    >
+                      {sheetFriendWatchers.map((watcher: any, index: number) => {
+                        const watcherName =
+                          watcher.user?.displayName ??
+                          watcher.user?.name ??
+                          watcher.user?.username ??
+                          "Someone";
+                        return (
+                          <LinkPressable
+                            key={watcher.user._id}
+                            href={`/profile/${watcher.user._id}`}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open ${watcherName}'s profile`}
+                            className="flex-row items-center gap-3 py-2.5 active:opacity-70 hover:opacity-80 web:transition-opacity"
+                            style={
+                              index < sheetFriendWatchers.length - 1
+                                ? {
+                                    borderBottomColor: "rgba(255,255,255,0.07)",
+                                    borderBottomWidth: StyleSheet.hairlineWidth,
+                                  }
+                                : undefined
+                            }
+                          >
+                            <Avatar
+                              uri={watcher.avatarUrl}
+                              label={watcherName}
+                              size={30}
+                            />
+                            <Text
+                              className="min-w-0 flex-1 text-[14px] font-medium text-text-primary"
+                              numberOfLines={1}
+                            >
+                              {watcherName}
+                            </Text>
+                            {typeof watcher.rating === "number" ? (
+                              <View className="flex-row items-center gap-1">
+                                <Ionicons name="star" size={12} color="#FBBF24" />
+                                <Text className="text-[12px] font-semibold text-amber-300">
+                                  {watcher.rating}
+                                </Text>
+                              </View>
+                            ) : null}
+                            <Text className="text-[12px] text-text-tertiary">
+                              {formatRelativeTime(watcher.watchedAt)}
+                            </Text>
+                          </LinkPressable>
+                        );
+                      })}
+                      {sheetFriendTotal > sheetFriendWatchers.length ? (
+                        <Text className="pb-2.5 pt-1 text-[12px] text-text-tertiary">
+                          +{sheetFriendTotal - sheetFriendWatchers.length} more from people you
+                          follow
+                        </Text>
+                      ) : null}
+                    </GlassSurface>
+                  </View>
+                )}
+
+                {/* ─── Community ─── */}
                 {(hasEpisodeRatingStats || episodeCommunityReviewItems.length > 0) && (
                   <View className="mt-6">
-                    <View className="flex-row items-center gap-2.5">
-                      <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
-                        Community
-                      </Text>
-                      {hasEpisodeRatingStats && (
-                        <GlassSurface
-                          radius={999}
-                          variant="control"
-                          fallbackColor="rgba(251,191,36,0.08)"
-                          tintColor="rgba(251,191,36,0.08)"
-                          borderColor="rgba(251,191,36,0.14)"
-                          contentStyle={{
-                            alignItems: "center",
-                            flexDirection: "row",
-                            gap: 4,
-                            paddingHorizontal: 8,
-                            paddingVertical: 2,
-                          }}
-                        >
-                          <Ionicons name="star" size={10} color="#fbbf24" />
-                          <Text className="text-[11px] font-semibold" style={{ color: "#fcd34d" }}>
-                            {episodeStats.averageRating.toFixed(1)}
-                          </Text>
-                          <Text className="text-[11px] text-text-tertiary">
-                            ({episodeStats.reviewCount ?? episodeStats.count})
-                          </Text>
-                        </GlassSurface>
-                      )}
-                    </View>
-                    {episodeCommunityReviewItems.length > 0 && (
-                      <View className="mt-3 gap-3">
-                        {episodeCommunityReviewItems.map((item: any) => (
-                          <GlassSurface
-                            key={item.review._id}
-                            radius={18}
-                            variant="surface"
-                            fallbackColor="rgba(22,26,34,0.58)"
-                            contentStyle={{ padding: 14 }}
-                          >
-                            <View className="flex-row items-center gap-2.5">
-                              <Avatar
-                                uri={item.authorAvatarUrl}
-                                label={item.author?.displayName ?? item.author?.username ?? "?"}
-                                size={26}
-                              />
-                              <Text className="flex-1 text-[13px] font-semibold text-text-primary">
-                                {item.author?.displayName ?? item.author?.username ?? "User"}
-                              </Text>
-                              <View className="flex-row items-center gap-1">
-                                {Array.from({ length: 5 }, (_, i) => (
-                                  <Ionicons
-                                    key={i}
-                                    name={i < Math.round(item.review.rating) ? "star" : "star-outline"}
-                                    size={11}
-                                    color={i < Math.round(item.review.rating) ? "#fbbf24" : "#3b3f4a"}
-                                  />
-                                ))}
-                              </View>
+                    <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Community
+                    </Text>
+                    {hasEpisodeRatingStats && sheetHistogram && (
+                      <GlassSurface
+                        radius={18}
+                        variant="surface"
+                        fallbackColor="rgba(22,26,34,0.66)"
+                        style={{ marginTop: 12 }}
+                        contentStyle={{ padding: 16 }}
+                      >
+                        <View className="flex-row items-center gap-5">
+                          <View className="items-center">
+                            <Text className="text-3xl font-bold tabular-nums text-text-primary">
+                              {episodeStats.averageRating.toFixed(1)}
+                            </Text>
+                            <View className="mt-1 flex-row items-center gap-0.5">
+                              {Array.from({ length: 5 }, (_, i) => (
+                                <Ionicons
+                                  key={i}
+                                  name={
+                                    i < Math.round(episodeStats.averageRating)
+                                      ? "star"
+                                      : "star-outline"
+                                  }
+                                  size={10}
+                                  color={
+                                    i < Math.round(episodeStats.averageRating)
+                                      ? "#fbbf24"
+                                      : "#3b3f4a"
+                                  }
+                                />
+                              ))}
                             </View>
-                            {item.review.reviewText ? (
-                              <Text
-                                className="mt-2 text-sm leading-5 text-text-secondary"
-                                numberOfLines={4}
-                                style={
-                                  Platform.OS === "web"
-                                    ? { userSelect: "text" as const }
-                                    : null
-                                }
-                              >
-                                {item.review.reviewText}
-                              </Text>
-                            ) : null}
-                          </GlassSurface>
+                            <Text className="mt-1 text-[11px] text-text-tertiary">
+                              {episodeStats.reviewCount ?? episodeStats.count} rating
+                              {(episodeStats.reviewCount ?? episodeStats.count) === 1 ? "" : "s"}
+                            </Text>
+                          </View>
+                          <View className="flex-1">
+                            <RatingHistogram histogram={sheetHistogram} compact />
+                          </View>
+                        </View>
+                      </GlassSurface>
+                    )}
+                    {episodeCommunityReviewItems.length > 0 && (
+                      <View className="mt-1">
+                        {episodeCommunityReviewItems.map((item: any, index: number) => (
+                          <EpisodeReviewRow
+                            key={item.review._id}
+                            item={item}
+                            isLast={index === episodeCommunityReviewItems.length - 1}
+                          />
                         ))}
                       </View>
                     )}
                   </View>
                 )}
 
-                {/* ─── Crew & Guest Stars ─── */}
-                {(selectedEpisode.episode.crew?.length > 0 || selectedEpisode.episode.guestStars?.length > 0) && (
+                {/* ─── Guest Stars & Crew ─── */}
+                {sheetGuestStars.length > 0 && (
                   <View className="mt-6">
-                    {selectedEpisode.episode.crew?.length > 0 && (
-                      <View>
-                        <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
-                          Crew
-                        </Text>
-                        <View className="mt-2.5 flex-row flex-wrap gap-2">
-                          {selectedEpisode.episode.crew.map((person: any) => (
-                            <GlassSurface
-                              key={`${selectedEpisode.episode.id}-${person.id}-${person.job}`}
-                              radius={999}
-                              variant="surface"
-                              fallbackColor="rgba(255,255,255,0.05)"
-                              borderColor="rgba(255,255,255,0.08)"
-                              contentStyle={{ paddingHorizontal: 12, paddingVertical: 6 }}
-                            >
-                              <Text className="text-xs text-text-secondary">
-                                <Text className="font-medium text-text-primary">{person.name}</Text>
-                                {" · "}{person.job}
-                              </Text>
-                            </GlassSurface>
-                          ))}
-                        </View>
-                      </View>
-                    )}
+                    <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Guest Stars
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ marginHorizontal: -20, marginTop: 12 }}
+                      contentContainerStyle={{ paddingHorizontal: 20 }}
+                    >
+                      {sheetGuestStars.map((person: any) => (
+                        <CastMember
+                          key={`guest-${person.id}`}
+                          name={person.name}
+                          role={person.character ?? ""}
+                          profilePath={person.profilePath}
+                          personId={String(person.id)}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          }}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
 
-                    {selectedEpisode.episode.guestStars?.length > 0 && (
-                      <View className={selectedEpisode.episode.crew?.length > 0 ? "mt-5" : ""}>
-                        <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
-                          Guest Stars
-                        </Text>
-                        <View className="mt-2.5 flex-row flex-wrap gap-2">
-                          {selectedEpisode.episode.guestStars.map((person: any) => (
-                            <GlassSurface
-                              key={`${selectedEpisode.episode.id}-guest-${person.id}`}
-                              radius={999}
-                              variant="surface"
-                              fallbackColor="rgba(14,165,233,0.06)"
-                              borderColor="rgba(14,165,233,0.12)"
-                              contentStyle={{ paddingHorizontal: 12, paddingVertical: 6 }}
-                            >
-                              <Text className="text-xs text-text-secondary">
-                                <Text className="font-medium text-text-primary">{person.name}</Text>
-                                {person.character ? ` as ${person.character}` : ""}
-                              </Text>
-                            </GlassSurface>
-                          ))}
+                {sheetCrew.length > 0 && (
+                  <View className="mt-6">
+                    <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Crew
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ marginHorizontal: -20, marginTop: 12 }}
+                      contentContainerStyle={{ paddingHorizontal: 20 }}
+                    >
+                      {sheetCrew.map((person: any) => (
+                        <CastMember
+                          key={`crew-${person.id}`}
+                          name={person.name}
+                          role={person.jobs.join(" · ")}
+                          profilePath={person.profilePath}
+                          personId={String(person.id)}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          }}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* ─── Up next ─── */}
+                {sheetNextEpisode && episodeNavContext?.next && (
+                  <View className="mt-6">
+                    <Text className="text-xs font-semibold uppercase text-text-tertiary" style={{ letterSpacing: 1.2 }}>
+                      Up next
+                    </Text>
+                    <GlassPressable
+                      accessibilityLabel={`Open next episode: ${sheetNextEpisode.name}`}
+                      accessibilityRole="button"
+                      radius={18}
+                      variant="surface"
+                      fallbackColor="rgba(22,26,34,0.66)"
+                      style={{ marginTop: 12 }}
+                      contentStyle={{
+                        alignItems: "center",
+                        flexDirection: "row",
+                        gap: 12,
+                        padding: 10,
+                      }}
+                      onPress={() => {
+                        if (!episodeNavContext.next) return;
+                        void goToEpisode(episodeNavContext.next);
+                      }}
+                    >
+                      {sheetNextEpisode.stillPath ? (
+                        <Image
+                          source={{ uri: sheetNextEpisode.stillPath }}
+                          accessibilityLabel={`${sheetNextEpisode.name} still`}
+                          style={{
+                            aspectRatio: 16 / 9,
+                            backgroundColor: "#1C2028",
+                            borderRadius: 10,
+                            width: 104,
+                          }}
+                          contentFit="cover"
+                          transition={150}
+                        />
+                      ) : (
+                        <View
+                          className="items-center justify-center"
+                          style={{
+                            aspectRatio: 16 / 9,
+                            backgroundColor: "#1C2028",
+                            borderRadius: 10,
+                            width: 104,
+                          }}
+                        >
+                          <Ionicons name="tv-outline" size={22} color="#3b3f4a" />
                         </View>
+                      )}
+                      <View className="min-w-0 flex-1">
+                        <Text className="text-[11px] font-bold text-text-tertiary" style={{ letterSpacing: 1 }}>
+                          {`S${String(episodeNavContext.next.seasonNumber).padStart(2, "0")} E${String(sheetNextEpisode.episodeNumber).padStart(2, "0")}`}
+                        </Text>
+                        <Text
+                          className="mt-0.5 text-[15px] font-semibold text-text-primary"
+                          numberOfLines={1}
+                        >
+                          {sheetNextEpisode.name}
+                        </Text>
+                        {!isEpisodeAvailable(sheetNextEpisode.airDate) &&
+                        sheetNextEpisode.airDate ? (
+                          <Text className="mt-0.5 text-[12px] text-text-tertiary">
+                            Airs {formatDate(new Date(sheetNextEpisode.airDate).getTime())}
+                          </Text>
+                        ) : null}
                       </View>
-                    )}
+                      <Ionicons name="chevron-forward" size={16} color="#404654" />
+                    </GlassPressable>
                   </View>
                 )}
               </View>
@@ -4210,6 +4656,156 @@ export default function ShowScreen() {
 }
 
 /* ─── Inline Sub-components ─── */
+
+// Heart control for episode review rows. Counts are seeded from the review
+// list payload (likeCount/likedByViewer) and adjusted optimistically — the
+// self-fetching LikeButton would cost two queries per row here.
+function EpisodeReviewLike({
+  reviewId,
+  likeCount,
+  likedByViewer,
+}: {
+  reviewId: string;
+  likeCount: number;
+  likedByViewer: boolean;
+}) {
+  const { isAuthenticated } = useAuth();
+  const toggle = useMutation(api.likes.toggle);
+  const [override, setOverride] = useState<{ liked: boolean; count: number } | null>(null);
+
+  // Server refetches win over stale optimistic state.
+  useEffect(() => {
+    setOverride(null);
+  }, [likeCount, likedByViewer]);
+
+  const liked = override?.liked ?? likedByViewer;
+  const count = override?.count ?? likeCount;
+
+  return (
+    <Pressable
+      onPress={() => {
+        if (!isAuthenticated) {
+          if (Platform.OS === "web") {
+            promptSignIn("Sign in to like this review.");
+          } else {
+            Alert.alert("Sign in required", "Sign in to like this review.");
+          }
+          return;
+        }
+        const willLike = !liked;
+        Haptics.impactAsync(
+          willLike ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light,
+        );
+        setOverride({ liked: willLike, count: Math.max(0, count + (willLike ? 1 : -1)) });
+        toggle({ targetType: "review", targetId: reviewId });
+      }}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityState={{ selected: liked }}
+      accessibilityLabel={
+        liked
+          ? `Unlike. ${count} ${count === 1 ? "like" : "likes"}`
+          : `Like. ${count} ${count === 1 ? "like" : "likes"}`
+      }
+      className="flex-row items-center gap-1 pt-3 web:transition-opacity active:opacity-80 hover:opacity-80"
+      style={{ minHeight: 32, minWidth: 32, justifyContent: "flex-start" }}
+    >
+      <Ionicons
+        name={liked ? "heart" : "heart-outline"}
+        size={18}
+        color={liked ? "#F43F5E" : "#9BA1B0"}
+        accessible={false}
+        accessibilityElementsHidden
+        aria-hidden={true}
+        importantForAccessibility="no"
+      />
+      {count > 0 ? (
+        <Text
+          className="text-[12px] font-semibold"
+          style={{ color: liked ? "#F43F5E" : "#9BA1B0" }}
+        >
+          {count}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+// Episode community review row: the row body links to the full review page
+// (comments, report, context) with the like control as a sibling pressable —
+// nesting it would emit a button inside a button on web.
+function EpisodeReviewRow({ item, isLast }: { item: any; isLast: boolean }) {
+  const review = item.review;
+  const label =
+    item.author?.displayName ?? item.author?.name ?? item.author?.username ?? "Someone";
+  return (
+    <View
+      className="flex-row items-start gap-2"
+      style={
+        isLast
+          ? undefined
+          : {
+              borderBottomColor: "rgba(255,255,255,0.07)",
+              borderBottomWidth: StyleSheet.hairlineWidth,
+            }
+      }
+    >
+      <LinkPressable
+        href={`/review/${review._id}`}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Review by ${label}, ${review.rating} out of 5 stars`}
+        className="min-w-0 flex-1 flex-row gap-3 py-3 web:transition-opacity active:opacity-80 hover:opacity-80"
+      >
+        <Avatar uri={item.authorAvatarUrl} label={label} size={32} />
+        <View className="min-w-0 flex-1">
+          <View className="flex-row items-center gap-1.5">
+            <Text
+              className="shrink text-[13px] font-semibold text-text-primary"
+              numberOfLines={1}
+            >
+              {label}
+            </Text>
+            <View className="flex-row items-center gap-0.5">
+              {Array.from({ length: 5 }, (_, i) => (
+                <Ionicons
+                  key={i}
+                  name={i < Math.round(review.rating) ? "star" : "star-outline"}
+                  size={11}
+                  color={i < Math.round(review.rating) ? "#fbbf24" : "#3b3f4a"}
+                />
+              ))}
+            </View>
+            {review.createdAt ? (
+              <Text className="text-[11px] text-text-tertiary">
+                {formatRelativeTime(review.createdAt)}
+              </Text>
+            ) : null}
+          </View>
+          {review.reviewText ? (
+            <View className="mt-0.5">
+              <SpoilerShield active={Boolean(review.spoiler)}>
+                <Text
+                  className="text-sm leading-5 text-text-secondary"
+                  numberOfLines={4}
+                >
+                  {review.reviewText}
+                </Text>
+              </SpoilerShield>
+            </View>
+          ) : null}
+        </View>
+      </LinkPressable>
+      <EpisodeReviewLike
+        reviewId={review._id}
+        likeCount={item.likeCount ?? 0}
+        likedByViewer={Boolean(item.likedByViewer)}
+      />
+    </View>
+  );
+}
 
 function GlanceItem({
   label,

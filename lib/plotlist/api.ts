@@ -89,6 +89,7 @@ export const api = {
     getExtendedDetails: ref("action", "shows:getExtendedDetails"),
     getSeasonDetails: ref("action", "shows:getSeasonDetails"),
     getImdbRatings: ref("action", "shows:getImdbRatings"),
+    getEpisodeFriendWatchers: ref("query", "shows:getEpisodeFriendWatchers"),
   },
   people: {
     getDetails: ref("action", "people:getDetails"),
@@ -133,6 +134,7 @@ export const api = {
     listForUserDetailed: ref("query", "reviews:listForUserDetailed"),
     getMyEpisodeRatings: ref("query", "reviews:getMyEpisodeRatings"),
     getEpisodeStats: ref("query", "reviews:getEpisodeStats"),
+    getShowStats: ref("query", "reviews:getShowStats"),
   },
   lists: {
     create: ref("mutation", "lists:create"),

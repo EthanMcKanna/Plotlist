@@ -3203,6 +3203,25 @@ async function detailedWatchStates(userId: string, args: any, publicOnly = false
   );
 }
 
+// Aggregate rating summary: count/average plus a 5-bucket distribution
+// (index 0 = 1 star … index 4 = 5 stars; half-star ratings round to the
+// nearest whole bucket).
+function buildRatingStats(ratings: number[]) {
+  const histogram = [0, 0, 0, 0, 0];
+  for (const rating of ratings) {
+    const bucket = Math.min(5, Math.max(1, Math.round(rating)));
+    histogram[bucket - 1] += 1;
+  }
+  return {
+    count: ratings.length,
+    reviewCount: ratings.length,
+    averageRating: ratings.length
+      ? ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length
+      : null,
+    histogram,
+  };
+}
+
 async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>, viewerId?: string) {
   const authorIds = Array.from(new Set(reviewRows.map((review) => review.authorId)));
   const showIds = Array.from(new Set(reviewRows.map((review) => review.showId)));
@@ -3211,6 +3230,9 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
     showIds.length ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
   ]);
   const authors = new Map(authorRows.map((user) => [user.id, toClientUser(user)] as const));
+  const authorAvatars = new Map(
+    authorRows.map((user) => [user.id, user.avatarUrl ?? user.image ?? null] as const),
+  );
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
   const likeRows =
     reviewRows.length > 0
@@ -3236,6 +3258,7 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
   return reviewRows.map((review) => ({
     review: toDoc(review),
     author: authors.get(review.authorId) ?? null,
+    authorAvatarUrl: authorAvatars.get(review.authorId) ?? null,
     show: showMap.get(review.showId) ?? null,
     likeCount: likeCount.get(review.id) ?? 0,
     likedByViewer: likedByViewer.has(review.id),
@@ -4593,7 +4616,27 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)))
       .orderBy(desc(reviews.createdAt));
     const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
-    return pageRows(await buildReviewDetails(visibleRows, viewer?.id), args);
+    // People the viewer follows surface first; each group keeps newest-first
+    // order from the query above (sort is stable).
+    let orderedRows = visibleRows;
+    if (viewer && visibleRows.length > 1) {
+      const authorIds = Array.from(new Set(visibleRows.map((row) => row.authorId)));
+      const followedAuthors = new Set<string>();
+      for (const chunk of chunkForSqlParams(authorIds, 1, 80)) {
+        const followRows = await db
+          .select()
+          .from(follows)
+          .where(and(eq(follows.followerId, viewer.id), inArray(follows.followeeId, chunk)));
+        for (const row of followRows) {
+          followedAuthors.add(row.followeeId);
+        }
+      }
+      orderedRows = [...visibleRows].sort(
+        (left, right) =>
+          Number(followedAuthors.has(right.authorId)) - Number(followedAuthors.has(left.authorId)),
+      );
+    }
+    return pageRows(await buildReviewDetails(orderedRows, viewer?.id), args);
   },
   "reviews:listForUserDetailed": async ({ args, req }) => {
     const viewer = await getOptionalAuthUser(req);
@@ -4619,12 +4662,87 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .select()
       .from(reviews)
       .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)));
+    return buildRatingStats(rows.map((row) => row.rating));
+  },
+  "reviews:getShowStats": async ({ args }) => {
+    const parsed = z.object({ showId: z.string() }).parse(args ?? {});
+    // Show-level reviews only, matching listForShowDetailed — episode ratings
+    // have their own per-episode stats.
+    const rows = await db
+      .select()
+      .from(reviews)
+      .where(and(eq(reviews.showId, parsed.showId), isNull(reviews.seasonNumber)));
+    return buildRatingStats(rows.map((row) => row.rating));
+  },
+  "shows:getEpisodeFriendWatchers": async ({ args, req }) => {
+    const viewer = await getOptionalAuthUser(req);
+    if (!viewer) {
+      return { watchers: [], totalCount: 0 };
+    }
+    const parsed = z
+      .object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number() })
+      .parse(args ?? {});
+    // Follows are already a privacy-safe audience: private accounts approve
+    // followers, and blocks sever the edge in both directions.
+    const followRows = await db
+      .select()
+      .from(follows)
+      .where(eq(follows.followerId, viewer.id));
+    const followeeIds = followRows.map((row) => row.followeeId);
+    if (followeeIds.length === 0) {
+      return { watchers: [], totalCount: 0 };
+    }
+    const progressRows: Array<typeof episodeProgress.$inferSelect> = [];
+    for (const chunk of chunkForSqlParams(followeeIds, 1, 80)) {
+      const rows = await db
+        .select()
+        .from(episodeProgress)
+        .where(
+          and(
+            eq(episodeProgress.showId, parsed.showId),
+            eq(episodeProgress.seasonNumber, parsed.seasonNumber),
+            eq(episodeProgress.episodeNumber, parsed.episodeNumber),
+            inArray(episodeProgress.userId, chunk),
+          ),
+        );
+      progressRows.push(...rows);
+    }
+    if (progressRows.length === 0) {
+      return { watchers: [], totalCount: 0 };
+    }
+    progressRows.sort((left, right) => right.watchedAt - left.watchedAt);
+    const visible = progressRows.slice(0, 12);
+    const watcherIds = visible.map((row) => row.userId);
+    const [watcherUsers, ratingRows] = await Promise.all([
+      getUsersByIdsChunked(watcherIds),
+      db
+        .select()
+        .from(reviews)
+        .where(
+          and(
+            eq(reviews.showId, parsed.showId),
+            eq(reviews.seasonNumber, parsed.seasonNumber),
+            eq(reviews.episodeNumber, parsed.episodeNumber),
+            inArray(reviews.authorId, watcherIds),
+          ),
+        ),
+    ]);
+    const userMap = new Map(watcherUsers.map((user) => [user.id, user] as const));
+    const ratingMap = new Map(ratingRows.map((row) => [row.authorId, row.rating] as const));
     return {
-      count: rows.length,
-      reviewCount: rows.length,
-      averageRating: rows.length
-        ? rows.reduce((sum, row) => sum + row.rating, 0) / rows.length
-        : null,
+      watchers: visible.flatMap((row) => {
+        const user = userMap.get(row.userId);
+        if (!user) return [];
+        return [
+          {
+            user: toClientUser(user),
+            avatarUrl: user.avatarUrl ?? user.image ?? null,
+            watchedAt: row.watchedAt,
+            rating: ratingMap.get(row.userId) ?? null,
+          },
+        ];
+      }),
+      totalCount: progressRows.length,
     };
   },
   "lists:get": async ({ args, req }) => {
