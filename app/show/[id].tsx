@@ -3534,11 +3534,6 @@ export default function ShowScreen() {
             )?.rating ?? null;
           const selectedStillPath =
             selectedEpisode.episode.stillPath ?? selectedEpisode.episode.still_path ?? null;
-          const sheetTmdbRating =
-            typeof selectedEpisode.episode.voteAverage === "number" &&
-            selectedEpisode.episode.voteAverage > 0
-              ? selectedEpisode.episode.voteAverage
-              : null;
           const sheetHistogram = Array.isArray(episodeStats?.histogram)
             ? episodeStats.histogram
             : null;
@@ -3621,17 +3616,9 @@ export default function ShowScreen() {
                   episodeSheetStyle,
                 ]}
               >
-                <GlassSurface
-                  radius={20}
-                  variant="sheet"
-                  fallbackColor="rgba(13,15,20,0.94)"
-                  style={{
-                    flex: 1,
-                    borderBottomLeftRadius: isWideLayout ? 20 : 0,
-                    borderBottomRightRadius: isWideLayout ? 20 : 0,
-                  }}
-                  contentStyle={{ flex: 1 }}
-                >
+                {/* Solid content surface — glass stays on the nav layer only
+                    (close/share, prev/next), matching the show page. */}
+                <View style={{ flex: 1, backgroundColor: "#0D0F14" }}>
                 <Animated.ScrollView
                   ref={sheetScrollRef}
                   // flex lives in style, not className — NativeWind classes
@@ -3770,9 +3757,8 @@ export default function ShowScreen() {
                 <View className="absolute bottom-4 left-5 right-5">
                   <GlassSurface
                     radius={999}
-                    variant="control"
-                    fallbackColor="rgba(0,0,0,0.34)"
-                    tintColor="rgba(255,255,255,0.07)"
+                    variant="surface"
+                    fallbackColor="rgba(0,0,0,0.42)"
                     style={{ alignSelf: "flex-start" }}
                     contentStyle={{
                       alignItems: "center",
@@ -3877,7 +3863,6 @@ export default function ShowScreen() {
                 {/* Ratings strip — visible to everyone, signed in or not */}
                 {(sheetImdbLoading ||
                   sheetImdbRating !== null ||
-                  sheetTmdbRating !== null ||
                   hasEpisodeRatingStats) && (
                   <View className="mt-4 flex-row flex-wrap items-center gap-2.5">
                     {sheetImdbLoading ? (
@@ -3885,9 +3870,8 @@ export default function ShowScreen() {
                     ) : sheetImdbRating !== null ? (
                       <GlassSurface
                         radius={999}
-                        variant="control"
+                        variant="surface"
                         fallbackColor="rgba(245,197,24,0.08)"
-                        tintColor="rgba(245,197,24,0.08)"
                         borderColor="rgba(245,197,24,0.16)"
                         contentStyle={{
                           alignItems: "center",
@@ -3903,38 +3887,11 @@ export default function ShowScreen() {
                         </Text>
                       </GlassSurface>
                     ) : null}
-                    {sheetTmdbRating !== null ? (
-                      <GlassSurface
-                        radius={999}
-                        variant="control"
-                        fallbackColor="rgba(1,180,228,0.08)"
-                        tintColor="rgba(1,180,228,0.08)"
-                        borderColor="rgba(1,180,228,0.18)"
-                        contentStyle={{
-                          alignItems: "center",
-                          flexDirection: "row",
-                          gap: 6,
-                          paddingHorizontal: 12,
-                          paddingVertical: 8,
-                        }}
-                      >
-                        <Text
-                          className="text-[10px] font-bold"
-                          style={{ color: "#67d5f5", letterSpacing: 0.8 }}
-                        >
-                          TMDB
-                        </Text>
-                        <Text className="text-sm font-semibold" style={{ color: "#8ee0fa" }}>
-                          {sheetTmdbRating.toFixed(1)}
-                        </Text>
-                      </GlassSurface>
-                    ) : null}
                     {hasEpisodeRatingStats ? (
                       <GlassSurface
                         radius={999}
-                        variant="control"
+                        variant="surface"
                         fallbackColor="rgba(251,191,36,0.08)"
-                        tintColor="rgba(251,191,36,0.08)"
                         borderColor="rgba(251,191,36,0.14)"
                         contentStyle={{
                           alignItems: "center",
@@ -3963,13 +3920,12 @@ export default function ShowScreen() {
                     <GlassPressable
                       disabled={!sheetIsAvailable}
                       radius={999}
-                      variant={sheetIsWatched ? "prominent" : "control"}
+                      variant="surface"
                       fallbackColor={
                         sheetIsWatched
                           ? "rgba(14,165,233,0.15)"
                           : "rgba(255,255,255,0.05)"
                       }
-                      tintColor={sheetIsWatched ? "rgba(14,165,233,0.12)" : undefined}
                       borderColor={
                         sheetIsWatched ? "rgba(14,165,233,0.28)" : "rgba(255,255,255,0.08)"
                       }
@@ -4017,9 +3973,8 @@ export default function ShowScreen() {
                       <GlassPressable
                         accessibilityLabel={sheetIsWatched ? "Log a rewatch" : "Log with details"}
                         radius={999}
-                        variant="control"
+                        variant="surface"
                         fallbackColor="rgba(14,165,233,0.10)"
-                        tintColor="rgba(14,165,233,0.10)"
                         borderColor="rgba(14,165,233,0.22)"
                         contentStyle={{
                           alignItems: "center",
@@ -4141,7 +4096,7 @@ export default function ShowScreen() {
                           <View>
                             <GlassSurface
                               radius={12}
-                              variant="control"
+                              variant="surface"
                               fallbackColor="rgba(255,255,255,0.05)"
                               contentStyle={{ minHeight: 80 }}
                             >
@@ -4250,7 +4205,7 @@ export default function ShowScreen() {
                               setEpisodeReviewExpanded(true);
                             }}
                             radius={12}
-                            variant="control"
+                            variant="surface"
                             fallbackColor="rgba(255,255,255,0.05)"
                             contentStyle={{ padding: 12 }}
                           >
@@ -4622,7 +4577,7 @@ export default function ShowScreen() {
                 )}
               </View>
             </Animated.ScrollView>
-                </GlassSurface>
+                </View>
               </Animated.View>
             </GestureDetector>
           </View>
