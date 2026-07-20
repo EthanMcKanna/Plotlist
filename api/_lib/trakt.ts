@@ -81,6 +81,9 @@ async function traktFetch(args: {
           "content-type": "application/json",
           "trakt-api-version": "2",
           "trakt-api-key": clientId,
+          // Workers fetch sends no User-Agent by default and Trakt's edge
+          // 403s UA-less requests (verified 2026-07-20).
+          "user-agent": "Plotlist/1.0 (+https://plotlist.app)",
           ...(args.accessToken ? { authorization: `Bearer ${args.accessToken}` } : {}),
         },
         body: args.body === undefined ? undefined : JSON.stringify(args.body),
