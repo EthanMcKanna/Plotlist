@@ -353,6 +353,60 @@ export function normalizeWatchlistItems(
   return items;
 }
 
+// Fold history events into the watched structure so episode progress can be
+// derived even though the modern /sync/watched/shows response carries no
+// per-episode seasons breakdown (aggregate plays only — verified 2026-07-20;
+// history events are the underlying source of truth anyway). Episodes already
+// present from a seasons-style payload win; history-derived episodes use the
+// EARLIEST play as the watched date (rewatches live in the diary) and count
+// their plays. Original show order is preserved and new shows append, so the
+// progress cursor stays stable across resumes.
+export function mergeHistoryIntoWatched(
+  watched: TraktSnapshotWatchedShow[],
+  history: TraktSnapshotHistoryEvent[],
+): TraktSnapshotWatchedShow[] {
+  const byShow = new Map<string, TraktSnapshotWatchedShow>();
+  for (const show of watched) {
+    byShow.set(show.key, { ...show, episodes: [...show.episodes] });
+  }
+  const fromHistory = new Map<string, TraktSnapshotEpisode>();
+  const preexisting = new Set<string>();
+  for (const show of byShow.values()) {
+    for (const episode of show.episodes) {
+      preexisting.add(`${show.key}|${episode.seasonNumber}|${episode.episodeNumber}`);
+    }
+  }
+
+  const sorted = [...history].sort((a, b) => a.watchedAt - b.watchedAt || a.id - b.id);
+  for (const event of sorted) {
+    const episodeKey = `${event.key}|${event.seasonNumber}|${event.episodeNumber}`;
+    if (preexisting.has(episodeKey)) {
+      continue;
+    }
+    const existing = fromHistory.get(episodeKey);
+    if (existing) {
+      existing.plays += 1;
+      continue;
+    }
+    let show = byShow.get(event.key);
+    if (!show) {
+      show = { key: event.key, lastWatchedAt: null, episodes: [] };
+      byShow.set(event.key, show);
+    }
+    const episode: TraktSnapshotEpisode = {
+      seasonNumber: event.seasonNumber,
+      episodeNumber: event.episodeNumber,
+      plays: 1,
+      lastWatchedAt: event.watchedAt,
+    };
+    show.episodes.push(episode);
+    show.lastWatchedAt = Math.max(show.lastWatchedAt ?? 0, event.watchedAt) || event.watchedAt;
+    fromHistory.set(episodeKey, episode);
+  }
+
+  return Array.from(byShow.values()).filter((show) => show.episodes.length > 0);
+}
+
 // A viewing is a rewatch when an earlier history event exists for the same
 // episode. Events are compared chronologically (ties broken by event id, so
 // the flags are stable across runs); input order does not matter.

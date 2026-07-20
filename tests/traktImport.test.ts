@@ -4,6 +4,7 @@ import {
   buildShowRef,
   computeImportProgressPercent,
   computeRewatchFlags,
+  mergeHistoryIntoWatched,
   normalizeEpisodeRatings,
   normalizeHistoryItems,
   normalizeShowRatings,
@@ -128,6 +129,29 @@ describe("normalizeWatchedShows", () => {
     expect(refs["trakt:1388"]).toBeTruthy();
   });
 
+  it("drops seasons-less aggregate entries (the modern API shape)", () => {
+    // Since ~2025 /sync/watched/shows returns only aggregate plays — no
+    // seasons array. These entries carry no episode data; progress instead
+    // derives from history via mergeHistoryIntoWatched.
+    const refs: Record<string, TraktShowRef> = {};
+    const result = normalizeWatchedShows(
+      [
+        {
+          plays: 2,
+          last_watched_at: "2026-07-20T04:26:00.000Z",
+          last_updated_at: "2026-07-20T04:26:00.000Z",
+          reset_at: null,
+          show: { ...breakingBadShow, aired_episodes: 46 },
+        },
+      ],
+      refs,
+      NOW,
+    );
+    expect(result).toHaveLength(0);
+    // The show ref still registers so matching covers it.
+    expect(refs["trakt:1388"]).toBeTruthy();
+  });
+
   it("drops shows without keys or episodes and tolerates junk", () => {
     const refs: Record<string, TraktShowRef> = {};
     const result = normalizeWatchedShows(
@@ -232,6 +256,82 @@ describe("ratings + watchlist normalization", () => {
     expect(items).toEqual([
       { key: "trakt:1388", listedAt: Date.parse("2022-03-04T00:00:00.000Z") },
     ]);
+  });
+});
+
+describe("mergeHistoryIntoWatched", () => {
+  const historyEvent = (
+    id: number,
+    watchedAt: number,
+    episode: { s: number; e: number },
+    key = "trakt:1388",
+  ): TraktSnapshotHistoryEvent => ({
+    id,
+    key,
+    seasonNumber: episode.s,
+    episodeNumber: episode.e,
+    episodeTitle: null,
+    watchedAt,
+  });
+
+  it("builds watched shows entirely from history when watched/shows is bare", () => {
+    const merged = mergeHistoryIntoWatched(
+      [],
+      [
+        historyEvent(2, 2_000, { s: 1, e: 1 }),
+        historyEvent(1, 1_000, { s: 1, e: 1 }),
+        historyEvent(3, 3_000, { s: 1, e: 2 }),
+        historyEvent(4, 4_000, { s: 2, e: 1 }, "trakt:999"),
+      ],
+    );
+    expect(merged).toHaveLength(2);
+    const first = merged.find((show) => show.key === "trakt:1388")!;
+    // Earliest play wins as the watched date; both plays are counted.
+    expect(first.episodes).toEqual([
+      { seasonNumber: 1, episodeNumber: 1, plays: 2, lastWatchedAt: 1_000 },
+      { seasonNumber: 1, episodeNumber: 2, plays: 1, lastWatchedAt: 3_000 },
+    ]);
+    expect(merged.find((show) => show.key === "trakt:999")!.episodes).toHaveLength(1);
+  });
+
+  it("keeps seasons-style episodes untouched and only appends missing ones", () => {
+    const merged = mergeHistoryIntoWatched(
+      [
+        {
+          key: "trakt:1388",
+          lastWatchedAt: 9_000,
+          episodes: [{ seasonNumber: 1, episodeNumber: 1, plays: 5, lastWatchedAt: 9_000 }],
+        },
+      ],
+      [
+        historyEvent(1, 1_000, { s: 1, e: 1 }),
+        historyEvent(2, 2_000, { s: 1, e: 2 }),
+      ],
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].episodes).toEqual([
+      { seasonNumber: 1, episodeNumber: 1, plays: 5, lastWatchedAt: 9_000 },
+      { seasonNumber: 1, episodeNumber: 2, plays: 1, lastWatchedAt: 2_000 },
+    ]);
+  });
+
+  it("preserves original show order and appends new shows after", () => {
+    const merged = mergeHistoryIntoWatched(
+      [
+        {
+          key: "trakt:2",
+          lastWatchedAt: null,
+          episodes: [{ seasonNumber: 1, episodeNumber: 1, plays: 1, lastWatchedAt: 1 }],
+        },
+        {
+          key: "trakt:1",
+          lastWatchedAt: null,
+          episodes: [{ seasonNumber: 1, episodeNumber: 1, plays: 1, lastWatchedAt: 1 }],
+        },
+      ],
+      [historyEvent(1, 1_000, { s: 1, e: 1 }, "trakt:3")],
+    );
+    expect(merged.map((show) => show.key)).toEqual(["trakt:2", "trakt:1", "trakt:3"]);
   });
 });
 

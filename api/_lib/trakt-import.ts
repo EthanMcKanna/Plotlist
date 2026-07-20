@@ -17,6 +17,7 @@ import {
   computeImportProgressPercent,
   computeRewatchFlags,
   emptyTraktSnapshot,
+  mergeHistoryIntoWatched,
   normalizeEpisodeRatings,
   normalizeHistoryItems,
   normalizeShowRatings,
@@ -80,7 +81,9 @@ const MAX_JOB_FAILURES = 5;
 
 const HISTORY_PAGE_LIMIT = 100;
 const HISTORY_PAGES_PER_STEP = 8;
-const HISTORY_MAX_EVENTS = 25_000;
+// Progress derives from history too (watched/shows carries no per-episode
+// data anymore), so the cap bounds both the diary AND watched coverage.
+const HISTORY_MAX_EVENTS = 50_000;
 const MATCH_SHOWS_PER_STEP = 24;
 const MATCH_FETCH_CONCURRENCY = 8;
 const PROGRESS_SHOWS_PER_STEP = 12;
@@ -643,6 +646,20 @@ async function runPhaseStep(ctx: SliceContext): Promise<"step" | "completed" | "
       const done = await stepFetch(ctx);
       if (done) {
         job.phase = "match";
+        if (job.options.history) {
+          // /sync/watched/shows no longer breaks plays down per episode, so
+          // progress derives from the history events themselves; a seasons
+          // payload (if Trakt ever returns one) still wins per episode.
+          ctx.snapshot.watched = mergeHistoryIntoWatched(
+            ctx.snapshot.watched,
+            ctx.snapshot.history,
+          );
+          job.counts.watchedShowsTotal = ctx.snapshot.watched.length;
+          job.counts.episodesTotal = ctx.snapshot.watched.reduce(
+            (sum, show) => sum + show.episodes.length,
+            0,
+          );
+        }
         job.counts.showsTotal = Object.keys(ctx.snapshot.showRefs).length;
         await writeSnapshot(ensureSnapshotKey(ctx), ctx.snapshot);
       }

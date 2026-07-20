@@ -668,8 +668,8 @@ export default function ImportTraktScreen() {
             </GlassSurface>
             {(lastImport.counts.historyTruncated ?? 0) > 0 ? (
               <Text className="mt-2 text-xs leading-4 text-text-tertiary">
-                Your Trakt history is enormous — the diary import covered the most recent 25,000
-                plays. Watched episodes were still imported in full.
+                Your Trakt history is enormous — the import covered your most recent 50,000
+                plays.
               </Text>
             ) : null}
             {lastImport.unmatched.length > 0 ? (
