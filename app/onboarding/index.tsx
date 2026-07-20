@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { LoadingScreen } from "../../components/LoadingScreen";
+import { OnboardingImportStep } from "../../components/OnboardingImportStep";
 import { OnboardingPhoneStep } from "../../components/OnboardingPhoneStep";
 import { OnboardingProfileStep } from "../../components/OnboardingProfileStep";
 import { OnboardingTour } from "../../components/OnboardingTour";
@@ -15,9 +16,10 @@ import {
   markOnboardingStep,
 } from "../../lib/onboardingCache";
 import { getWelcomeTourSeen, getWelcomeTourSeenCached } from "../../lib/preferences";
+import { callQuery } from "../../lib/plotlist/rpc";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
 
-type Stage = "tour" | "profile" | "phone";
+type Stage = "tour" | "profile" | "phone" | "import";
 
 export default function OnboardingWizard() {
   const router = useRouter();
@@ -26,6 +28,17 @@ export default function OnboardingWizard() {
 
   const [stage, setStage] = useState<Stage | null>(null);
 
+  // Resolved in the background while the user fills earlier stages: the Trakt
+  // import stage only appears when the server has it configured and this
+  // account isn't already connected. Unresolved or errored reads as "no" —
+  // onboarding never waits on it beyond a short grace.
+  const traktAvailable = useRef<Promise<boolean> | null>(null);
+  if (traktAvailable.current === null) {
+    traktAvailable.current = callQuery(api.traktImport.getStatus, {})
+      .then((status: any) => Boolean(status?.configured && !status?.account))
+      .catch(() => false);
+  }
+
   const completeOnboarding = useCallback(async () => {
     const result = await setOnboardingStep({ step: "complete" });
     cacheOnboardingStep(result?.userId, "complete");
@@ -33,15 +46,37 @@ export default function OnboardingWizard() {
     router.replace("/home");
   }, [router, setOnboardingStep]);
 
+  const finishPhoneStage = useCallback(async () => {
+    const available = await Promise.race([
+      traktAvailable.current ?? Promise.resolve(false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_500)),
+    ]);
+    if (available) {
+      setStage("import");
+      return;
+    }
+    await completeOnboarding();
+  }, [completeOnboarding]);
+
+  // Completing via the import path lands on the import screen with home
+  // beneath it, so back (or finishing the import) drops into the app.
+  const completeOnboardingToImport = useCallback(async () => {
+    const result = await setOnboardingStep({ step: "complete" });
+    cacheOnboardingStep(result?.userId, "complete");
+    markOnboardingStep("complete");
+    router.replace("/home");
+    router.push("/settings/import-trakt");
+  }, [router, setOnboardingStep]);
+
   // Phone verification is the optional friend-discovery step — Apple sign-ups
   // have no phone hash yet, while phone-OTP accounts already verified one.
   const finishProfileStage = useCallback(async () => {
     if (me?.hasVerifiedPhone) {
-      await completeOnboarding();
+      await finishPhoneStage();
       return;
     }
     setStage("phone");
-  }, [completeOnboarding, me?.hasVerifiedPhone]);
+  }, [finishPhoneStage, me?.hasVerifiedPhone]);
 
   // Resolve the starting stage once `me` has loaded (null means the profile
   // record is still being created — treat it as a brand-new user).
@@ -100,10 +135,17 @@ export default function OnboardingWizard() {
             onSkip={finishProfileStage}
           />
         </Animated.View>
-      ) : (
+      ) : stage === "phone" ? (
         <Animated.View entering={FadeInRight.duration(240)} style={styles.stage}>
           <OnboardingPhoneStep
-            onDone={completeOnboarding}
+            onDone={finishPhoneStage}
+            onSkip={finishPhoneStage}
+          />
+        </Animated.View>
+      ) : (
+        <Animated.View entering={FadeInRight.duration(240)} style={styles.stage}>
+          <OnboardingImportStep
+            onImport={completeOnboardingToImport}
             onSkip={completeOnboarding}
           />
         </Animated.View>
