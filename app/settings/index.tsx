@@ -702,6 +702,13 @@ export default function SettingsScreen() {
               </>
             ) : null}
             <SettingsRow
+              icon="swap-vertical-outline"
+              iconColor="#0ea5e9"
+              label="Import from Trakt"
+              href="/settings/import-trakt"
+            />
+            <View className="mx-4 h-px bg-dark-border" />
+            <SettingsRow
               icon="download-outline"
               label="Export my data"
               onPress={handleExport}

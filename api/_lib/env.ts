@@ -14,6 +14,11 @@ const serverEnvSchema = z.object({
   APPLE_WEB_CLIENT_ID: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   OMDB_API_KEY: z.string().min(1).optional(),
+  // Trakt API app credentials (https://trakt.tv/oauth/applications). Both
+  // optional: without them the Trakt import feature reports itself
+  // unavailable instead of failing.
+  TRAKT_CLIENT_ID: z.string().min(1).optional(),
+  TRAKT_CLIENT_SECRET: z.string().min(1).optional(),
   OPENAI_MODERATION_API_KEY: z.string().min(1).optional(),
   GEMINI_EMBEDDING_MODEL: z.string().default("gemini-embedding-2"),
   GEMINI_EMBEDDING_VERSION: z.string().default("shows-v2-ge2-1536"),

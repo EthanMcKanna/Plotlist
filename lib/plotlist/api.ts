@@ -187,6 +187,15 @@ export const api = {
     resolve: ref("mutation", "reports:resolve"),
     listOpen: ref("query", "reports:listOpen"),
   },
+  traktImport: {
+    getStatus: ref("query", "traktImport:getStatus"),
+    cancel: ref("mutation", "traktImport:cancel"),
+    startDeviceAuth: ref("action", "traktImport:startDeviceAuth"),
+    pollDeviceAuth: ref("action", "traktImport:pollDeviceAuth"),
+    disconnect: ref("action", "traktImport:disconnect"),
+    start: ref("action", "traktImport:start"),
+    tick: ref("action", "traktImport:tick"),
+  },
   notifications: {
     list: ref("query", "notifications:list"),
     getUnreadCount: ref("query", "notifications:getUnreadCount"),

@@ -86,7 +86,9 @@ async function serveUploadedFile(pathname: string, request: Request) {
   }
 
   const key = decodeURIComponent(pathname.replace(/^\/files\//, ""));
-  if (!key || key.includes("..")) {
+  // Only user uploads are public. Other bucket prefixes (e.g. the Trakt
+  // import staging area) hold private data and must never be servable.
+  if (!key || key.includes("..") || !key.startsWith("uploads/")) {
     return jsonResponse(404, { error: { code: "not_found", message: "Not found" } });
   }
 

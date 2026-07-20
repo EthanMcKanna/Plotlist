@@ -11,6 +11,10 @@ import {
 import { refreshStaleHomeCatalogCategories } from "../api/_lib/rpc";
 import { runEmbeddingRefreshTick } from "../api/_lib/embedding-refresh";
 import { runShowIngestTick } from "../api/_lib/show-ingest";
+import {
+  cleanupTraktImportArtifacts,
+  runTraktImportCronTick,
+} from "../api/_lib/trakt-import";
 
 // Consolidated cron dispatch (six schedules):
 //   * * * * *       — bulk catalog ingest: drain due show_ingest_state rows
@@ -39,6 +43,16 @@ const EMBEDDING_SHOWS_PER_TICK = 40;
 export async function runScheduledTasks(cron: string) {
   try {
     if (cron === SHOW_INGEST_CRON) {
+      // Trakt imports ride the minute cron so a user's import keeps moving
+      // after they close the app. It runs first (a user is actively waiting
+      // on it) and never blocks ingest on failure.
+      const traktSummary = await runTraktImportCronTick().catch((error) => {
+        console.error("[cron] trakt import tick failed", error);
+        return { ran: false as const };
+      });
+      if (traktSummary.ran) {
+        console.info("[cron] trakt import", traktSummary);
+      }
       const summary = await runShowIngestTick(INGEST_SHOWS_PER_TICK);
       if (summary.selected > 0 || summary.changesSynced !== null) {
         console.info("[cron] show ingest", summary);
@@ -74,13 +88,14 @@ export async function runScheduledTasks(cron: string) {
     }
 
     if (cron === CLEANUP_CRON) {
-      const [tmdb, releases, auth, notifications] = await Promise.all([
+      const [tmdb, releases, auth, notifications, trakt] = await Promise.all([
         cleanupExpiredTmdbCache(),
         deleteExpiredReleaseEvents(),
         cleanupExpiredAuthArtifacts(),
         cleanupOldNotifications(),
+        cleanupTraktImportArtifacts(),
       ]);
-      console.info("[cron] cleanup", { tmdb, releases, auth, notifications });
+      console.info("[cron] cleanup", { tmdb, releases, auth, notifications, trakt });
       return;
     }
 

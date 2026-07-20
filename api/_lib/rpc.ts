@@ -137,6 +137,17 @@ import {
   resolveNotificationPreferences,
 } from "../../lib/notificationContent";
 import { getWatchInsightsForUser } from "./watch-insights";
+import { isTraktConfigured } from "./trakt";
+import {
+  cancelTraktImportJob,
+  disconnectTraktAccount,
+  getTraktImportStatus,
+  pollTraktDeviceAuth,
+  runInitialSliceForJob,
+  runTraktImportTickForUser,
+  startTraktDeviceAuth,
+  startTraktImportJob,
+} from "./trakt-import";
 import {
   getEpisodeProgressState,
   isEpisodeVerified,
@@ -5174,9 +5185,17 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     return resolveNotificationPreferences(user.notificationPreferences);
   },
+  "traktImport:getStatus": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await getTraktImportStatus(user.id);
+  },
 };
 
 export const mutationHandlers: Record<string, RpcHandler> = {
+  "traktImport:cancel": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await cancelTraktImportJob(user.id);
+  },
   "users:ensureProfile": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = ensureProfileArgs.parse(args ?? {});
@@ -7027,6 +7046,48 @@ export const actionHandlers: Record<string, RpcHandler> = {
       Math.min(parsed.limit ?? 25, RELEASE_CALENDAR_MAX_ITEMS),
       parsed.today,
     );
+  },
+  // ─── Trakt import (engine in api/_lib/trakt-import.ts) ───
+  "traktImport:startDeviceAuth": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    if (!isTraktConfigured()) {
+      throw new ApiError(503, "trakt_not_configured", "Trakt import isn't available right now");
+    }
+    await enforceRateLimit(rateLimitKey("trakt-device-auth", user.id), 10, 60 * 60 * 1000);
+    return await startTraktDeviceAuth(user.id);
+  },
+  "traktImport:pollDeviceAuth": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    if (!isTraktConfigured()) {
+      return { state: "none" };
+    }
+    return await pollTraktDeviceAuth(user.id);
+  },
+  "traktImport:disconnect": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await disconnectTraktAccount(user.id);
+  },
+  "traktImport:start": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        history: z.boolean(),
+        ratings: z.boolean(),
+        watchlist: z.boolean(),
+      })
+      .parse(args ?? {});
+    await enforceRateLimit(rateLimitKey("trakt-import-start", user.id), 12, 60 * 60 * 1000);
+    const job = await startTraktImportJob(user.id, parsed);
+    // Run the first slice inline so the response already carries progress;
+    // the client pump and the minute cron take it from here.
+    await runInitialSliceForJob(job.id).catch((error) => {
+      console.error("[trakt-import] initial slice failed", job.id, error);
+    });
+    return await getTraktImportStatus(user.id);
+  },
+  "traktImport:tick": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await runTraktImportTickForUser(user.id);
   },
 };
 

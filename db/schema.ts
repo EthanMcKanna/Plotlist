@@ -995,6 +995,129 @@ export const rateLimits = sqliteTable(
   }),
 );
 
+export const traktDeviceAuthStatusValues = [
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+] as const;
+
+export const traktImportStatusValues = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+
+// Phases run strictly in this order; the cursor records where a resumable
+// slice left off inside the current phase.
+export const traktImportPhaseValues = [
+  "fetch",
+  "match",
+  "progress",
+  "diary",
+  "ratings",
+  "watchlist",
+  "finalize",
+] as const;
+
+// One row per pending "connect Trakt" device-code handshake. Rows are
+// short-lived (Trakt codes expire in ~10 minutes) and cleaned up by cron.
+export const traktDeviceAuths = sqliteTable(
+  "trakt_device_auths",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceCode: text("device_code").notNull(),
+    userCode: text("user_code").notNull(),
+    verificationUrl: text("verification_url").notNull(),
+    intervalSeconds: integer("interval_seconds").notNull(),
+    expiresAt: timestampMs("expires_at").notNull(),
+    status: text("status", { enum: traktDeviceAuthStatusValues }).notNull(),
+    // Server-side throttle so client polling can never exceed Trakt's
+    // required device-token poll interval.
+    lastPolledAt: timestampMs("last_polled_at"),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("trakt_device_auths_user_created_idx").on(
+      table.userId,
+      table.createdAt,
+    ),
+    expiresIdx: index("trakt_device_auths_expires_idx").on(table.expiresAt),
+  }),
+);
+
+// A connected Trakt account (one per user). Tokens are held server-side only
+// and never returned to clients; disconnecting deletes the row.
+export const traktAccounts = sqliteTable(
+  "trakt_accounts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    traktUsername: text("trakt_username"),
+    traktSlug: text("trakt_slug"),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    tokenExpiresAt: timestampMs("token_expires_at"),
+    connectedAt: timestampMs("connected_at").notNull(),
+    lastImportedAt: timestampMs("last_imported_at"),
+    updatedAt: timestampMs("updated_at").notNull(),
+  },
+  (table) => ({
+    userIdx: uniqueIndex("trakt_accounts_user_idx").on(table.userId),
+  }),
+);
+
+// Resumable Trakt import jobs. Work advances in bounded slices driven by both
+// the client (while the screen is open) and the minute cron (when it isn't);
+// lease_until is the single-runner guard between the two. The fetched Trakt
+// snapshot lives in R2 under snapshot_key, never in this row.
+export const traktImports = sqliteTable(
+  "trakt_imports",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status", { enum: traktImportStatusValues }).notNull(),
+    phase: text("phase", { enum: traktImportPhaseValues }).notNull(),
+    options: jsonb("options")
+      .$type<{ history: boolean; ratings: boolean; watchlist: boolean }>()
+      .notNull(),
+    cursor: jsonb("cursor").$type<Record<string, number>>().notNull(),
+    counts: jsonb("counts").$type<Record<string, number>>().notNull(),
+    // Bounded list of Trakt items we could not resolve to a catalog show,
+    // surfaced to the user in the completion report.
+    unmatched: jsonb("unmatched").$type<
+      Array<{ title: string; year: number | null; reason: string }>
+    >(),
+    snapshotKey: text("snapshot_key"),
+    error: text("error"),
+    failCount: integer("fail_count").notNull(),
+    leaseUntil: timestampMs("lease_until"),
+    createdAt: timestampMs("created_at").notNull(),
+    startedAt: timestampMs("started_at"),
+    completedAt: timestampMs("completed_at"),
+    updatedAt: timestampMs("updated_at").notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("trakt_imports_user_created_idx").on(
+      table.userId,
+      table.createdAt,
+    ),
+    statusLeaseIdx: index("trakt_imports_status_lease_idx").on(
+      table.status,
+      table.leaseUntil,
+    ),
+  }),
+);
+
 export const showIngestStatusValues = ["pending", "ingested", "failed"] as const;
 
 // One row per TMDB TV series id known to exist (seeded from the daily id
