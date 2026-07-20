@@ -8,6 +8,7 @@ import {
   deleteExpiredReleaseEvents,
   refreshStaleTrackedReleases,
 } from "../api/_lib/release-refresh";
+import { runStreamingArrivalNotifications } from "../api/_lib/streaming-arrivals";
 import { refreshStaleHomeCatalogCategories } from "../api/_lib/rpc";
 import { runEmbeddingRefreshTick } from "../api/_lib/embedding-refresh";
 import { runShowIngestTick } from "../api/_lib/show-ingest";
@@ -74,8 +75,14 @@ export async function runScheduledTasks(cron: string) {
 
     if (cron === NOTIFICATIONS_CRON) {
       const digest = await runEpisodeAirNotifications();
+      // Rides the same hourly tick; cheap because it only re-reads provider
+      // payloads for shows whose TMDB cache refreshed since the last pass.
+      const streaming = await runStreamingArrivalNotifications().catch((error) => {
+        console.error("[cron] streaming arrivals failed", error);
+        return null;
+      });
       const receipts = await checkExpoPushReceipts();
-      console.info("[cron] notifications", { digest, receipts });
+      console.info("[cron] notifications", { digest, streaming, receipts });
       return;
     }
 

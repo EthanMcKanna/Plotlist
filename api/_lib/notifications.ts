@@ -8,6 +8,7 @@ import {
   pushTokens,
   releaseEvents,
   reviews,
+  showNotificationMutes,
   shows,
   users,
   watchLogs,
@@ -25,16 +26,18 @@ import {
   buildFollowRequestNotificationContent,
   buildListFollowNotificationContent,
   buildLikeNotificationContent,
+  buildPremiereNotificationContent,
   categoryForNotificationType,
-  EPISODE_DIGEST_LOCAL_HOUR,
   getLocalDateStringForTimezone,
   getLocalHourForTimezone,
   planPushesForRecipient,
+  resolveDigestHour,
   resolveNotificationPreferences,
   type NotificationType,
 } from "../../lib/notificationContent";
 import { db } from "./db";
 import { createId } from "./ids";
+import { userHasPro } from "./pro";
 import { getBlockedEitherWayIdSet } from "./privacy";
 import { chunkForSqlParams } from "./sql-dialect";
 
@@ -677,13 +680,42 @@ export async function notifyComment(
   }
 }
 
-// Hourly cron: for every user whose device timezone just hit the digest hour,
-// find today's release events for shows they're watching and notify once per
-// show per air date. Dedupe keys make repeated runs no-ops.
+// Hourly cron: for every user whose device timezone just hit their digest
+// hour (default 17:00; Pro users can override), find today's release events
+// for shows they're watching and notify once per show per air date. Pro users
+// additionally get premiere alerts for watchlisted/paused shows. Dedupe keys
+// make repeated runs no-ops.
 export async function runEpisodeAirNotifications(now = new Date()) {
   const tokenRows = await db
     .select({ userId: pushTokens.userId, timezone: pushTokens.timezone })
     .from(pushTokens);
+
+  const tokenUserIds = Array.from(new Set(tokenRows.map((row) => row.userId)));
+  // Prefs + Pro state up front: the digest hour is per-user now, so the
+  // hour gate can't be applied until we know who has an override.
+  const userMetaById = new Map<
+    string,
+    { digestHour: number; isPro: boolean; premieresEnabled: boolean }
+  >();
+  for (const chunk of chunkForSqlParams(tokenUserIds, 1)) {
+    const rows = await db
+      .select({
+        id: users.id,
+        notificationPreferences: users.notificationPreferences,
+        proUntil: users.proUntil,
+      })
+      .from(users)
+      .where(inArray(users.id, chunk));
+    for (const row of rows) {
+      const isPro = userHasPro(row);
+      userMetaById.set(row.id, {
+        digestHour: resolveDigestHour(row.notificationPreferences, isPro),
+        isPro,
+        premieresEnabled:
+          resolveNotificationPreferences(row.notificationPreferences).premieres,
+      });
+    }
+  }
 
   const localDateByUser = new Map<string, string>();
   for (const token of tokenRows) {
@@ -691,7 +723,9 @@ export async function runEpisodeAirNotifications(now = new Date()) {
       continue;
     }
     const hour = getLocalHourForTimezone(token.timezone, now);
-    if (hour !== EPISODE_DIGEST_LOCAL_HOUR) {
+    const digestHour =
+      userMetaById.get(token.userId)?.digestHour ?? resolveDigestHour(null, false);
+    if (hour !== digestHour) {
       continue;
     }
     const localDate = getLocalDateStringForTimezone(token.timezone, now);
@@ -722,30 +756,79 @@ export async function runEpisodeAirNotifications(now = new Date()) {
   const eventShowIds = Array.from(eventsByShow.keys());
   const userIds = Array.from(localDateByUser.keys());
 
-  const watchingRows: Array<{ userId: string; showId: string }> = [];
+  // Pro per-show mutes silence every show-scoped alert below.
+  const mutedPairs = new Set<string>();
   for (const showChunk of chunkForSqlParams(eventShowIds, 1, 40)) {
     for (const userChunk of chunkForSqlParams(userIds, 1, 40)) {
       const rows = await db
-        .select({ userId: watchStates.userId, showId: watchStates.showId })
+        .select({
+          userId: showNotificationMutes.userId,
+          showId: showNotificationMutes.showId,
+        })
+        .from(showNotificationMutes)
+        .where(
+          and(
+            inArray(showNotificationMutes.showId, showChunk),
+            inArray(showNotificationMutes.userId, userChunk),
+          ),
+        );
+      for (const row of rows) {
+        mutedPairs.add(`${row.userId}:${row.showId}`);
+      }
+    }
+  }
+
+  const watchingRows: Array<{ userId: string; showId: string }> = [];
+  // Premiere alerts go to Pro users waiting on a show (watchlist/paused);
+  // watching/caught-up users already get the richer episode digest.
+  const waitingRows: Array<{ userId: string; showId: string }> = [];
+  const premiereShowIds = eventShowIds.filter((showId) =>
+    (eventsByShow.get(showId) ?? []).some(
+      (event) => event.isPremiere || event.isReturningSeason,
+    ),
+  );
+  for (const showChunk of chunkForSqlParams(eventShowIds, 1, 40)) {
+    for (const userChunk of chunkForSqlParams(userIds, 1, 40)) {
+      const rows = await db
+        .select({
+          userId: watchStates.userId,
+          showId: watchStates.showId,
+          status: watchStates.status,
+        })
         .from(watchStates)
         .where(
           and(
             // Caught-up users are exactly who "new episode tonight" is for;
             // watching users may still be mid-backlog but were the historical
-            // audience, so they stay.
-            inArray(watchStates.status, ["watching", "caught_up"] as any),
+            // audience, so they stay. Watchlist/paused feed the Pro premiere
+            // pass instead.
+            inArray(
+              watchStates.status,
+              ["watching", "caught_up", "watchlist", "paused"] as any,
+            ),
             inArray(watchStates.showId, showChunk),
             inArray(watchStates.userId, userChunk),
           ),
         );
-      watchingRows.push(...rows);
+      for (const row of rows) {
+        if (row.status === "watching" || row.status === "caught_up") {
+          watchingRows.push(row);
+        } else if (premiereShowIds.includes(row.showId)) {
+          const meta = userMetaById.get(row.userId);
+          if (meta?.isPro && meta.premieresEnabled) {
+            waitingRows.push(row);
+          }
+        }
+      }
     }
   }
-  if (watchingRows.length === 0) {
+  if (watchingRows.length === 0 && waitingRows.length === 0) {
     return { users: localDateByUser.size, created: 0, sent: 0 };
   }
 
-  const watchedShowIds = Array.from(new Set(watchingRows.map((row) => row.showId)));
+  const watchedShowIds = Array.from(
+    new Set([...watchingRows, ...waitingRows].map((row) => row.showId)),
+  );
   const showRows: Array<typeof shows.$inferSelect> = [];
   for (const chunk of chunkForSqlParams(watchedShowIds, 1)) {
     showRows.push(...(await db.select().from(shows).where(inArray(shows.id, chunk))));
@@ -756,7 +839,7 @@ export async function runEpisodeAirNotifications(now = new Date()) {
   for (const row of watchingRows) {
     const localDate = localDateByUser.get(row.userId);
     const show = showById.get(row.showId);
-    if (!localDate || !show) {
+    if (!localDate || !show || mutedPairs.has(`${row.userId}:${row.showId}`)) {
       continue;
     }
     const events = (eventsByShow.get(row.showId) ?? []).filter(
@@ -774,6 +857,41 @@ export async function runEpisodeAirNotifications(now = new Date()) {
     inputs.push({
       userId: row.userId,
       type: "episode",
+      showId: row.showId,
+      title: content.title,
+      body: content.body,
+      dedupeKey: content.dedupeKey,
+      data: {
+        url: `/show/${row.showId}`,
+        showId: row.showId,
+        seasonNumber: content.seasonNumber,
+        episodeNumber: content.episodeNumber,
+        airDate: localDate,
+      },
+    });
+  }
+
+  for (const row of waitingRows) {
+    const localDate = localDateByUser.get(row.userId);
+    const show = showById.get(row.showId);
+    if (!localDate || !show || mutedPairs.has(`${row.userId}:${row.showId}`)) {
+      continue;
+    }
+    const events = (eventsByShow.get(row.showId) ?? []).filter(
+      (event) => event.airDate === localDate,
+    );
+    const content = buildPremiereNotificationContent({
+      showId: row.showId,
+      showTitle: show.title,
+      airDate: localDate,
+      events,
+    });
+    if (!content) {
+      continue;
+    }
+    inputs.push({
+      userId: row.userId,
+      type: "premiere",
       showId: row.showId,
       title: content.title,
       body: content.body,

@@ -34,6 +34,7 @@
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-menu/menu": "^1.2.2",
+    "@revenuecat/purchases-js": "^1.47.3",
     "@sentry/cloudflare": "^10.63.0",
     "@sentry/react-native": "~7.2.0",
     "@shopify/flash-list": "2.0.2",

@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, type Href } from "expo-router";
 import * as Sharing from "expo-sharing";
 
+import { ActionSheet } from "../../components/ActionSheet";
 import { AvatarCropModal } from "../../components/AvatarCropModal";
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
 import { LinkPressable } from "../../components/LinkPressable";
@@ -21,7 +22,7 @@ import { clearAuthTokens, getStoredSignInPhone } from "../../lib/authStorage";
 import { uploadAvatarImage } from "../../lib/avatarUpload";
 import { getContactSyncAlertCopy } from "../../lib/contactSync";
 import { loadDeviceContacts } from "../../lib/deviceContacts";
-import { confirmAction, notifyError } from "../../lib/dialogs";
+import { confirmAction, notify, notifyError } from "../../lib/dialogs";
 import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
@@ -195,6 +196,8 @@ export default function SettingsScreen() {
     follows: true,
     likes: true,
     comments: true,
+    streaming: true,
+    premieres: true,
     ...(notificationPrefs ?? {}),
     ...notificationOverrides,
   };
@@ -446,6 +449,81 @@ export default function SettingsScreen() {
   const isPro = proStatus.isPro || me?.isPro === true;
   const backdropUrl: string | null = me?.profileBackdropUrl ?? null;
   const [backdropBusy, setBackdropBusy] = useState(false);
+  const [digestSheetVisible, setDigestSheetVisible] = useState(false);
+  const [digestHourOverride, setDigestHourOverride] = useState<number | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const mutedShows = useQuery(
+    api.notifications.getMutedShows,
+    hasProfile ? {} : "skip",
+  ) as any[] | undefined;
+
+  // Contextual paywall gate shared by every Pro control below: free users
+  // get the paywall in place, and a successful purchase continues the tap.
+  const ensurePro = async () => {
+    if (isPro) return true;
+    const outcome = await presentProPaywall();
+    return outcome === "purchased" || outcome === "restored";
+  };
+
+  const toggleProNotificationPref = (key: string) => (value: boolean) => {
+    void (async () => {
+      if (!(await ensurePro())) return;
+      toggleNotificationPref(key)(value);
+    })();
+  };
+
+  const resolvedDigestHour =
+    digestHourOverride ??
+    (typeof (notificationPrefs as any)?.digestHour === "number"
+      ? ((notificationPrefs as any).digestHour as number)
+      : 17);
+  const formatDigestHour = (hour: number) =>
+    new Date(2000, 0, 1, hour).toLocaleTimeString(undefined, { hour: "numeric" });
+
+  const handlePickDigestHour = () => {
+    void (async () => {
+      if (!(await ensurePro())) return;
+      setDigestSheetVisible(true);
+    })();
+  };
+
+  const saveDigestHour = (hour: number) => {
+    setDigestSheetVisible(false);
+    const previous = resolvedDigestHour;
+    setDigestHourOverride(hour);
+    void updateNotificationPrefs({ preferences: {}, digestHour: hour }).catch(() => {
+      setDigestHourOverride(previous);
+      notifyError("Could not save", "Your alert time didn't stick. Try again.");
+    });
+  };
+
+  const handleCalendarFeed = () => {
+    void (async () => {
+      if (calendarBusy) return;
+      if (!(await ensurePro())) return;
+      setCalendarBusy(true);
+      try {
+        const feed = (await callQuery(api.releaseCalendar.getIcalFeedUrl, {})) as {
+          url: string;
+          webcalUrl: string;
+        };
+        if (Platform.OS === "web") {
+          await navigator.clipboard.writeText(feed.url);
+          notify(
+            "Feed link copied",
+            "Paste it into Apple or Google Calendar under “Add calendar subscription”.",
+          );
+        } else {
+          // webcal:// makes iOS offer "Subscribe" directly.
+          await Share.share({ url: feed.webcalUrl, message: feed.webcalUrl });
+        }
+      } catch (error) {
+        notifyError("Could not get feed", String((error as Error)?.message ?? error));
+      } finally {
+        setCalendarBusy(false);
+      }
+    })();
+  };
 
   // Paywall placement follows the launch strategy: the locked control itself
   // is the contextual upsell — tapping it while free opens the paywall, and a
@@ -761,7 +839,7 @@ export default function SettingsScreen() {
           <View className="mt-10">
             <SectionHeader title="Plotlist Pro" />
             <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
-              {proStatus.isPro ? (
+              {isPro ? (
                 <SettingsRow
                   icon="sparkles"
                   iconColor="#FACC15"
@@ -778,14 +856,23 @@ export default function SettingsScreen() {
                 />
               )}
               <SettingsRow
-                icon="refresh-outline"
-                label="Restore purchases"
-                onPress={() => void handleRestorePurchases()}
-                loading={restoringPurchases}
+                icon="calendar-outline"
+                iconColor="#38bdf8"
+                label="Calendar feed for your shows"
+                onPress={handleCalendarFeed}
+                loading={calendarBusy}
               />
+              {Platform.OS !== "web" ? (
+                <SettingsRow
+                  icon="refresh-outline"
+                  label="Restore purchases"
+                  onPress={() => void handleRestorePurchases()}
+                  loading={restoringPurchases}
+                />
+              ) : null}
             </GlassSurface>
             <Text className="mt-2 text-xs leading-4 text-text-tertiary">
-              {proStatus.isPro
+              {isPro
                 ? proStatus.expirationDate
                   ? `Subscribed — ${proStatus.willRenew ? "renews" : "active until"} ${new Date(
                       proStatus.expirationDate,
@@ -827,7 +914,52 @@ export default function SettingsScreen() {
               description="When someone comments on your review, log, or list."
               value={resolvedNotificationPrefs.comments}
               onChange={toggleNotificationPref("comments")}
+            />
+            <NotificationToggleRow
+              label="Streaming arrivals · Pro"
+              description="When a watchlist show lands on one of your streaming services."
+              value={resolvedNotificationPrefs.streaming}
+              onChange={toggleProNotificationPref("streaming")}
+            />
+            <NotificationToggleRow
+              label="Premieres & returns · Pro"
+              description="When a show on your watchlist premieres or comes back for a new season."
+              value={resolvedNotificationPrefs.premieres}
+              onChange={toggleProNotificationPref("premieres")}
               isLast
+            />
+          </GlassSurface>
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                handlePickDigestHour();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Change episode alert time"
+              className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
+            >
+              <Ionicons name="time-outline" size={20} color="#FACC15" />
+              <View className="flex-1">
+                <Text className="text-base font-medium text-text-primary">
+                  Alert time · Pro
+                </Text>
+                <Text className="mt-0.5 text-xs text-text-tertiary">
+                  When "new episode tonight" alerts arrive.
+                </Text>
+              </View>
+              <Text className="text-sm font-semibold text-brand-400">
+                {formatDigestHour(resolvedDigestHour)}
+              </Text>
+            </Pressable>
+            <SettingsRow
+              icon="notifications-off-outline"
+              label={
+                mutedShows && mutedShows.length > 0
+                  ? `Muted shows (${mutedShows.length})`
+                  : "Muted shows"
+              }
+              href={"/settings/muted" as Href}
             />
           </GlassSurface>
           <Text className="mt-2 text-xs leading-4 text-text-tertiary">
@@ -835,6 +967,19 @@ export default function SettingsScreen() {
             in-app inbox.
           </Text>
         </View>
+
+        <ActionSheet
+          visible={digestSheetVisible}
+          onClose={() => setDigestSheetVisible(false)}
+          title="Episode alert time"
+          options={[8, 10, 12, 15, 17, 19, 20, 21, 22].map((hour) => ({
+            label:
+              hour === 17
+                ? `${formatDigestHour(hour)} (default)`
+                : formatDigestHour(hour),
+            onPress: () => saveDigestHour(hour),
+          }))}
+        />
 
         {/* ── Contacts ── */}
         {/* Address-book sync is native-only; on web the section only appears

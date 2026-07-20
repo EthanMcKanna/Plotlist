@@ -181,6 +181,7 @@ export const api = {
     refreshForMe: ref("action", "releaseCalendar:refreshForMe"),
     getHomePreview: ref("query", "releaseCalendar:getHomePreview"),
     listForMe: ref("query", "releaseCalendar:listForMe"),
+    getIcalFeedUrl: ref("query", "releaseCalendar:getIcalFeedUrl"),
   },
   reports: {
     create: ref("mutation", "reports:create"),
@@ -205,5 +206,9 @@ export const api = {
     markRead: ref("mutation", "notifications:markRead"),
     markAllRead: ref("mutation", "notifications:markAllRead"),
     updatePreferences: ref("mutation", "notifications:updatePreferences"),
+    muteShow: ref("mutation", "notifications:muteShow"),
+    unmuteShow: ref("mutation", "notifications:unmuteShow"),
+    getMutedShowIds: ref("query", "notifications:getMutedShowIds"),
+    getMutedShows: ref("query", "notifications:getMutedShows"),
   },
 };

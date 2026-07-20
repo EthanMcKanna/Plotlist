@@ -44,6 +44,9 @@ export const notificationTypeValues = [
   "episode",
   "list_follow",
   "contact_joined",
+  // Pro power-tracking alerts (season premieres/returns, streaming arrivals).
+  "premiere",
+  "streaming",
 ] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log", "follow", "list"] as const;
@@ -103,9 +106,10 @@ export const users = sqliteTable(
     // Streaming services the user subscribes to (provider keys, e.g.
     // "netflix"); used to filter and lean home/search surfaces.
     streamingProviders: jsonb("streaming_providers").$type<string[]>(),
-    // Per-category notification opt-outs; a missing key means enabled.
+    // Per-category notification opt-outs; a missing key means enabled. Also
+    // carries the Pro `digestHour` (number 0-23; missing = default 17).
     notificationPreferences: jsonb("notification_preferences").$type<
-      Record<string, boolean>
+      Record<string, boolean | number>
     >(),
     // Plotlist Pro entitlement expiry (ms). Written only by the RevenueCat
     // webhook; pro = proUntil > now. Deliberately public via toClientUser so
@@ -988,6 +992,41 @@ export const pushTickets = sqliteTable(
     createdIdx: index("push_tickets_created_idx").on(table.createdAt),
   }),
 );
+
+// Pro per-show notification mutes: a row silences every show-scoped alert
+// (episode digest, premieres, streaming arrivals) for that user+show. Honored
+// even after Pro lapses — un-muting is always free.
+export const showNotificationMutes = sqliteTable(
+  "show_notification_mutes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    showId: text("show_id")
+      .notNull()
+      .references(() => shows.id, { onDelete: "cascade" }),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    userShowIdx: uniqueIndex("show_notification_mutes_user_show_idx").on(
+      table.userId,
+      table.showId,
+    ),
+    showIdx: index("show_notification_mutes_show_idx").on(table.showId),
+  }),
+);
+
+// Last-seen US streaming providers per show (provider keys, e.g. "netflix"),
+// diffed by the streaming-arrival cron so "just landed on your services"
+// fires exactly once per arrival.
+export const showProviderAvailability = sqliteTable("show_provider_availability", {
+  showId: text("show_id")
+    .primaryKey()
+    .references(() => shows.id, { onDelete: "cascade" }),
+  providerKeys: jsonb("provider_keys").$type<string[]>().notNull(),
+  updatedAt: timestampMs("updated_at").notNull(),
+});
 
 export const rateLimits = sqliteTable(
   "rate_limits",

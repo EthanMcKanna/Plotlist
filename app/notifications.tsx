@@ -34,6 +34,8 @@ const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   episode: "tv",
   list_follow: "list",
   contact_joined: "people",
+  premiere: "sparkles",
+  streaming: "play-circle",
 };
 
 const TYPE_ICON_COLORS: Record<string, string> = {
@@ -45,6 +47,8 @@ const TYPE_ICON_COLORS: Record<string, string> = {
   episode: "#22C55E",
   list_follow: "#38BDF8",
   contact_joined: "#38BDF8",
+  premiere: "#FACC15",
+  streaming: "#38BDF8",
 };
 
 function notificationHref(item: any): Href | null {

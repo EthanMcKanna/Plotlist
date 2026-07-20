@@ -13,6 +13,9 @@ import {
   getLocalHourForTimezone,
   mergeNotificationPreferences,
   planPushesForRecipient,
+  buildPremiereNotificationContent,
+  buildStreamingArrivalNotificationContent,
+  resolveDigestHour,
   resolveNotificationPreferences,
 } from "../lib/notificationContent";
 
@@ -23,6 +26,8 @@ describe("resolveNotificationPreferences", () => {
       follows: true,
       likes: true,
       comments: true,
+      premieres: true,
+      streaming: true,
     });
   });
 
@@ -32,6 +37,8 @@ describe("resolveNotificationPreferences", () => {
       follows: true,
       likes: false,
       comments: true,
+      premieres: true,
+      streaming: true,
     });
   });
 });
@@ -52,6 +59,66 @@ describe("mergeNotificationPreferences", () => {
       episodes: false,
       follows: false,
     });
+  });
+
+  it("stores and clears the Pro digest hour", () => {
+    expect(mergeNotificationPreferences(null, { digestHour: 20 })).toEqual({
+      digestHour: 20,
+    });
+    expect(
+      mergeNotificationPreferences({ digestHour: 20, likes: false }, { digestHour: null }),
+    ).toEqual({ likes: false });
+    // Out-of-range hours are ignored rather than stored.
+    expect(mergeNotificationPreferences(null, { digestHour: 24 })).toEqual({});
+  });
+});
+
+describe("resolveDigestHour", () => {
+  it("honors a stored hour only for Pro users", () => {
+    expect(resolveDigestHour({ digestHour: 9 }, true)).toBe(9);
+    expect(resolveDigestHour({ digestHour: 9 }, false)).toBe(EPISODE_DIGEST_LOCAL_HOUR);
+    expect(resolveDigestHour(null, true)).toBe(EPISODE_DIGEST_LOCAL_HOUR);
+    expect(resolveDigestHour({ digestHour: 99 }, true)).toBe(EPISODE_DIGEST_LOCAL_HOUR);
+  });
+});
+
+describe("buildPremiereNotificationContent", () => {
+  it("announces season returns and ignores non-premiere events", () => {
+    const content = buildPremiereNotificationContent({
+      showId: "show1",
+      showTitle: "Severance",
+      airDate: "2026-07-20",
+      events: [
+        { seasonNumber: 3, episodeNumber: 1, isReturningSeason: true },
+        { seasonNumber: 3, episodeNumber: 2 },
+      ],
+    });
+    expect(content!.body).toContain("season 3 starts tonight");
+    expect(content!.dedupeKey).toBe("premiere:show1:2026-07-20");
+
+    expect(
+      buildPremiereNotificationContent({
+        showId: "show1",
+        showTitle: "Severance",
+        airDate: "2026-07-20",
+        events: [{ seasonNumber: 3, episodeNumber: 4 }],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("buildStreamingArrivalNotificationContent", () => {
+  it("lists providers and keys the dedupe on the arrival batch", () => {
+    const content = buildStreamingArrivalNotificationContent({
+      showId: "show1",
+      showTitle: "Dark",
+      providerLabels: ["Netflix", "Hulu"],
+      providerKeys: ["netflix", "hulu"],
+    });
+    expect(content!.body).toBe(
+      "Dark just arrived on Netflix and Hulu. It's on your watchlist.",
+    );
+    expect(content!.dedupeKey).toBe("streaming:show1:hulu+netflix");
   });
 });
 

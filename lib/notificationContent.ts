@@ -2,7 +2,17 @@
 // the app (settings copy). No database or platform imports so it stays unit
 // testable.
 
-export const NOTIFICATION_CATEGORIES = ["episodes", "follows", "likes", "comments"] as const;
+// "premieres" (season premieres/returns for shows you haven't started) and
+// "streaming" (watchlist arrivals on your services) are Pro-only at emit
+// time; the toggles still live here so free users see what Pro unlocks.
+export const NOTIFICATION_CATEGORIES = [
+  "episodes",
+  "follows",
+  "likes",
+  "comments",
+  "premieres",
+  "streaming",
+] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export type NotificationType =
@@ -13,13 +23,40 @@ export type NotificationType =
   | "comment"
   | "episode"
   | "list_follow"
-  | "contact_joined";
+  | "contact_joined"
+  | "premiere"
+  | "streaming";
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
 // Local hour when "new episode tonight" pushes go out. Release events are
 // date-only, so early evening is the closest honest reading of "tonight".
+// Pro subscribers can override this per-account via `digestHour` in their
+// stored notification preferences.
 export const EPISODE_DIGEST_LOCAL_HOUR = 17;
+
+export const DIGEST_HOUR_PREF_KEY = "digestHour";
+
+// The stored preference record mixes booleans (category toggles) and the
+// numeric digest hour, so both readers accept the union.
+export type StoredNotificationPreferences = Record<string, boolean | number>;
+
+export function resolveDigestHour(
+  stored: StoredNotificationPreferences | null | undefined,
+  hasPro: boolean,
+): number {
+  const raw = stored?.[DIGEST_HOUR_PREF_KEY];
+  if (
+    hasPro &&
+    typeof raw === "number" &&
+    Number.isInteger(raw) &&
+    raw >= 0 &&
+    raw <= 23
+  ) {
+    return raw;
+  }
+  return EPISODE_DIGEST_LOCAL_HOUR;
+}
 
 // More than this many episode notifications in one batch collapses into a
 // single summary push so a binge-drop day doesn't spam the lock screen.
@@ -34,6 +71,8 @@ const CATEGORY_BY_TYPE: Record<NotificationType, NotificationCategory> = {
   episode: "episodes",
   list_follow: "follows",
   contact_joined: "follows",
+  premiere: "premieres",
+  streaming: "streaming",
 };
 
 export function categoryForNotificationType(type: NotificationType): NotificationCategory {
@@ -42,7 +81,7 @@ export function categoryForNotificationType(type: NotificationType): Notificatio
 
 // Missing keys mean enabled: users are opted in until they flip a toggle.
 export function resolveNotificationPreferences(
-  stored: Record<string, boolean> | null | undefined,
+  stored: StoredNotificationPreferences | null | undefined,
 ): NotificationPreferences {
   const resolved = {} as NotificationPreferences;
   for (const category of NOTIFICATION_CATEGORIES) {
@@ -52,15 +91,28 @@ export function resolveNotificationPreferences(
 }
 
 export function mergeNotificationPreferences(
-  stored: Record<string, boolean> | null | undefined,
-  updates: Partial<Record<NotificationCategory, boolean>>,
-): Record<string, boolean> {
-  const next: Record<string, boolean> = { ...(stored ?? {}) };
+  stored: StoredNotificationPreferences | null | undefined,
+  updates: Partial<Record<NotificationCategory, boolean>> & {
+    // null resets the digest hour back to the default.
+    digestHour?: number | null;
+  },
+): StoredNotificationPreferences {
+  const next: StoredNotificationPreferences = { ...(stored ?? {}) };
   for (const category of NOTIFICATION_CATEGORIES) {
     const value = updates[category];
     if (typeof value === "boolean") {
       next[category] = value;
     }
+  }
+  if (updates.digestHour === null) {
+    delete next[DIGEST_HOUR_PREF_KEY];
+  } else if (
+    typeof updates.digestHour === "number" &&
+    Number.isInteger(updates.digestHour) &&
+    updates.digestHour >= 0 &&
+    updates.digestHour <= 23
+  ) {
+    next[DIGEST_HOUR_PREF_KEY] = updates.digestHour;
   }
   return next;
 }
@@ -168,6 +220,61 @@ export function buildEpisodeNotificationContent(args: {
     seasonNumber: first.seasonNumber,
     episodeNumber: first.episodeNumber,
     episodeCount: ordered.length,
+  };
+}
+
+// Pro premiere alert for shows the user is waiting on (watchlist/paused) —
+// distinct from the episode digest, which covers watching/caught-up shows.
+export function buildPremiereNotificationContent(args: {
+  showId: string;
+  showTitle: string;
+  airDate: string;
+  events: EpisodeReleaseForNotification[];
+}): EpisodeNotificationContent | null {
+  const premieres = args.events.filter(
+    (event) => event.isPremiere || event.isReturningSeason,
+  );
+  if (premieres.length === 0) {
+    return null;
+  }
+  const first = [...premieres].sort(
+    (left, right) =>
+      left.seasonNumber - right.seasonNumber || left.episodeNumber - right.episodeNumber,
+  )[0];
+  const code = formatEpisodeCode(first.seasonNumber, first.episodeNumber);
+  const body =
+    first.seasonNumber <= 1
+      ? `${args.showTitle} premieres tonight with ${code}. It's on your watchlist.`
+      : `${args.showTitle} is back — season ${first.seasonNumber} starts tonight (${code}).`;
+  return {
+    title: first.seasonNumber <= 1 ? "Premiere tonight" : "Season premiere tonight",
+    body,
+    dedupeKey: `premiere:${args.showId}:${args.airDate}`,
+    seasonNumber: first.seasonNumber,
+    episodeNumber: first.episodeNumber,
+    episodeCount: premieres.length,
+  };
+}
+
+// Pro streaming arrival alert: a watchlisted show just landed on one of the
+// user's own services. One notification per show per arrival batch.
+export function buildStreamingArrivalNotificationContent(args: {
+  showId: string;
+  showTitle: string;
+  providerLabels: string[];
+  providerKeys: string[];
+}): { title: string; body: string; dedupeKey: string } | null {
+  if (args.providerLabels.length === 0) {
+    return null;
+  }
+  const labels =
+    args.providerLabels.length === 1
+      ? args.providerLabels[0]
+      : `${args.providerLabels.slice(0, -1).join(", ")} and ${args.providerLabels.at(-1)}`;
+  return {
+    title: "Now streaming",
+    body: `${args.showTitle} just arrived on ${labels}. It's on your watchlist.`,
+    dedupeKey: `streaming:${args.showId}:${[...args.providerKeys].sort().join("+")}`,
   };
 }
 

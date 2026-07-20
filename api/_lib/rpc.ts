@@ -25,6 +25,7 @@ import {
   releaseEvents,
   reports,
   reviews,
+  showNotificationMutes,
   shows,
   tmdbDetailsCache,
   tmdbListCache,
@@ -39,6 +40,7 @@ import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
 import { moderateText } from "./moderation";
+import { createCalendarFeedToken } from "./calendar-feed";
 import { requirePro, userHasPro } from "./pro";
 import { ensurePhoneIdentity } from "./auth";
 import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
@@ -135,6 +137,7 @@ import {
 } from "../../lib/profilePrivacy";
 import {
   mergeNotificationPreferences,
+  resolveDigestHour,
   resolveNotificationPreferences,
 } from "../../lib/notificationContent";
 import { getWatchInsightsForUser } from "./watch-insights";
@@ -5190,7 +5193,40 @@ export const queryHandlers: Record<string, RpcHandler> = {
   },
   "notifications:getPreferences": async ({ req }) => {
     const user = await requireAuthUser(req);
-    return resolveNotificationPreferences(user.notificationPreferences);
+    return {
+      ...resolveNotificationPreferences(user.notificationPreferences),
+      digestHour: resolveDigestHour(user.notificationPreferences, userHasPro(user)),
+    };
+  },
+  "notifications:getMutedShowIds": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    const rows = await db
+      .select({ showId: showNotificationMutes.showId })
+      .from(showNotificationMutes)
+      .where(eq(showNotificationMutes.userId, user.id));
+    return rows.map((row) => row.showId);
+  },
+  "notifications:getMutedShows": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    const rows = await db
+      .select({
+        showId: showNotificationMutes.showId,
+        createdAt: showNotificationMutes.createdAt,
+        title: shows.title,
+        posterUrl: shows.posterUrl,
+      })
+      .from(showNotificationMutes)
+      .innerJoin(shows, eq(shows.id, showNotificationMutes.showId))
+      .where(eq(showNotificationMutes.userId, user.id))
+      .orderBy(desc(showNotificationMutes.createdAt));
+    return rows;
+  },
+  "releaseCalendar:getIcalFeedUrl": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    requirePro(user);
+    const token = createCalendarFeedToken(user.id);
+    const url = `https://plotlist.app/api/calendar/feed?token=${encodeURIComponent(token)}`;
+    return { url, webcalUrl: url.replace(/^https:/, "webcal:") };
   },
   "traktImport:getStatus": async ({ req }) => {
     const user = await requireAuthUser(req);
@@ -6508,11 +6544,52 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z
       .object({
         preferences: z.record(z.string(), z.boolean()),
+        // Pro: custom digest hour (0-23); null resets to the 17:00 default.
+        digestHour: z.number().int().min(0).max(23).nullable().optional(),
       })
       .parse(args ?? {});
-    const merged = mergeNotificationPreferences(user.notificationPreferences, parsed.preferences);
+    if (typeof parsed.digestHour === "number") {
+      requirePro(user);
+    }
+    const merged = mergeNotificationPreferences(user.notificationPreferences, {
+      ...parsed.preferences,
+      ...(parsed.digestHour !== undefined ? { digestHour: parsed.digestHour } : {}),
+    });
     await db.update(users).set({ notificationPreferences: merged }).where(eq(users.id, user.id));
-    return resolveNotificationPreferences(merged);
+    return {
+      ...resolveNotificationPreferences(merged),
+      digestHour: resolveDigestHour(merged, userHasPro(user)),
+    };
+  },
+  // Pro per-show notification mutes. Muting requires Pro; un-muting is
+  // always allowed so lapsed subscribers can undo their own silence.
+  "notifications:muteShow": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    requirePro(user);
+    const parsed = z.object({ showId: z.string().min(1) }).parse(args ?? {});
+    await db
+      .insert(showNotificationMutes)
+      .values({
+        id: createId("mute"),
+        userId: user.id,
+        showId: parsed.showId,
+        createdAt: Date.now(),
+      })
+      .onConflictDoNothing();
+    return { muted: true };
+  },
+  "notifications:unmuteShow": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z.object({ showId: z.string().min(1) }).parse(args ?? {});
+    await db
+      .delete(showNotificationMutes)
+      .where(
+        and(
+          eq(showNotificationMutes.userId, user.id),
+          eq(showNotificationMutes.showId, parsed.showId),
+        ),
+      );
+    return { muted: false };
   },
 };
 

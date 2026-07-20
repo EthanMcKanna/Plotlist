@@ -60,6 +60,8 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api } from "../../lib/plotlist/api";
 import { confirmAction, notify, notifyError, promptSignIn } from "../../lib/dialogs";
+import { presentProPaywall } from "../../lib/purchases";
+import { useProStatus } from "../../lib/useProStatus";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
@@ -582,6 +584,48 @@ export default function ShowScreen() {
     api.watchStates.getForShow,
     !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
   );
+  // Pro per-show notification mute (bell in the floating header).
+  const proStatus = useProStatus();
+  const isProUser = proStatus.isPro || me?.isPro === true;
+  const mutedShowIds = useQuery(
+    api.notifications.getMutedShowIds,
+    !isShowPreview && isAuthenticated ? {} : "skip",
+  ) as string[] | undefined;
+  const muteShowMutation = useMutation(api.notifications.muteShow);
+  const unmuteShowMutation = useMutation(api.notifications.unmuteShow);
+  const [muteOverride, setMuteOverride] = useState<boolean | null>(null);
+  const isShowMuted =
+    muteOverride ?? (showId ? (mutedShowIds?.includes(showId) ?? false) : false);
+  const handleToggleMute = async () => {
+    if (!showId || isShowPreview) return;
+    if (isShowMuted) {
+      setMuteOverride(false);
+      try {
+        await unmuteShowMutation({ showId });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        setMuteOverride(true);
+        notifyError("Could not unmute", String((error as Error)?.message ?? error));
+      }
+      return;
+    }
+    // Contextual paywall: muting is the Pro feature, un-muting never is.
+    if (!isProUser) {
+      const outcome = await presentProPaywall();
+      if (outcome !== "purchased" && outcome !== "restored") return;
+    }
+    setMuteOverride(true);
+    try {
+      await muteShowMutation({ showId });
+      notify(
+        "Show muted",
+        `${show?.title ?? "This show"} won't send episode, premiere, or streaming alerts.`,
+      );
+    } catch (error) {
+      setMuteOverride(false);
+      notifyError("Could not mute", String((error as Error)?.message ?? error));
+    }
+  };
   const queriedShowFacets = useQuery(
     api.embeddings.getShowFacets,
     !isShowPreview && showId ? { showId } : "skip",
@@ -2417,30 +2461,61 @@ export default function ShowScreen() {
             <View />
           )}
 
-          <GlassPressable
-            accessibilityLabel="Share this show"
-            accessibilityRole="button"
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              void sharePlotlistLink(
-                `/show/${showId}`,
-                show?.title ? `${show.title} on Plotlist` : "Check this out on Plotlist",
-              );
-            }}
-            radius={20}
-            surfaceStyle={{
-              height: 40,
-              width: 40,
-            }}
-            contentStyle={{
-              alignItems: "center",
-              height: 40,
-              justifyContent: "center",
-              width: 40,
-            }}
-          >
-            <Ionicons name="share-outline" size={19} color="#F1F3F7" />
-          </GlassPressable>
+          <View pointerEvents="box-none" style={{ flexDirection: "row", gap: 10 }}>
+            {isAuthenticated && !isShowPreview ? (
+              <GlassPressable
+                accessibilityLabel={
+                  isShowMuted ? "Unmute notifications for this show" : "Mute notifications for this show"
+                }
+                accessibilityRole="button"
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  void handleToggleMute();
+                }}
+                radius={20}
+                surfaceStyle={{
+                  height: 40,
+                  width: 40,
+                }}
+                contentStyle={{
+                  alignItems: "center",
+                  height: 40,
+                  justifyContent: "center",
+                  width: 40,
+                }}
+              >
+                <Ionicons
+                  name={isShowMuted ? "notifications-off" : "notifications-outline"}
+                  size={19}
+                  color={isShowMuted ? "#FACC15" : "#F1F3F7"}
+                />
+              </GlassPressable>
+            ) : null}
+            <GlassPressable
+              accessibilityLabel="Share this show"
+              accessibilityRole="button"
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                void sharePlotlistLink(
+                  `/show/${showId}`,
+                  show?.title ? `${show.title} on Plotlist` : "Check this out on Plotlist",
+                );
+              }}
+              radius={20}
+              surfaceStyle={{
+                height: 40,
+                width: 40,
+              }}
+              contentStyle={{
+                alignItems: "center",
+                height: 40,
+                justifyContent: "center",
+                width: 40,
+              }}
+            >
+              <Ionicons name="share-outline" size={19} color="#F1F3F7" />
+            </GlassPressable>
+          </View>
           </View>
         </View>
 
