@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { useQuery } from "../lib/plotlist/react";
 import { useContactSync } from "../lib/useContactSync";
@@ -87,6 +88,7 @@ function PersonPreviewRow({ item }: { item: any }) {
 }
 
 function ShareInviteCard({ onShare }: { onShare: () => void }) {
+  const accent = useAccent();
   return (
     <Pressable
       onPress={() => {
@@ -98,7 +100,7 @@ function ShareInviteCard({ onShare }: { onShare: () => void }) {
       className="flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-4 py-3.5 active:bg-dark-hover"
     >
       <View className="h-11 w-11 items-center justify-center rounded-full bg-brand-500/15">
-        <Ionicons name="share-outline" size={20} color="#38BDF8" />
+        <Ionicons name="share-outline" size={20} color={accent.ramp[400]} />
       </View>
       <View className="flex-1">
         <Text className="text-base font-semibold text-text-primary">

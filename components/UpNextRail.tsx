@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 import type { Id } from "../lib/plotlist/types";
 import { api } from "../lib/plotlist/api";
+import { useAccent } from "../lib/appearanceStore";
 import { formatShortDate } from "../lib/format";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
@@ -36,6 +37,7 @@ export function UpNextRail() {
 }
 
 export function UpNextRailContent({ enabled }: { enabled: boolean }) {
+  const accent = useAccent();
   const upNextItems = useQuery(
     api.episodeProgress.getUpNext,
     enabled ? getUpNextQueryArgs() : "skip",
@@ -171,7 +173,7 @@ export function UpNextRailContent({ enabled }: { enabled: boolean }) {
                   <Pressable
                     className="absolute bottom-2 right-2 items-center justify-center rounded-full active:opacity-60"
                     style={{
-                      backgroundColor: "rgba(14, 165, 233, 0.95)",
+                      backgroundColor: accent.rgba(500, 0.95),
                       width: 34,
                       height: 34,
                       boxShadow: "0 2px 6px rgba(0,0,0,0.5)",

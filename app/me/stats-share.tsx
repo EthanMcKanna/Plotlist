@@ -28,6 +28,7 @@ import {
   YearHeroCard,
 } from "../../components/StatsShareCards";
 import { api } from "../../lib/plotlist/api";
+import { useAccent } from "../../lib/appearanceStore";
 import { notifyError } from "../../lib/dialogs";
 import { useAuth, useQuery } from "../../lib/plotlist/react";
 import type { WatchInsights } from "../../lib/watchInsights";
@@ -82,6 +83,7 @@ function PagerArrow({
 }
 
 export default function StatsShareScreen() {
+  const accent = useAccent();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading } = useAuth();
   const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
@@ -103,7 +105,7 @@ export default function StatsShareScreen() {
     return (
       <Screen webMaxWidth={null}>
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#38bdf8" />
+          <ActivityIndicator color={accent.ramp[400]} />
         </View>
       </Screen>
     );
@@ -370,7 +372,7 @@ export default function StatsShareScreen() {
             {cards.map((card, index) => {
               const dotStyle = {
                 backgroundColor:
-                  index === page ? "#38BDF8" : "rgba(255,255,255,0.18)",
+                  index === page ? accent.ramp[400] : "rgba(255,255,255,0.18)",
                 borderRadius: 3,
                 height: 6,
                 width: index === page ? 18 : 6,
@@ -417,7 +419,7 @@ export default function StatsShareScreen() {
               ) : (
                 <Ionicons name="share-outline" size={17} color="#E0F2FE" />
               )}
-              <Text className="text-[15px] font-bold text-sky-100">
+              <Text className="text-[15px] font-bold text-brand-100">
                 {isSharing ? "Preparing…" : "Share card"}
               </Text>
             </GlassPressable>
@@ -444,7 +446,7 @@ export default function StatsShareScreen() {
               ) : (
                 <Ionicons name="download-outline" size={17} color="#E0F2FE" />
               )}
-              <Text className="text-[15px] font-bold text-sky-100">
+              <Text className="text-[15px] font-bold text-brand-100">
                 {isSharing ? "Preparing…" : "Download image"}
               </Text>
             </GlassPressable>

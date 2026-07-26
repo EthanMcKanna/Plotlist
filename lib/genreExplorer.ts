@@ -6,6 +6,7 @@
 import type { ComponentProps } from "react";
 import type { Ionicons } from "@expo/vector-icons";
 
+import { getAccent } from "./appearanceStore";
 import {
   FACET_DEFS,
   FACET_GROUPS,
@@ -36,6 +37,8 @@ const GROUP_PRESENTATION: Array<{
   { key: "animation", icon: "color-wand", accent: "#C084FC" },
   { key: "unscripted", icon: "videocam", accent: "#34D399" },
   { key: "origin", icon: "earth", accent: "#F59E0B" },
+  // "format" carries the brand accent — resolved live in
+  // getGenreExplorerGroup so it follows the active accent theme.
   { key: "format", icon: "albums", accent: "#38BDF8" },
 ];
 
@@ -46,10 +49,15 @@ export const GENRE_EXPLORER_GROUPS: GenreExplorerGroup[] =
   }));
 
 export function getGenreExplorerGroup(key: FacetGroupKey): GenreExplorerGroup {
-  return (
-    GENRE_EXPLORER_GROUPS.find((group) => group.key === key) ??
-    GENRE_EXPLORER_GROUPS[0]
-  );
+  const group =
+    GENRE_EXPLORER_GROUPS.find((candidate) => candidate.key === key) ??
+    GENRE_EXPLORER_GROUPS[0];
+  // The brand-accented group resolves against the live accent theme at call
+  // time (calls happen during render, so the value tracks theme switches).
+  if (group.key === "format") {
+    return { ...group, accent: getAccent().ramp[400] };
+  }
+  return group;
 }
 
 export function getFacetsForGroup(groupKey: FacetGroupKey): FacetDef[] {

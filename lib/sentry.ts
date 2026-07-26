@@ -43,6 +43,8 @@ export function initSentry() {
         themeDark: {
           background: "#151823",
           foreground: "#F1F3F7",
+          // Captured once at initSentry(), before accent-theme hydration —
+          // the feedback form deliberately stays default sky blue.
           accentBackground: "#0EA5E9",
           border: "#2A2F3A",
         },

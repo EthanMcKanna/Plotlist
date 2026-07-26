@@ -20,6 +20,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { useAccent } from "../lib/appearanceStore";
 import { CURATED_SHOWS } from "../lib/curatedShows";
 import { AppLogo } from "./AppLogo";
 
@@ -30,10 +31,11 @@ import { AppLogo } from "./AppLogo";
 // Web-only — native users land on sign-in directly.
 // ─────────────────────────────────────────────────────────────────────────
 
+// `discover` is the brand accent and resolves at render via useAccent() —
+// a hex here would capture the theme at import time.
 const ACCENTS = {
   track: "#22C55E",
   log: "#F59E0B",
-  discover: "#38BDF8",
   friends: "#F472B6",
   calendar: "#A3E635",
 };
@@ -237,6 +239,7 @@ function Stars({ value, size = 13 }: { value: number; size?: number }) {
 }
 
 function TrackVignette() {
+  const accent = useAccent();
   const bear = CURATED_SHOWS.find((show) => show.id === "bear")!;
   const sev = CURATED_SHOWS.find((show) => show.id === "sev")!;
   const andor = CURATED_SHOWS.find((show) => show.id === "and")!;
@@ -266,7 +269,12 @@ function TrackVignette() {
               Violet
             </Text>
           </View>
-          <View style={styles.watchedCheck}>
+          <View
+            style={[
+              styles.watchedCheck,
+              { backgroundColor: accent.ramp[400] },
+            ]}
+          >
             <Ionicons
               name="checkmark"
               size={16}
@@ -402,17 +410,20 @@ function LogVignette() {
 }
 
 function DiscoverVignette() {
+  const accent = useAccent();
   const results = ["td", "pb", "sop", "wire"].map(
     (id) => CURATED_SHOWS.find((show) => show.id === id)!,
   );
   return (
     <VignetteCard>
       <View className="p-5">
-        <View style={styles.searchField}>
+        <View
+          style={[styles.searchField, { borderColor: accent.rgba(400, 0.35) }]}
+        >
           <Ionicons
             name="sparkles"
             size={15}
-            color={ACCENTS.discover}
+            color={accent.ramp[400]}
             accessible={false}
             aria-hidden={true}
           />
@@ -429,7 +440,7 @@ function DiscoverVignette() {
         </View>
         <View className="mt-5 flex-row" style={{ gap: 10 }}>
           {results.map((show, index) => (
-            <View key={show.id} style={[styles.resultPoster, index === 0 && styles.resultPosterLead]}>
+            <View key={show.id} style={[styles.resultPoster, index === 0 && { borderColor: accent.rgba(400, 0.55) }]}>
               <Image
                 source={{ uri: show.p }}
                 style={StyleSheet.absoluteFill}
@@ -437,7 +448,12 @@ function DiscoverVignette() {
                 transition={300}
               />
               {index === 0 ? (
-                <View style={styles.matchBadge}>
+                <View
+                  style={[
+                    styles.matchBadge,
+                    { backgroundColor: accent.ramp[400] },
+                  ]}
+                >
                   <Text className="text-[9.5px] font-extrabold text-text-inverse">98% match</Text>
                 </View>
               ) : null}
@@ -450,6 +466,7 @@ function DiscoverVignette() {
 }
 
 function FriendsVignette() {
+  const accent = useAccent();
   const arcane = CURATED_SHOWS.find((show) => show.id === "arc")!;
   const tlou = CURATED_SHOWS.find((show) => show.id === "tlou")!;
   return (
@@ -469,7 +486,7 @@ function FriendsVignette() {
           },
           {
             initial: "J",
-            tint: "#38BDF8",
+            tint: accent.ramp[400],
             name: "Jonah",
             action: "finished",
             show: tlou,
@@ -573,7 +590,8 @@ function CalendarVignette() {
 type Feature = {
   key: string;
   kicker: string;
-  accent: string;
+  // null = the live brand accent, resolved at render in FeatureSection.
+  accent: string | null;
   headline: string;
   body: string;
   vignette: ReactNode;
@@ -601,7 +619,7 @@ const FEATURES: Feature[] = [
   {
     key: "discover",
     kicker: "Discover",
-    accent: ACCENTS.discover,
+    accent: null,
     headline: "Describe a vibe. Get a show.",
     body:
       "Search the way you actually think — “a slow-burn crime drama with a moral spiral” — and Plotlist matches the mood. Recommendations sharpen with every rating.",
@@ -737,10 +755,12 @@ function FeatureSection({
   index: number;
   isWide: boolean;
 }) {
+  const accent = useAccent();
   const flip = index % 2 === 1;
+  const accentColor = feature.accent ?? accent.ramp[400];
   const copy = (
     <View style={isWide ? styles.featureCopyWide : styles.featureCopyNarrow}>
-      <Kicker label={feature.kicker} accent={feature.accent} />
+      <Kicker label={feature.kicker} accent={accentColor} />
       <Text
         className="mt-4 font-black tracking-tight text-text-primary"
         style={{ fontSize: isWide ? 40 : 30, lineHeight: isWide ? 46 : 36 }}
@@ -799,6 +819,7 @@ function Interstitial({ isWide }: { isWide: boolean }) {
 }
 
 function FeatureGrid({ isWide }: { isWide: boolean }) {
+  const accent = useAccent();
   return (
     <View style={styles.grid}>
       {FEATURE_TILES.map((tile) => (
@@ -809,7 +830,7 @@ function FeatureGrid({ isWide }: { isWide: boolean }) {
           <Ionicons
             name={tile.icon}
             size={22}
-            color="#38BDF8"
+            color={accent.ramp[400]}
             accessible={false}
             aria-hidden={true}
           />
@@ -826,11 +847,12 @@ function FeatureGrid({ isWide }: { isWide: boolean }) {
 }
 
 function FinalCta({ isWide }: { isWide: boolean }) {
+  const accent = useAccent();
   return (
     <View style={styles.finalCta}>
       <LinearGradient
         pointerEvents="none"
-        colors={["rgba(56,189,248,0.0)", "rgba(56,189,248,0.07)", "rgba(56,189,248,0.0)"]}
+        colors={[accent.rgba(400, 0), accent.rgba(400, 0.07), accent.rgba(400, 0)]}
         style={StyleSheet.absoluteFill}
       />
       <BrandMark size={44} />
@@ -1062,7 +1084,6 @@ const styles = StyleSheet.create({
   },
   watchedCheck: {
     alignItems: "center",
-    backgroundColor: "#38BDF8",
     borderRadius: 16,
     height: 32,
     justifyContent: "center",
@@ -1121,7 +1142,6 @@ const styles = StyleSheet.create({
   searchField: {
     alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.05)",
-    borderColor: "rgba(56,189,248,0.35)",
     borderRadius: 14,
     borderWidth: 1,
     flexDirection: "row",
@@ -1146,11 +1166,7 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: "hidden",
   },
-  resultPosterLead: {
-    borderColor: "rgba(56,189,248,0.55)",
-  },
   matchBadge: {
-    backgroundColor: "#38BDF8",
     borderRadius: 999,
     bottom: 8,
     left: 8,

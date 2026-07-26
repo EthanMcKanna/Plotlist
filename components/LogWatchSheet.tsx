@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAccent } from "../lib/appearanceStore";
 import { notifyError } from "../lib/dialogs";
 import { useIsDesktopWeb, useWebSheetStyle } from "../lib/webLayout";
 
@@ -101,6 +102,7 @@ function Chip({
   onPress: () => void;
   compact?: boolean;
 }) {
+  const accent = useAccent();
   return (
     <Pressable
       accessibilityRole="button"
@@ -114,15 +116,15 @@ function Chip({
       style={{
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: active ? "rgba(14,165,233,0.45)" : "rgba(255,255,255,0.10)",
-        backgroundColor: active ? "rgba(14,165,233,0.16)" : "rgba(255,255,255,0.04)",
+        borderColor: active ? accent.rgba(500, 0.45) : "rgba(255,255,255,0.10)",
+        backgroundColor: active ? accent.rgba(500, 0.16) : "rgba(255,255,255,0.04)",
         paddingHorizontal: compact ? 12 : 14,
         paddingVertical: compact ? 6 : 8,
       }}
     >
       <Text
         className={compact ? "text-[13px] font-semibold" : "text-[14px] font-semibold"}
-        style={{ color: active ? "#7dd3fc" : "#9BA1B0" }}
+        style={{ color: active ? accent.ramp[300] : "#9BA1B0" }}
       >
         {label}
       </Text>
@@ -146,6 +148,7 @@ export function LogWatchSheet({
   editLog,
   onSaved,
 }: LogWatchSheetProps) {
+  const accent = useAccent();
   const insets = useSafeAreaInsets();
   const isDesktopWeb = useIsDesktopWeb();
   const webSheetStyle = useWebSheetStyle();
@@ -368,7 +371,7 @@ export function LogWatchSheet({
           <Pressable accessibilityLabel="Save entry" onPress={handleSave} disabled={saving}>
             <Text
               className="text-[16px] font-semibold"
-              style={{ color: saving ? "#5A6070" : "#38BDF8" }}
+              style={{ color: saving ? "#5A6070" : accent.ramp[400] }}
             >
               {saving ? "Saving…" : "Save"}
             </Text>
@@ -502,7 +505,7 @@ export function LogWatchSheet({
 
               {customSummary ? (
                 <View className="mt-4 flex-row items-center" style={{ gap: 6 }}>
-                  <Ionicons name="calendar-outline" size={14} color="#7DD3FC" />
+                  <Ionicons name="calendar-outline" size={14} color={accent.ramp[300]} />
                   <Text className="text-[13px] font-semibold text-brand-300">{customSummary}</Text>
                   {precisionForParts(parts) !== "day" ? (
                     <Text className="text-[12px] text-text-tertiary">· approximate</Text>
@@ -530,24 +533,24 @@ export function LogWatchSheet({
             style={{
               borderRadius: 12,
               borderWidth: 1,
-              borderColor: isRewatch ? "rgba(14,165,233,0.35)" : "rgba(255,255,255,0.08)",
-              backgroundColor: isRewatch ? "rgba(14,165,233,0.10)" : "rgba(255,255,255,0.03)",
+              borderColor: isRewatch ? accent.rgba(500, 0.35) : "rgba(255,255,255,0.08)",
+              backgroundColor: isRewatch ? accent.rgba(500, 0.1) : "rgba(255,255,255,0.03)",
               paddingHorizontal: 14,
               paddingVertical: 12,
               gap: 10,
             }}
           >
-            <Ionicons name="repeat" size={18} color={isRewatch ? "#38BDF8" : "#5A6070"} />
+            <Ionicons name="repeat" size={18} color={isRewatch ? accent.ramp[400] : "#5A6070"} />
             <Text
               className="flex-1 text-[14px] font-medium"
-              style={{ color: isRewatch ? "#7dd3fc" : "#9BA1B0" }}
+              style={{ color: isRewatch ? accent.ramp[300] : "#9BA1B0" }}
             >
               I've seen this before
             </Text>
             <Ionicons
               name={isRewatch ? "checkmark-circle" : "ellipse-outline"}
               size={20}
-              color={isRewatch ? "#38BDF8" : "#404654"}
+              color={isRewatch ? accent.ramp[400] : "#404654"}
             />
           </Pressable>
 
@@ -582,8 +585,8 @@ export function LogWatchSheet({
                   style={{
                     borderRadius: 999,
                     borderWidth: 1,
-                    borderColor: active ? "rgba(14,165,233,0.45)" : "rgba(255,255,255,0.08)",
-                    backgroundColor: active ? "rgba(14,165,233,0.16)" : "rgba(255,255,255,0.03)",
+                    borderColor: active ? accent.rgba(500, 0.45) : "rgba(255,255,255,0.08)",
+                    backgroundColor: active ? accent.rgba(500, 0.16) : "rgba(255,255,255,0.03)",
                     height: 40,
                     width: 40,
                   }}

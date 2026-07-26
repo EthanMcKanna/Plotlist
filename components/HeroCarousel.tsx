@@ -21,6 +21,8 @@ import Animated, {
   useAnimatedStyle,
 } from "react-native-reanimated";
 
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
 import {
   getHomeSignalReleaseDistanceDays,
   hasReleaseWindowHomeSignal,
@@ -53,10 +55,18 @@ type HeroEyebrowDisplay = {
   tint: string;
 };
 
+// Sentinel tint resolved to the live accent theme at render (module-scope maps
+// must not capture the accent color at import).
+const ACCENT_TINT = "accent";
+
+function resolveEyebrowTint(tint: string, accent: AccentTheme) {
+  return tint === ACCENT_TINT ? accent.ramp[400] : tint;
+}
+
 const EYEBROW_LABELS: Record<HeroEyebrow, HeroEyebrowDisplay> = {
   trending: { label: "On the rise", icon: "flame", tint: "#F59E0B" },
   current: { label: "Now", icon: "radio", tint: "#F59E0B" },
-  tonight: { label: "Airing tonight", icon: "radio", tint: "#38BDF8" },
+  tonight: { label: "Airing tonight", icon: "radio", tint: ACCENT_TINT },
   "for-you": { label: "For you", icon: "sparkles", tint: "#22C55E" },
   fresh: { label: "New", icon: "ribbon", tint: "#FB7185" },
 };
@@ -281,10 +291,10 @@ export function getHeroEyebrowDisplay(
 
   const releaseDistance = getHomeSignalReleaseDistanceDays(slide, now);
   if (releaseDistance === 0) {
-    return { label: "New", icon: "sparkles", tint: "#38BDF8" };
+    return { label: "New", icon: "sparkles", tint: ACCENT_TINT };
   }
   if (releaseDistance !== null && releaseDistance < 0 && releaseDistance >= -6) {
-    return { label: "New", icon: "sparkles", tint: "#38BDF8" };
+    return { label: "New", icon: "sparkles", tint: ACCENT_TINT };
   }
   if (isReturnSignal(slide.signal)) {
     return { label: "Returning", icon: "return-up-forward", tint: "#FB7185" };
@@ -293,7 +303,7 @@ export function getHeroEyebrowDisplay(
     return { label: "New season", icon: "albums", tint: "#FB7185" };
   }
   if (releaseDistance !== null && releaseDistance > 0 && releaseDistance <= 7) {
-    return { label: "This week", icon: "calendar", tint: "#38BDF8" };
+    return { label: "This week", icon: "calendar", tint: ACCENT_TINT };
   }
   return fallback;
 }
@@ -309,6 +319,7 @@ export function HeroCarousel({
   reduceMotionEnabled,
 }: HeroCarouselProps) {
   const { width: windowWidth } = useWindowDimensions();
+  const accent = useAccent();
   const heroHeight = Math.min(Math.max(windowWidth * 0.82, 360), 468);
   const totalHeight = topInset + heroHeight;
 
@@ -397,11 +408,13 @@ export function HeroCarousel({
       <View
         style={[styles.fallback, { height: totalHeight, paddingTop: topInset + 24 }]}
       >
-        <View style={styles.fallbackBadge}>
+        <View
+          style={[styles.fallbackBadge, { backgroundColor: accent.rgba(400, 0.14) }]}
+        >
           <Ionicons
             name="sparkles"
             size={20}
-            color="#38BDF8"
+            color={accent.ramp[400]}
             accessible={false}
             accessibilityElementsHidden
             aria-hidden={true}
@@ -502,8 +515,10 @@ export function HeroCarousel({
         {safeSlides.length > 1 ? (
           <View style={[styles.dots, styles.pointerNone]}>
             {safeSlides.map((slide, idx) => {
-              const tint =
-                EYEBROW_LABELS[slide.eyebrow]?.tint ?? "#F1F3F7";
+              const tint = resolveEyebrowTint(
+                EYEBROW_LABELS[slide.eyebrow]?.tint ?? "#F1F3F7",
+                accent,
+              );
               const active = idx === activeIndex;
               return (
                 <View
@@ -549,8 +564,9 @@ function HeroBackdropSlide({
     setImageFailed(false);
   }, [imageUrl]);
 
+  const accent = useAccent();
   const eyebrow = getHeroEyebrowDisplay(slide, now);
-  const tint = eyebrow?.tint ?? "#38BDF8";
+  const tint = resolveEyebrowTint(eyebrow?.tint ?? ACCENT_TINT, accent);
   const shouldShowImage = Boolean(imageUrl && !imageFailed);
   const shouldShowFallback = !imageUrl || imageFailed || !imageLoaded;
 
@@ -862,7 +878,6 @@ const styles = StyleSheet.create({
   },
   fallbackBadge: {
     alignItems: "center",
-    backgroundColor: "rgba(56,189,248,0.14)",
     borderRadius: 8,
     height: 44,
     justifyContent: "center",

@@ -1,5 +1,6 @@
 import { ScrollView, Text } from "react-native";
 
+import { useAccent } from "../lib/appearanceStore";
 import { GlassPressable } from "./NativeGlass";
 
 export type FilterOption = {
@@ -15,6 +16,7 @@ type FilterChipsProps = {
 };
 
 export function FilterChips({ options, value, onChange }: FilterChipsProps) {
+  const accent = useAccent();
   return (
     <ScrollView
       horizontal
@@ -29,7 +31,7 @@ export function FilterChips({ options, value, onChange }: FilterChipsProps) {
             onPress={() => onChange(option.value)}
             radius={999}
             variant={isSelected ? "prominent" : "control"}
-            fallbackColor={isSelected ? "rgba(14,165,233,0.86)" : undefined}
+            fallbackColor={isSelected ? accent.rgba(500, 0.86) : undefined}
             contentStyle={{
               alignItems: "center",
               flexDirection: "row",

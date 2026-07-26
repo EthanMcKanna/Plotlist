@@ -12,6 +12,7 @@ import { Link, router, type Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAccent } from "../../lib/appearanceStore";
 import { confirmAction, notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { useScrollToTopOnTabPress } from "../../lib/useScrollToTopOnTabPress";
@@ -91,6 +92,7 @@ function mediumHaptic() {
 // Seven slim bars for the trailing week; today reads brand-blue so the
 // header carries a pulse without becoming a stats dashboard.
 function WeekSparkline({ days }: { days: DiaryDayActivity[] }) {
+  const accent = useAccent();
   const max = Math.max(1, ...days.map((day) => day.count));
   const active = days.filter((day) => day.count > 0).length;
   return (
@@ -108,9 +110,9 @@ function WeekSparkline({ days }: { days: DiaryDayActivity[] }) {
               {
                 height,
                 backgroundColor: day.isToday
-                  ? "#38BDF8"
+                  ? accent.ramp[400]
                   : day.count > 0
-                    ? "rgba(125,211,252,0.42)"
+                    ? accent.rgba(300, 0.42)
                     : "rgba(255,255,255,0.12)",
               },
             ]}
@@ -144,13 +146,14 @@ function Stars({ rating, size = 13 }: { rating: number; size?: number }) {
 // number, every following row leaves the rail empty so the eye can scan
 // dates down the left edge.
 function DayRail({ label }: { label: DiaryDayLabel | null }) {
+  const accent = useAccent();
   return (
     <View style={styles.dayRail}>
       {label ? (
         <>
           <Text
             className="text-[17px] font-bold"
-            style={{ color: label.isToday ? "#38BDF8" : "#F1F3F7" }}
+            style={{ color: label.isToday ? accent.ramp[400] : "#F1F3F7" }}
           >
             {label.day}
           </Text>
@@ -272,6 +275,7 @@ const EntryRow = memo(function EntryRow({
   row: DiaryEntryRow;
   onAction: (action: DiaryAction) => void;
 }) {
+  const accent = useAccent();
   const item = row.item;
   const title = getDiaryItemTitle(item);
   const episodeLabel = getDiaryEpisodeLabel(item);
@@ -345,7 +349,7 @@ const EntryRow = memo(function EntryRow({
             </Text>
             {isRewatch ? (
               <View className="flex-row items-center gap-1 rounded-full border border-brand-500/25 bg-brand-500/10 px-1.5 py-0.5">
-                <Ionicons name="repeat" size={10} color="#7DD3FC" />
+                <Ionicons name="repeat" size={10} color={accent.ramp[300]} />
                 <Text className="text-[10px] font-bold text-brand-300">Rewatch</Text>
               </View>
             ) : null}
@@ -440,10 +444,11 @@ function DiaryHeader({
 }
 
 function DiaryFooter({ hasMore }: { hasMore?: boolean }) {
+  const accent = useAccent();
   if (hasMore) {
     return (
       <View className="items-center py-6">
-        <ActivityIndicator color="#38BDF8" />
+        <ActivityIndicator color={accent.ramp[400]} />
       </View>
     );
   }
@@ -458,6 +463,7 @@ function DiaryFooter({ hasMore }: { hasMore?: boolean }) {
 }
 
 function EmptyDiary() {
+  const accent = useAccent();
   return (
     <View className="flex-1 px-6 pt-5">
       <Text className="text-[34px] font-bold text-text-primary">Log</Text>
@@ -472,7 +478,7 @@ function EmptyDiary() {
       >
         <View className="items-center px-6 py-10">
           <View className="h-14 w-14 items-center justify-center rounded-full border border-brand-500/25 bg-brand-500/10">
-            <Ionicons name="book-outline" size={24} color="#7DD3FC" />
+            <Ionicons name="book-outline" size={24} color={accent.ramp[300]} />
           </View>
           <Text className="mt-4 text-[17px] font-bold text-text-primary">
             Your diary starts here
@@ -655,6 +661,7 @@ export function LogSurface({
 }
 
 export default function LogScreen() {
+  const accent = useAccent();
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
   const [limit, setLimit] = useState(60);
@@ -735,7 +742,7 @@ export default function LogScreen() {
     return (
       <Screen hasTabBar>
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#38BDF8" size="large" />
+          <ActivityIndicator color={accent.ramp[400]} size="large" />
         </View>
       </Screen>
     );

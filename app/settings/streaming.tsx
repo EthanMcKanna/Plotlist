@@ -7,6 +7,7 @@ import * as Haptics from "expo-haptics";
 
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { Screen } from "../../components/Screen";
+import { useAccent } from "../../lib/appearanceStore";
 import { api } from "../../lib/plotlist/api";
 import { useMutation, useQuery } from "../../lib/plotlist/react";
 import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
@@ -16,6 +17,7 @@ import {
 } from "../../lib/streamingProviders";
 
 export default function StreamingServicesScreen() {
+  const accent = useAccent();
   const me = useQuery(api.users.me);
   const updateProfile = useMutation(api.users.updateProfile);
 
@@ -128,7 +130,7 @@ export default function StreamingServicesScreen() {
                 <View
                   className="h-6 w-6 items-center justify-center rounded-full"
                   style={{
-                    backgroundColor: isOn ? "#0EA5E9" : "rgba(255,255,255,0.08)",
+                    backgroundColor: isOn ? accent.ramp[500] : "rgba(255,255,255,0.08)",
                   }}
                 >
                   {isOn ? <Ionicons name="checkmark" size={15} color="#0D0F14" /> : null}

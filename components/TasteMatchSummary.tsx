@@ -2,6 +2,8 @@ import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
 import { tasteMatchTier } from "../lib/plotlist/recsRanking";
 
 type SharedFavoriteShow = {
@@ -20,9 +22,9 @@ type SharedFacet = {
 // The percent is calibrated against random watcher pairs (50 = an average
 // pair — see TASTE_MATCH_CALIBRATION), so the meter anchors it with an "avg"
 // tick instead of pretending 0–100 is a linear scale.
-function tierAccent(percent: number) {
+function tierAccent(percent: number, accentTheme: AccentTheme) {
   if (percent >= 70) return "#22C55E";
-  if (percent >= 40) return "#38BDF8";
+  if (percent >= 40) return accentTheme.ramp[400];
   return "#F59E0B";
 }
 
@@ -35,7 +37,8 @@ export function TasteMatchMeter({
   height?: number;
   showAverageTick?: boolean;
 }) {
-  const accent = tierAccent(percent);
+  const accentTheme = useAccent();
+  const accent = tierAccent(percent, accentTheme);
   return (
     <View
       accessibilityRole="progressbar"
@@ -59,7 +62,8 @@ export function TasteMatchMeter({
 
 // Small pill for list rows (people discovery).
 export function TasteMatchChip({ percent }: { percent: number }) {
-  const accent = tierAccent(percent);
+  const accentTheme = useAccent();
+  const accent = tierAccent(percent, accentTheme);
   return (
     <View
       style={[styles.chip, { borderColor: `${accent}55`, backgroundColor: `${accent}1F` }]}
@@ -104,8 +108,9 @@ export function TasteMatchSummary({
   onPress?: () => void;
   variant?: "compact" | "card";
 }) {
+  const accentTheme = useAccent();
   const tier = tasteMatchTier(percent);
-  const accent = tierAccent(percent);
+  const accent = tierAccent(percent, accentTheme);
 
   if (variant === "compact") {
     return <TasteMatchChip percent={percent} />;
@@ -160,7 +165,17 @@ export function TasteMatchSummary({
       {visibleFacets.length > 0 ? (
         <View className="mt-2.5 flex-row items-center gap-1.5">
           {visibleFacets.map((facet) => (
-            <View key={facet.key} style={[styles.facetChip, { flexShrink: 1 }]}>
+            <View
+              key={facet.key}
+              style={[
+                styles.facetChip,
+                {
+                  backgroundColor: accentTheme.rgba(400, 0.12),
+                  borderColor: accentTheme.rgba(400, 0.35),
+                  flexShrink: 1,
+                },
+              ]}
+            >
               <Text
                 className="text-[12px] font-semibold text-brand-300"
                 numberOfLines={1}
@@ -236,8 +251,6 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   facetChip: {
-    backgroundColor: "rgba(56,189,248,0.12)",
-    borderColor: "rgba(56,189,248,0.35)",
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,

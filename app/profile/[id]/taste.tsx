@@ -17,6 +17,7 @@ import { HorizontalRail } from "../../../components/HorizontalRail";
 import { PageTitle } from "../../../components/PageTitle";
 import { Poster } from "../../../components/Poster";
 import { TasteMatchMeter } from "../../../components/TasteMatchSummary";
+import { useAccent } from "../../../lib/appearanceStore";
 import { useAction, useAuth, useQuery } from "../../../lib/plotlist/react";
 import { guardedPush } from "../../../lib/navigation";
 import { api } from "../../../lib/plotlist/api";
@@ -44,6 +45,7 @@ function pressShow(show: any) {
 // percent, the shared facets/shows behind it, and "from their shelf, for you"
 // — their loved shows the viewer hasn't seen, ranked by the viewer's taste.
 export default function TasteBreakdownScreen() {
+  const accent = useAccent();
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -145,7 +147,7 @@ export default function TasteBreakdownScreen() {
 
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#0ea5e9" />
+          <ActivityIndicator size="large" color={accent.ramp[500]} />
         </View>
       ) : !match ? (
         <View className="flex-1 items-center justify-center px-8">
@@ -192,13 +194,19 @@ export default function TasteBreakdownScreen() {
                     onPress={() => handlePressFacet(facet.key)}
                     accessibilityRole="button"
                     accessibilityLabel={`Browse ${facet.title}`}
-                    style={styles.facetChip}
+                    style={[
+                      styles.facetChip,
+                      {
+                        backgroundColor: accent.rgba(400, 0.12),
+                        borderColor: accent.rgba(400, 0.4),
+                      },
+                    ]}
                     className="active:opacity-75"
                   >
                     <Text className="text-[13px] font-semibold text-brand-300">
                       {facet.title}
                     </Text>
-                    <Ionicons name="chevron-forward" size={12} color="#7DD3FC" />
+                    <Ionicons name="chevron-forward" size={12} color={accent.ramp[300]} />
                   </Pressable>
                 ))}
               </View>
@@ -285,8 +293,6 @@ export default function TasteBreakdownScreen() {
 const styles = StyleSheet.create({
   facetChip: {
     alignItems: "center",
-    backgroundColor: "rgba(56,189,248,0.12)",
-    borderColor: "rgba(56,189,248,0.4)",
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",

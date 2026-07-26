@@ -15,6 +15,7 @@ import { FanPreviewCard } from "./FanPreviewCard";
 import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
 import { LinkPressable } from "./LinkPressable";
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { useAction } from "../lib/plotlist/react";
 import {
@@ -47,7 +48,11 @@ export function FacetGroupPills({
   style?: object;
 }) {
   const isDesktopWeb = useIsDesktopWeb();
-  const pills = GENRE_EXPLORER_GROUPS.map((candidate) => {
+  // Subscribe to accent changes; the brand-accented group resolves through
+  // getGenreExplorerGroup below.
+  useAccent();
+  const pills = GENRE_EXPLORER_GROUPS.map((rawGroup) => {
+    const candidate = getGenreExplorerGroup(rawGroup.key);
     const isActive = candidate.key === selected;
     return (
       <Pressable
@@ -183,6 +188,9 @@ export function GenreExplorer() {
   // empty frames re-render with artwork.
   const [, setPreviewEpoch] = useState(0);
 
+  // Subscribe to accent changes so the brand-accented group's resolved color
+  // (via getGenreExplorerGroup) stays live.
+  useAccent();
   const group = getGenreExplorerGroup(selectedGroup);
   const facets = useMemo(() => getFacetsForGroup(selectedGroup), [selectedGroup]);
 

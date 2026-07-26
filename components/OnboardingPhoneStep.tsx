@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { PrimaryButton } from "./PrimaryButton";
 import { TextField } from "./TextField";
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { setStoredSignInPhone } from "../lib/authStorage";
 import { formatPhoneNumber, normalizePhoneNumber } from "../lib/phone";
@@ -33,6 +34,7 @@ export function OnboardingPhoneStep({
   onSkip: () => Promise<void>;
   showSkip?: boolean;
 }) {
+  const accent = useAccent();
   const startVerification = useAction(api.phone.startVerification);
   const attachVerified = useAction(api.phone.attachVerified);
 
@@ -167,7 +169,7 @@ export function OnboardingPhoneStep({
           className="items-center justify-center rounded-full bg-dark-elevated"
           style={{ width: 72, height: 72 }}
         >
-          <Ionicons name="people" size={30} color="#38bdf8" />
+          <Ionicons name="people" size={30} color={accent.ramp[400]} />
         </View>
       </View>
 

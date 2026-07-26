@@ -59,6 +59,7 @@ import Animated, {
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { api } from "../../lib/plotlist/api";
+import { useAccent } from "../../lib/appearanceStore";
 import { confirmAction, notify, notifyError, promptSignIn } from "../../lib/dialogs";
 import { presentProPaywall } from "../../lib/purchases";
 import { useProStatus } from "../../lib/useProStatus";
@@ -511,6 +512,7 @@ export default function ShowScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
   // Reactive stand-ins for the old module-scope Dimensions constants: the
   // content column (excludes the desktop-web sidebar) and window height.
   const contentWidth = useContentWidth();
@@ -2617,9 +2619,9 @@ export default function ShowScreen() {
               accessibilityRole="button"
               radius={16}
               variant="control"
-              fallbackColor="rgba(14,165,233,0.10)"
-              tintColor="rgba(14,165,233,0.10)"
-              borderColor="rgba(14,165,233,0.20)"
+              fallbackColor={accent.rgba(500, 0.1)}
+              tintColor={accent.rgba(500, 0.1)}
+              borderColor={accent.rgba(500, 0.2)}
               surfaceStyle={{
                 width: 52,
                 height: 52,
@@ -2631,7 +2633,7 @@ export default function ShowScreen() {
                 height: 52,
               }}
             >
-              <Ionicons name="repeat" size={22} color="#38BDF8" />
+              <Ionicons name="repeat" size={22} color={accent.ramp[400]} />
             </GlassPressable>
             <GlassPressable
               onPress={() => {
@@ -3173,7 +3175,7 @@ export default function ShowScreen() {
             </View>
           ) : reviewsStatus === "LoadingFirstPage" ? (
             <View style={{ alignItems: "center", paddingVertical: 24 }}>
-              <ActivityIndicator color="#7dd3fc" />
+              <ActivityIndicator color={accent.ramp[300]} />
             </View>
           ) : (
             <EmptyState
@@ -3323,9 +3325,9 @@ export default function ShowScreen() {
                           radius={14}
                           variant={isIn ? "prominent" : "control"}
                           fallbackColor={
-                            isIn ? "rgba(14,165,233,0.12)" : "rgba(255,255,255,0.03)"
+                            isIn ? accent.rgba(500, 0.12) : "rgba(255,255,255,0.03)"
                           }
-                          borderColor={isIn ? "rgba(14,165,233,0.24)" : "transparent"}
+                          borderColor={isIn ? accent.rgba(500, 0.24) : "transparent"}
                           contentStyle={{
                             alignItems: "center",
                             flexDirection: "row",
@@ -3425,7 +3427,7 @@ export default function ShowScreen() {
                   className="mt-3 flex-row items-center gap-3 rounded-2xl border border-dashed border-dark-border px-4 py-3.5 active:bg-dark-hover"
                 >
                   <View className="h-6 w-6 items-center justify-center rounded-full bg-brand-500/15">
-                    <Ionicons name="add" size={16} color="#0ea5e9" />
+                    <Ionicons name="add" size={16} color={accent.ramp[500]} />
                   </View>
                   <Text className="text-base font-medium text-brand-400">New list</Text>
                 </Pressable>
@@ -3998,11 +4000,11 @@ export default function ShowScreen() {
                       variant="surface"
                       fallbackColor={
                         sheetIsWatched
-                          ? "rgba(14,165,233,0.15)"
+                          ? accent.rgba(500, 0.15)
                           : "rgba(255,255,255,0.05)"
                       }
                       borderColor={
-                        sheetIsWatched ? "rgba(14,165,233,0.28)" : "rgba(255,255,255,0.08)"
+                        sheetIsWatched ? accent.rgba(500, 0.28) : "rgba(255,255,255,0.08)"
                       }
                       surfaceStyle={{ opacity: sheetIsAvailable ? 1 : 0.5 }}
                       contentStyle={{
@@ -4027,11 +4029,11 @@ export default function ShowScreen() {
                       <Ionicons
                         name={sheetIsWatched ? "checkmark-circle" : "checkmark-circle-outline"}
                         size={18}
-                        color={sheetIsWatched ? "#38bdf8" : "#6B7280"}
+                        color={sheetIsWatched ? accent.ramp[400] : "#6B7280"}
                       />
                       <Text
                         className="text-sm font-semibold"
-                        style={{ color: sheetIsWatched ? "#7dd3fc" : "#9BA1B0" }}
+                        style={{ color: sheetIsWatched ? accent.ramp[300] : "#9BA1B0" }}
                       >
                         {sheetIsWatched
                           ? "Watched"
@@ -4049,8 +4051,8 @@ export default function ShowScreen() {
                         accessibilityLabel={sheetIsWatched ? "Log a rewatch" : "Log with details"}
                         radius={999}
                         variant="surface"
-                        fallbackColor="rgba(14,165,233,0.10)"
-                        borderColor="rgba(14,165,233,0.22)"
+                        fallbackColor={accent.rgba(500, 0.1)}
+                        borderColor={accent.rgba(500, 0.22)}
                         contentStyle={{
                           alignItems: "center",
                           flexDirection: "row",
@@ -4066,8 +4068,8 @@ export default function ShowScreen() {
                           );
                         }}
                       >
-                        <Ionicons name="repeat" size={18} color="#38BDF8" />
-                        <Text className="text-sm font-semibold" style={{ color: "#7dd3fc" }}>
+                        <Ionicons name="repeat" size={18} color={accent.ramp[400]} />
+                        <Text className="text-sm font-semibold" style={{ color: accent.ramp[300] }}>
                           Log
                         </Text>
                       </GlassPressable>
@@ -4354,7 +4356,7 @@ export default function ShowScreen() {
                               <Ionicons
                                 name={log.isRewatch ? "repeat" : "checkmark-circle-outline"}
                                 size={16}
-                                color={log.isRewatch ? "#38BDF8" : "#5A6070"}
+                                color={log.isRewatch ? accent.ramp[400] : "#5A6070"}
                               />
                               <View className="min-w-0 flex-1">
                                 <Text className="text-[14px] font-medium text-text-primary">

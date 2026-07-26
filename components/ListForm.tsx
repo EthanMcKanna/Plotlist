@@ -2,6 +2,8 @@ import { Platform, Pressable, Switch, Text, TextInput, View } from "react-native
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
+import { useAccent } from "../lib/appearanceStore";
+
 // Shared create/edit fields for lists so both flows stay visually identical.
 export function ListForm({
   title,
@@ -32,6 +34,7 @@ export function ListForm({
   onToggleComments?: () => void;
   onSubmit: () => void;
 }) {
+  const accent = useAccent();
   const canSubmit = Boolean(title.trim()) && !saving;
   return (
     <View>
@@ -86,7 +89,7 @@ export function ListForm({
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               onToggleComments();
             }}
-            trackColor={{ false: "#2A2F3A", true: "#0EA5E9" }}
+            trackColor={{ false: "#2A2F3A", true: accent.ramp[500] }}
             thumbColor="#FFFFFF"
             ios_backgroundColor="#2A2F3A"
             accessibilityLabel="Allow comments"

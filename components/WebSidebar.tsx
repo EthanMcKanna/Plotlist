@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Link, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { useQuery } from "../lib/plotlist/react";
 import { WEB_ACTIVE_NAV_EVENT } from "../lib/useScrollToTopOnTabPress";
@@ -93,6 +94,7 @@ function SidebarRow({
   compact: boolean;
   badge?: string | null;
 }) {
+  const accent = useAccent();
   return (
     <Link href={item.href as never} asChild>
       <Pressable
@@ -116,12 +118,15 @@ function SidebarRow({
         <Ionicons
           name={active ? item.activeIcon : item.icon}
           size={22}
-          color={active ? "#38BDF8" : "#9BA1B0"}
+          color={active ? accent.ramp[400] : "#9BA1B0"}
           accessible={false}
           aria-hidden={true}
         />
         {badge ? (
-          <View style={styles.badge} pointerEvents="none">
+          <View
+            style={[styles.badge, { backgroundColor: accent.ramp[400] }]}
+            pointerEvents="none"
+          >
             <Text style={styles.badgeText} accessible={false}>
               {badge}
             </Text>
@@ -251,7 +256,6 @@ const styles = StyleSheet.create({
   },
   badge: {
     alignItems: "center",
-    backgroundColor: "#38BDF8",
     borderRadius: 8,
     height: 15,
     justifyContent: "center",

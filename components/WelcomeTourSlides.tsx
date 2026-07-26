@@ -9,6 +9,9 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
+
 export type WelcomeSlide = {
   key: string;
   title: string;
@@ -96,11 +99,13 @@ function StaggerIn({
   return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
 }
 
-function Halo({ color = "rgba(14,165,233,0.10)" }: { color?: string }) {
+function Halo({ color }: { color?: string }) {
+  const accent = useAccent();
+  const haloColor = color ?? accent.rgba(500, 0.1);
   return (
     <View pointerEvents="none" style={styles.haloWrap}>
-      <View style={[styles.haloOuter, { backgroundColor: color }]} />
-      <View style={[styles.haloInner, { backgroundColor: color }]} />
+      <View style={[styles.haloOuter, { backgroundColor: haloColor }]} />
+      <View style={[styles.haloInner, { backgroundColor: haloColor }]} />
     </View>
   );
 }
@@ -156,8 +161,9 @@ function AvatarDot({
 
 // ── Slide 1: brand — fanned poster cards ──
 
-const POSTER_GRADIENTS: [string, string][] = [
-  ["#0B3B54", "#0ea5e9"],
+// Gradients resolve at render so the brand pair follows the live accent.
+const posterGradients = (accent: AccentTheme): [string, string][] => [
+  ["#0B3B54", accent.ramp[500]],
   ["#3A2A08", "#F59E0B"],
   ["#0B3B2B", "#22C55E"],
 ];
@@ -165,6 +171,8 @@ const POSTER_GRADIENTS: [string, string][] = [
 const POSTER_ICONS = ["tv-outline", "play", "heart"] as const;
 
 function BrandSlide(props: SlideAnimationProps) {
+  const accent = useAccent();
+  const gradients = posterGradients(accent);
   return (
     <View style={styles.stage}>
       <Halo />
@@ -189,7 +197,7 @@ function BrandSlide(props: SlideAnimationProps) {
             >
               <StaggerIn {...props} order={i} style={styles.posterCard}>
                 <LinearGradient
-                  colors={POSTER_GRADIENTS[fanIndex]}
+                  colors={gradients[fanIndex]}
                   start={{ x: 0, y: 1 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.posterFill}
@@ -258,11 +266,13 @@ function TrackSlide(props: SlideAnimationProps) {
 // ── Slide 3: up next ──
 
 const UP_NEXT = [
-  { show: "The Bear", episode: "S3 E1 · Tomorrow", progress: 0.72, colors: POSTER_GRADIENTS[1] },
-  { show: "Fallout", episode: "S1 E5 · The Past", progress: 0.4, colors: POSTER_GRADIENTS[0] },
+  { show: "The Bear", episode: "S3 E1 · Tomorrow", progress: 0.72, gradient: 1 },
+  { show: "Fallout", episode: "S1 E5 · The Past", progress: 0.4, gradient: 0 },
 ];
 
 function UpNextSlide(props: SlideAnimationProps) {
+  const accent = useAccent();
+  const gradients = posterGradients(accent);
   return (
     <View style={styles.stage}>
       <Halo />
@@ -271,7 +281,7 @@ function UpNextSlide(props: SlideAnimationProps) {
           <StaggerIn key={item.show} {...props} order={i}>
             <MockCard style={styles.upNextCard}>
               <LinearGradient
-                colors={item.colors}
+                colors={gradients[item.gradient]}
                 start={{ x: 0, y: 1 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.upNextThumb}
@@ -292,7 +302,12 @@ function UpNextSlide(props: SlideAnimationProps) {
                     order={i + 1.4}
                     style={[styles.progressFill, { width: `${item.progress * 100}%` }]}
                   >
-                    <View style={styles.progressFillInner} />
+                    <View
+                      style={[
+                        styles.progressFillInner,
+                        { backgroundColor: accent.ramp[500] },
+                      ]}
+                    />
                   </StaggerIn>
                 </View>
               </View>
@@ -309,6 +324,7 @@ function UpNextSlide(props: SlideAnimationProps) {
 const DISCOVER_CHIPS = ["Comfort comedy", "Crime thrillers", "Prestige drama"];
 
 function DiscoverSlide(props: SlideAnimationProps) {
+  const accent = useAccent();
   return (
     <View style={styles.stage}>
       <Halo color="rgba(245,158,11,0.08)" />
@@ -317,7 +333,12 @@ function DiscoverSlide(props: SlideAnimationProps) {
           <View style={styles.searchPill}>
             <Ionicons name="search" size={16} color="#9BA1B0" />
             <Text className="text-sm text-text-secondary">slow-burn sci-fi</Text>
-            <View style={styles.searchCursor} />
+            <View
+              style={[
+                styles.searchCursor,
+                { backgroundColor: accent.ramp[500] },
+              ]}
+            />
           </View>
         </StaggerIn>
         <View className="flex-row flex-wrap justify-center" style={{ gap: 8 }}>
@@ -482,7 +503,6 @@ const styles = StyleSheet.create({
     height: 4,
   },
   progressFillInner: {
-    backgroundColor: "#0ea5e9",
     borderRadius: 2,
     flex: 1,
   },
@@ -495,7 +515,6 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   searchCursor: {
-    backgroundColor: "#0ea5e9",
     borderRadius: 1,
     height: 16,
     width: 2,

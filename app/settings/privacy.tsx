@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { GlassSurface } from "../../components/NativeGlass";
 import { Screen } from "../../components/Screen";
 import { SegmentedControl } from "../../components/SegmentedControl";
+import { useAccent } from "../../lib/appearanceStore";
 import { api } from "../../lib/plotlist/api";
 import { confirmAction, notifyError } from "../../lib/dialogs";
 import {
@@ -75,6 +76,7 @@ function VisibilityCard({
 }
 
 export default function PrivacySettingsScreen() {
+  const accent = useAccent();
   const router = useRouter();
   const me = useQuery(api.users.me);
   const hasProfile = Boolean(me?._id);
@@ -167,7 +169,7 @@ export default function PrivacySettingsScreen() {
                 <Ionicons
                   name={isPrivate ? "lock-closed" : "lock-open-outline"}
                   size={17}
-                  color={isPrivate ? "#38bdf8" : "#9BA1B0"}
+                  color={isPrivate ? accent.ramp[400] : "#9BA1B0"}
                 />
               </View>
               <View className="flex-1">
@@ -183,7 +185,7 @@ export default function PrivacySettingsScreen() {
                 value={isPrivate}
                 disabled={savingPrivate}
                 onValueChange={handleTogglePrivate}
-                trackColor={{ true: "#0EA5E9", false: "#2A2F3A" }}
+                trackColor={{ true: accent.ramp[500], false: "#2A2F3A" }}
                 thumbColor="#F1F3F7"
               />
             </View>
@@ -198,7 +200,7 @@ export default function PrivacySettingsScreen() {
                 }}
                 className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
               >
-                <Ionicons name="person-add-outline" size={20} color="#38bdf8" />
+                <Ionicons name="person-add-outline" size={20} color={accent.ramp[400]} />
                 <Text className="flex-1 text-base font-medium text-text-primary">
                   Follow requests
                 </Text>

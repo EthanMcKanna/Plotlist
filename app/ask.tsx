@@ -25,6 +25,7 @@ import {
   type AskMoodChipId,
   type AskTimeChipId,
 } from "../lib/askPlotlist";
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useAction, useQuery } from "../lib/plotlist/react";
 import { notifyError } from "../lib/dialogs";
@@ -33,7 +34,6 @@ import { presentProPaywall } from "../lib/purchases";
 import { STREAMING_PROVIDER_OPTIONS } from "../lib/streamingProviders";
 import { SHOW_BACK_BUTTON, WEB_READING_MAX_WIDTH } from "../lib/webLayout";
 
-const ACCENT = "#38BDF8";
 const POSTER_WIDTH = 44;
 const POSTER_HEIGHT = 66;
 
@@ -80,6 +80,7 @@ function Chip({
   icon?: React.ComponentProps<typeof Ionicons>["name"];
   accessibilityLabel?: string;
 }) {
+  const accent = useAccent();
   return (
     <GlassPressable
       onPress={onPress}
@@ -87,16 +88,16 @@ function Chip({
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel ?? label}
-      borderColor={selected ? "rgba(56,189,248,0.65)" : undefined}
-      fallbackColor={selected ? "rgba(56,189,248,0.16)" : undefined}
-      tintColor={selected ? "rgba(56,189,248,0.22)" : undefined}
+      borderColor={selected ? accent.rgba(400, 0.65) : undefined}
+      fallbackColor={selected ? accent.rgba(400, 0.16) : undefined}
+      tintColor={selected ? accent.rgba(400, 0.22) : undefined}
       contentStyle={styles.chipContent}
     >
       {icon ? (
         <Ionicons
           name={icon}
           size={13}
-          color={selected ? ACCENT : "#9BA1B0"}
+          color={selected ? accent.ramp[400] : "#9BA1B0"}
           accessible={false}
           accessibilityElementsHidden
           aria-hidden={true}
@@ -105,7 +106,7 @@ function Chip({
       ) : null}
       <Text
         className="text-[13px] font-bold"
-        style={{ color: selected ? ACCENT : "#C7CCD6" }}
+        style={{ color: selected ? accent.ramp[400] : "#C7CCD6" }}
       >
         {label}
       </Text>
@@ -199,6 +200,7 @@ function PickRow({ pick, rank }: { pick: AskPick; rank: number }) {
 }
 
 export default function AskPlotlistScreen() {
+  const accent = useAccent();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const insets = useSafeAreaInsets();
   const askPlotlist = useAction(api.embeddings.askPlotlist);
@@ -329,8 +331,17 @@ export default function AskPlotlistScreen() {
           <View className="mt-2 flex-row items-center justify-between">
             <Text className="text-[34px] font-bold text-text-primary">Ask Plotlist</Text>
             {!isPro && typeof remaining === "number" ? (
-              <View style={styles.quotaPill} testID="ask-quota-pill">
-                <Text className="text-[11px] font-bold" style={{ color: ACCENT }}>
+              <View
+                style={[
+                  styles.quotaPill,
+                  {
+                    backgroundColor: accent.rgba(400, 0.12),
+                    borderColor: accent.rgba(400, 0.35),
+                  },
+                ]}
+                testID="ask-quota-pill"
+              >
+                <Text className="text-[11px] font-bold" style={{ color: accent.ramp[400] }}>
                   {remaining} free ask{remaining === 1 ? "" : "s"} left
                 </Text>
               </View>
@@ -413,7 +424,11 @@ export default function AskPlotlistScreen() {
           disabled={anyBusy}
           accessibilityRole="button"
           accessibilityLabel="Find me something to watch"
-          style={[styles.askButton, anyBusy ? styles.askButtonBusy : null]}
+          style={[
+            styles.askButton,
+            { backgroundColor: accent.ramp[400] },
+            anyBusy ? styles.askButtonBusy : null,
+          ]}
           className="web:transition-opacity hover:opacity-90 active:opacity-80"
           testID="ask-submit"
         >
@@ -479,7 +494,6 @@ export default function AskPlotlistScreen() {
 const styles = StyleSheet.create({
   askButton: {
     alignItems: "center",
-    backgroundColor: ACCENT,
     borderRadius: 999,
     flexDirection: "row",
     gap: 8,
@@ -549,8 +563,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   quotaPill: {
-    backgroundColor: "rgba(56,189,248,0.12)",
-    borderColor: "rgba(56,189,248,0.35)",
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 10,

@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Screen } from "../../components/Screen";
+import { useAccent } from "../../lib/appearanceStore";
 import { api } from "../../lib/plotlist/api";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import { confirmAction, notifyError } from "../../lib/dialogs";
@@ -101,6 +102,7 @@ function OptionToggleRow({
   disabled?: boolean;
   isLast?: boolean;
 }) {
+  const accent = useAccent();
   return (
     <View
       className={`flex-row items-center gap-3 px-4 py-3.5 ${
@@ -118,7 +120,7 @@ function OptionToggleRow({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onChange(next);
         }}
-        trackColor={{ true: "#0EA5E9", false: "#2A2F3A" }}
+        trackColor={{ true: accent.ramp[500], false: "#2A2F3A" }}
         thumbColor="#F1F3F7"
       />
     </View>
@@ -154,6 +156,7 @@ function ProgressBar({ percent }: { percent: number | null }) {
 }
 
 export default function ImportTraktScreen() {
+  const accent = useAccent();
   const [status, setStatus] = useState<StatusView | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuth | null>(null);
@@ -685,7 +688,7 @@ export default function ImportTraktScreen() {
                   <Ionicons
                     name={showUnmatched ? "chevron-up" : "chevron-down"}
                     size={14}
-                    color="#38bdf8"
+                    color={accent.ramp[400]}
                   />
                 </Pressable>
                 {showUnmatched ? (

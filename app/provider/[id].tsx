@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassPressable } from "../../components/NativeGlass";
 import { PageTitle } from "../../components/PageTitle";
 import { Poster } from "../../components/Poster";
+import { useAccent } from "../../lib/appearanceStore";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
 import { SHOW_BACK_BUTTON, usePosterGridLayout,
@@ -53,6 +54,7 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 };
 
 export default function ProviderScreen() {
+  const accent = useAccent();
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -192,7 +194,7 @@ export default function ProviderScreen() {
             </Text>
             {signalLabel ? (
               <Text
-                className="mt-1 text-[11px] font-semibold text-sky-300"
+                className="mt-1 text-[11px] font-semibold text-brand-300"
                 numberOfLines={1}
               >
                 {signalLabel}
@@ -270,7 +272,7 @@ export default function ProviderScreen() {
       {/* Grid */}
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#0ea5e9" />
+          <ActivityIndicator size="large" color={accent.ramp[500]} />
         </View>
       ) : (
         <View className="flex-1 px-6 pt-6" style={pageStyle}>
@@ -300,7 +302,7 @@ export default function ProviderScreen() {
             ListFooterComponent={
               isLoadingMore ? (
                 <View className="py-6 items-center">
-                  <ActivityIndicator size="small" color="#0ea5e9" />
+                  <ActivityIndicator size="small" color={accent.ramp[500]} />
                 </View>
               ) : null
             }

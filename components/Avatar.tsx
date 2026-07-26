@@ -1,6 +1,8 @@
 import { Image } from "expo-image";
 import { Text, View } from "react-native";
 
+import { useAccent } from "../lib/appearanceStore";
+
 function initials(label?: string | null) {
   if (!label) return "";
   const parts = label.trim().split(/\s+/).filter(Boolean);
@@ -20,6 +22,7 @@ export function Avatar({
   size?: number;
   glow?: boolean;
 }) {
+  const accent = useAccent();
   const avatar = uri ? (
     <Image
       source={{ uri }}
@@ -42,7 +45,7 @@ export function Avatar({
     return (
       <View
         style={{
-          boxShadow: "0 0 20px rgba(14,165,233,0.25)",
+          boxShadow: `0 0 20px ${accent.rgba(500, 0.25)}`,
           borderRadius: size / 2,
         }}
       >

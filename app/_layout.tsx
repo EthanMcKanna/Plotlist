@@ -10,6 +10,7 @@ import { StyleSheet, View } from "react-native";
 
 import { Platform } from "react-native";
 
+import { AppearanceProvider } from "../components/AppearanceProvider";
 import { AuthErrorBoundary } from "../components/AuthErrorBoundary";
 import { AuthGate } from "../components/AuthGate";
 import { NotificationsBridge } from "../components/NotificationsBridge";
@@ -51,23 +52,25 @@ function RootLayout() {
         <SafeAreaProvider>
           <View style={styles.host}>
             <GestureHandlerRootView style={styles.appFrame}>
-              <StatusBar style="light" />
-              <AuthErrorBoundary>
-                <AuthGate>
-                  <NotificationsBridge />
-                  <PurchasesBridge />
-                  <WebShell>
-                    <Stack
-                      screenOptions={{
-                        headerShown: false,
-                        // Keep transition backdrops dark — the default card
-                        // background is white and flashes during slides.
-                        contentStyle: styles.stackContent,
-                      }}
-                    />
-                  </WebShell>
-                </AuthGate>
-              </AuthErrorBoundary>
+              <AppearanceProvider>
+                <StatusBar style="light" />
+                <AuthErrorBoundary>
+                  <AuthGate>
+                    <NotificationsBridge />
+                    <PurchasesBridge />
+                    <WebShell>
+                      <Stack
+                        screenOptions={{
+                          headerShown: false,
+                          // Keep transition backdrops dark — the default card
+                          // background is white and flashes during slides.
+                          contentStyle: styles.stackContent,
+                        }}
+                      />
+                    </WebShell>
+                  </AuthGate>
+                </AuthErrorBoundary>
+              </AppearanceProvider>
             </GestureHandlerRootView>
           </View>
         </SafeAreaProvider>

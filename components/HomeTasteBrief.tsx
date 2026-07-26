@@ -14,6 +14,7 @@ import {
   getFeatureCardVisibleMetaLine,
   type SignatureRailItem,
 } from "./SignatureRail";
+import { useAccent } from "../lib/appearanceStore";
 import {
   getHomeSignalReleaseDistanceDays,
   hasChartOnlyHomeSignal,
@@ -269,6 +270,7 @@ export function HomeTasteBrief({
   onPressItem,
 }: HomeTasteBriefProps) {
   const { width } = useWindowDimensions();
+  const accent = useAccent();
   const [contentWidth, setContentWidth] = useState<number | null>(null);
   const isWide = shouldUseWideTasteBrief(
     getHomeTasteBriefEffectiveWidth(width, contentWidth),
@@ -301,7 +303,7 @@ export function HomeTasteBrief({
       key: "fresh",
       label: "Fresh",
       item: freshItem,
-      accent: "#38BDF8",
+      accent: accent.ramp[400],
     },
   ];
   const slots = candidateSlots.filter((slot) => Boolean(slot.item));

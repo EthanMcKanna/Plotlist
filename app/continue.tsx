@@ -26,6 +26,7 @@ import { HomeSectionHeader } from "../components/HomeSectionHeader";
 import { HorizontalRail } from "../components/HorizontalRail";
 import { LinkPressable } from "../components/LinkPressable";
 import { api } from "../lib/plotlist/api";
+import { useAccent } from "../lib/appearanceStore";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
@@ -33,7 +34,6 @@ import { formatShortDate } from "../lib/format";
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { SHOW_BACK_BUTTON, WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
 
-const ACCENT = "#0EA5E9";
 const NEW_ACCENT = "#34D399";
 const RETURNING_ACCENT = "#A78BFA";
 const GAP_ACCENT = "#F59E0B";
@@ -197,6 +197,7 @@ function SectionShell({
 }
 
 export default function ContinueScreen() {
+  const accent = useAccent();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -367,7 +368,7 @@ export default function ContinueScreen() {
 
         {!surface ? (
           <View className="mt-16 items-center">
-            <ActivityIndicator color={ACCENT} />
+            <ActivityIndicator color={accent.ramp[500]} />
           </View>
         ) : isEmpty ? (
           <View className="px-6 pt-10">
@@ -396,7 +397,7 @@ export default function ContinueScreen() {
                 index={nextSectionIndex()}
                 kicker="Resume"
                 title="Pick up where you left off"
-                accent={ACCENT}
+                accent={accent.ramp[500]}
                 icon="play"
               >
                 {renderCardRail(surface.resume)}

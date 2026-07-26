@@ -11,6 +11,8 @@ import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { Poster } from "../../components/Poster";
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
+import type { AccentTheme } from "../../lib/appearance";
+import { useAccent } from "../../lib/appearanceStore";
 import { guardedPush } from "../../lib/navigation";
 import { formatEpisodeCode, formatShortDate, formatWatchTimeLabel } from "../../lib/format";
 import { useAuth, useQuery } from "../../lib/plotlist/react";
@@ -83,6 +85,7 @@ function BarRow({
 }
 
 function MonthlyChart({ months }: { months: WatchInsights["monthlyActivity"] }) {
+  const accent = useAccent();
   const max = Math.max(1, ...months.map((month) => month.episodes));
   return (
     <View className="flex-row items-end gap-1.5" style={{ height: 96 }}>
@@ -94,7 +97,7 @@ function MonthlyChart({ months }: { months: WatchInsights["monthlyActivity"] }) 
               style={{
                 height: `${Math.max((month.episodes / max) * 100, month.episodes > 0 ? 6 : 2)}%`,
                 backgroundColor:
-                  month.episodes > 0 ? "#38BDF8" : "rgba(255,255,255,0.08)",
+                  month.episodes > 0 ? accent.ramp[400] : "rgba(255,255,255,0.08)",
               }}
             />
           </View>
@@ -105,8 +108,19 @@ function MonthlyChart({ months }: { months: WatchInsights["monthlyActivity"] }) 
   );
 }
 
-const DAYPART_COLORS = ["#38BDF8", "#F59E0B", "#A78BFA", "#22D3EE"];
-const GENRE_COLORS = ["#38BDF8", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6"];
+const daypartColors = (accent: AccentTheme) => [
+  accent.ramp[400],
+  "#F59E0B",
+  "#A78BFA",
+  "#22D3EE",
+];
+const genreColors = (accent: AccentTheme) => [
+  accent.ramp[400],
+  "#22C55E",
+  "#F59E0B",
+  "#A78BFA",
+  "#F472B6",
+];
 
 // Shown to free accounts in place of the all-time sections. A successful
 // purchase invalidates every cached query so the redacted insights refetch
@@ -155,7 +169,7 @@ function AllTimeLockedCard() {
           style={{ marginTop: 14 }}
           contentStyle={{ alignItems: "center", paddingVertical: 11 }}
         >
-          <Text className="text-sm font-bold text-sky-100">Unlock with Pro</Text>
+          <Text className="text-sm font-bold text-brand-100">Unlock with Pro</Text>
         </GlassPressable>
       </GlassSurface>
     </View>
@@ -163,6 +177,7 @@ function AllTimeLockedCard() {
 }
 
 export default function WatchStatsScreen() {
+  const accent = useAccent();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading } = useAuth();
   const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
@@ -175,7 +190,7 @@ export default function WatchStatsScreen() {
     return (
       <Screen>
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color="#38bdf8" />
+          <ActivityIndicator color={accent.ramp[400]} />
         </View>
       </Screen>
     );
@@ -203,9 +218,11 @@ export default function WatchStatsScreen() {
   const maxWeekday = Math.max(1, ...insights.weekdayActivity.map((day) => day.episodes));
   const maxDaypart = Math.max(1, ...insights.daypartActivity.map((part) => part.episodes));
   const maxGenreMinutes = Math.max(1, ...insights.topGenres.map((genre) => genre.minutes));
+  const daypartPalette = daypartColors(accent);
+  const genrePalette = genreColors(accent);
   const librarySeries: Array<{ label: string; value: number; color: string }> = [
     { label: "Watching", value: insights.library.watching, color: "#22C55E" },
-    { label: "Completed", value: insights.library.completed, color: "#38BDF8" },
+    { label: "Completed", value: insights.library.completed, color: accent.ramp[400] },
     { label: "Watchlist", value: insights.library.watchlist, color: "#F59E0B" },
     { label: "Dropped", value: insights.library.dropped, color: "#EF4444" },
   ];
@@ -253,16 +270,16 @@ export default function WatchStatsScreen() {
           <GlassSurface
             radius={12}
             variant="surface"
-            fallbackColor="rgba(14,165,233,0.14)"
-            borderColor="rgba(125,211,252,0.28)"
+            fallbackColor={accent.rgba(500, 0.14)}
+            borderColor={accent.rgba(300, 0.28)}
             style={{ marginTop: 20 }}
             contentStyle={{ padding: 20 }}
           >
-            <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
+            <Text className="text-xs font-bold uppercase tracking-widest text-brand-200/80">
               Total time watched
             </Text>
             <Text className="mt-2 text-5xl font-black text-white">{time.value}</Text>
-            <Text className="mt-1 text-sm text-sky-100/70">
+            <Text className="mt-1 text-sm text-brand-100/70">
               {hasHistory
                 ? `${insights.totals.episodes.toLocaleString()} episodes across ${insights.totals.shows.toLocaleString()} shows`
                 : "Mark episodes watched to start building your stats."}
@@ -305,16 +322,16 @@ export default function WatchStatsScreen() {
                     paddingVertical: 14,
                   }}
                 >
-                  <Ionicons name="sparkles" size={18} color="#7DD3FC" />
+                  <Ionicons name="sparkles" size={18} color={accent.ramp[300]} />
                   <View className="flex-1">
-                    <Text className="text-sm font-bold text-sky-100">
+                    <Text className="text-sm font-bold text-brand-100">
                       Share your {insights.yearToDate.year} so far
                     </Text>
-                    <Text className="mt-0.5 text-xs text-sky-100/60">
+                    <Text className="mt-0.5 text-xs text-brand-100/60">
                       {insights.yearToDate.episodes.toLocaleString()} episodes, ready to post
                     </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={15} color="#7DD3FC" />
+                  <Ionicons name="chevron-forward" size={15} color={accent.ramp[300]} />
                 </GlassPressable>
               ) : null}
 
@@ -323,7 +340,7 @@ export default function WatchStatsScreen() {
                 <View className="flex-row">
                   <StatChip
                     icon="flash"
-                    color="#38BDF8"
+                    color={accent.ramp[400]}
                     value={insights.window.episodesLast7Days.toLocaleString()}
                     label="Last 7 days"
                   />
@@ -420,7 +437,7 @@ export default function WatchStatsScreen() {
                         label={genre.label}
                         value={genre.minutes}
                         max={maxGenreMinutes}
-                        color={GENRE_COLORS[index % GENRE_COLORS.length]}
+                        color={genrePalette[index % genrePalette.length]}
                         valueLabel={`${Math.round(genre.minutes / 60).toLocaleString()}h`}
                       />
                     ))}
@@ -445,7 +462,7 @@ export default function WatchStatsScreen() {
                       label={part.label}
                       value={part.episodes}
                       max={maxDaypart}
-                      color={DAYPART_COLORS[index % DAYPART_COLORS.length]}
+                      color={daypartPalette[index % daypartPalette.length]}
                     />
                   ))}
                   <View className="my-3 h-px bg-dark-border" />
@@ -535,7 +552,7 @@ export default function WatchStatsScreen() {
                         }`}
                       >
                         <View className="h-9 w-9 items-center justify-center rounded-xl bg-brand-500/15">
-                          <Ionicons name="play" size={15} color="#38BDF8" />
+                          <Ionicons name="play" size={15} color={accent.ramp[400]} />
                         </View>
                         <View className="flex-1">
                           <Text

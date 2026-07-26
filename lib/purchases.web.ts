@@ -6,6 +6,7 @@ import {
   type Package,
 } from "@revenuecat/purchases-js";
 
+import { getAccent } from "./appearanceStore";
 import {
   PRO_ENTITLEMENT_ID,
   type PaywallOutcome,
@@ -219,7 +220,7 @@ function chooseProPackage(packages: Package[]): Promise<Package | null> {
         fontWeight: "700",
         cursor: "pointer",
         border: isAnnual ? "none" : "1px solid rgba(255,255,255,0.18)",
-        background: isAnnual ? "#38BDF8" : "transparent",
+        background: isAnnual ? getAccent().ramp[400] : "transparent",
         color: isAnnual ? "#06121C" : "#F1F3F7",
       });
       button.addEventListener("click", () => finish(pkg));

@@ -16,6 +16,7 @@ import { HorizontalRail } from "../../components/HorizontalRail";
 import { Screen } from "../../components/Screen";
 import { Poster } from "../../components/Poster";
 import { api } from "../../lib/plotlist/api";
+import { useAccent } from "../../lib/appearanceStore";
 import { notifyError } from "../../lib/dialogs";
 import type { Id } from "../../lib/plotlist/types";
 
@@ -112,6 +113,7 @@ function DraggableFavoriteShow({
 }
 
 export default function FavoritesScreen() {
+  const accent = useAccent();
   const router = useRouter();
   const me = useQuery(api.users.me);
   const updateProfile = useMutation(api.users.updateProfile);
@@ -376,7 +378,7 @@ export default function FavoritesScreen() {
           style={
             isDirty
               ? {
-                  boxShadow: "0 0 12px rgba(14,165,233,0.3)",
+                  boxShadow: `0 0 12px ${accent.rgba(500, 0.3)}`,
                 }
               : undefined
           }

@@ -24,6 +24,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAccent } from "../../lib/appearanceStore";
 import { notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { useAction, useQuery } from "../../lib/plotlist/react";
@@ -114,7 +115,6 @@ import { useScrollToTopOnTabPress } from "../../lib/useScrollToTopOnTabPress";
 
 const FOR_YOU_ACCENT = "#22C55E";
 const HEAT_ACCENT = "#F59E0B";
-const FRESH_ACCENT = "#38BDF8";
 const CRITICS_ACCENT = "#F472B6";
 const QUICK_ACCENT = "#A3E635";
 const MIN_FEATURE_RAIL_ITEMS = 3;
@@ -201,6 +201,7 @@ export function HomeSurface({
   const isWideLayout = useIsWideLayout();
   const webPageStyle = useWebPageStyle();
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
   const surfaceNow = data.generatedAt;
   // Discovery rail kickers shift with the time of day (titles stay fixed).
   const railHeaderCopy = useMemo(
@@ -920,7 +921,7 @@ export function HomeSurface({
               index={getSectionDisplayIndex(item.kind)}
               kicker="Schedule"
               title="Releases"
-              accent="#38BDF8"
+              accent={accent.ramp[400]}
               icon="radio"
               variant="banner"
               cardWidth={SCHEDULE_CARD_WIDTH}
@@ -949,11 +950,16 @@ export function HomeSurface({
               accessibilityLabel="Ask Plotlist what to watch tonight"
               contentStyle={styles.askCardContent}
             >
-              <View style={styles.askCardIcon}>
+              <View
+                style={[
+                  styles.askCardIcon,
+                  { backgroundColor: accent.rgba(400, 0.16) },
+                ]}
+              >
                 <Ionicons
                   name="sparkles"
                   size={17}
-                  color="#38BDF8"
+                  color={accent.ramp[400]}
                   accessible={false}
                   accessibilityElementsHidden
                   aria-hidden={true}
@@ -1065,7 +1071,7 @@ export function HomeSurface({
               index={getSectionDisplayIndex(item.kind)}
               kicker={railHeaderCopy.fresh.kicker}
               title={railHeaderCopy.fresh.title}
-              accent={FRESH_ACCENT}
+              accent={accent.ramp[400]}
               icon="sparkles"
               variant="poster"
             />
@@ -1077,7 +1083,7 @@ export function HomeSurface({
             index={getSectionDisplayIndex(item.kind)}
             kicker={railHeaderCopy.fresh.kicker}
             title={railHeaderCopy.fresh.title}
-            accent={FRESH_ACCENT}
+            accent={accent.ramp[400]}
             icon="sparkles"
             layout="poster"
             items={withShowHrefs(freshItems)}
@@ -1233,7 +1239,7 @@ export function HomeSurface({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#38bdf8"
+            tintColor={accent.ramp[400]}
             progressViewOffset={insets.top + 8}
           />
         }
@@ -1341,7 +1347,6 @@ const styles = StyleSheet.create({
   },
   askCardIcon: {
     alignItems: "center",
-    backgroundColor: "rgba(56,189,248,0.16)",
     borderRadius: 12,
     height: 36,
     justifyContent: "center",

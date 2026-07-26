@@ -17,6 +17,8 @@ import { FlashList } from "../components/FlashList";
 import { LinkPressable } from "../components/LinkPressable";
 import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
 import { formatRelativeTime } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
@@ -38,18 +40,18 @@ const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   streaming: "play-circle",
 };
 
-const TYPE_ICON_COLORS: Record<string, string> = {
-  follow: "#38BDF8",
+const typeIconColors = (accent: AccentTheme): Record<string, string> => ({
+  follow: accent.ramp[400],
   follow_request: "#F59E0B",
   follow_accepted: "#22C55E",
   like: "#F472B6",
   comment: "#A78BFA",
   episode: "#22C55E",
-  list_follow: "#38BDF8",
-  contact_joined: "#38BDF8",
+  list_follow: accent.ramp[400],
+  contact_joined: accent.ramp[400],
   premiere: "#FACC15",
-  streaming: "#38BDF8",
-};
+  streaming: accent.ramp[400],
+});
 
 function notificationHref(item: any): Href | null {
   const url = item?.data?.url;
@@ -68,6 +70,7 @@ function NotificationRow({
   onOpen: (item: any) => void;
   onMarkRead: (item: any) => void;
 }) {
+  const accent = useAccent();
   const unread = !item.readAt;
   const href = notificationHref(item);
   const rowClassName = `flex-row items-start gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors ${
@@ -86,7 +89,7 @@ function NotificationRow({
           <Ionicons
             name={TYPE_ICONS[item.type] ?? "notifications"}
             size={18}
-            color={TYPE_ICON_COLORS[item.type] ?? "#9BA1B0"}
+            color={typeIconColors(accent)[item.type] ?? "#9BA1B0"}
           />
         </View>
       )}
@@ -101,7 +104,7 @@ function NotificationRow({
           {formatRelativeTime(item.createdAt)}
         </Text>
       </View>
-      {unread ? <View className="mt-2 h-2 w-2 rounded-full bg-sky-400" /> : null}
+      {unread ? <View className="mt-2 h-2 w-2 rounded-full bg-brand-400" /> : null}
     </>
   );
   // Rows with a destination are real links on web (cmd/middle-click work);
@@ -134,6 +137,7 @@ function NotificationRow({
 }
 
 export default function NotificationsScreen() {
+  const accent = useAccent();
   const isDesktopWeb = useIsDesktopWeb();
   const unreadCount = useQuery(api.notifications.getUnreadCount);
   const {
@@ -223,7 +227,7 @@ export default function NotificationsScreen() {
           </View>
           {(unreadCount ?? 0) > 0 ? (
             <Pressable onPress={handleMarkAllRead} hitSlop={8}>
-              <Text className="text-sm font-semibold text-sky-400">Mark all read</Text>
+              <Text className="text-sm font-semibold text-brand-400">Mark all read</Text>
             </Pressable>
           ) : null}
           {/* Desktop web has no pull-to-refresh gesture. */}
@@ -263,7 +267,7 @@ export default function NotificationsScreen() {
                 <RefreshControl
                   refreshing={refreshing}
                   onRefresh={handleRefresh}
-                  tintColor="#38BDF8"
+                  tintColor={accent.ramp[400]}
                 />
               }
               ItemSeparatorComponent={() => <View style={{ height: 10 }} />}

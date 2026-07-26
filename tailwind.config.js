@@ -23,17 +23,20 @@ module.exports = {
           tertiary: "#5A6070",
           inverse: "#0D0F14",
         },
+        // Resolved from the --brand-* CSS variables that AppearanceProvider
+        // supplies (accent themes); values are R G B channel triplets so
+        // opacity modifiers (e.g. bg-brand-500/10) still compose.
         brand: {
-          50: "#f0f9ff",
-          100: "#e0f2fe",
-          200: "#bae6fd",
-          300: "#7dd3fc",
-          400: "#38bdf8",
-          500: "#0ea5e9",
-          600: "#0284c7",
-          700: "#0369a1",
-          800: "#075985",
-          900: "#0c4a6e",
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
+          200: "rgb(var(--brand-200) / <alpha-value>)",
+          300: "rgb(var(--brand-300) / <alpha-value>)",
+          400: "rgb(var(--brand-400) / <alpha-value>)",
+          500: "rgb(var(--brand-500) / <alpha-value>)",
+          600: "rgb(var(--brand-600) / <alpha-value>)",
+          700: "rgb(var(--brand-700) / <alpha-value>)",
+          800: "rgb(var(--brand-800) / <alpha-value>)",
+          900: "rgb(var(--brand-900) / <alpha-value>)",
         },
         accent: {
           DEFAULT: "#F59E0B",
@@ -51,7 +54,7 @@ module.exports = {
       boxShadow: {
         card: "0 4px 16px 0 rgba(0, 0, 0, 0.3)",
         elevated: "0 8px 32px 0 rgba(0, 0, 0, 0.4)",
-        glow: "0 0 20px 0 rgba(14, 165, 233, 0.15)",
+        glow: "0 0 20px 0 rgb(var(--brand-glow) / 0.15)",
       },
       spacing: {
         18: "4.5rem",

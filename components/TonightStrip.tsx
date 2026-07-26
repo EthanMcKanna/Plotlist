@@ -8,6 +8,7 @@ import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
+import { useAccent } from "../lib/appearanceStore";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import { recordHomeWarmSchedule } from "../lib/homeWarmCache";
 import { getLocalDateString } from "../lib/releaseCalendar";
@@ -36,7 +37,6 @@ export type HomeSchedulePreviewState = {
   refresh: () => Promise<void>;
 };
 
-const ACCENT = "#38BDF8";
 // Kept in the same visual family as the continue rail's banners: 16:9 art,
 // text over a scrim, one size smaller so resume stays the headliner.
 export const SCHEDULE_CARD_WIDTH = 240;
@@ -318,6 +318,7 @@ export function TonightStrip({
   schedule?: HomeSchedulePreviewState;
   index?: number;
 } = {}) {
+  const accent = useAccent();
   const localSchedule = useHomeSchedulePreview(!schedule);
   const activeSchedule = schedule ?? localSchedule;
   const {
@@ -350,7 +351,7 @@ export function TonightStrip({
         kicker="Schedule"
         title="Releases"
         subtitle={getHomeScheduleSubtitle({ tonightCount, ...windowCounts })}
-        accent={ACCENT}
+        accent={accent.ramp[400]}
         icon="radio"
         actionLabel="Calendar"
         actionHref="/calendar"
@@ -377,6 +378,7 @@ export function TonightStrip({
 }
 
 function CalendarTailCard() {
+  const accent = useAccent();
   return (
     <LinkPressable
       href="/calendar"
@@ -387,11 +389,19 @@ function CalendarTailCard() {
       style={[styles.card, styles.tailCard]}
       className="active:opacity-85 hover:opacity-90 web:transition-opacity"
     >
-      <View style={styles.tailIcon}>
+      <View
+        style={[
+          styles.tailIcon,
+          {
+            backgroundColor: accent.rgba(400, 0.12),
+            borderColor: accent.rgba(400, 0.28),
+          },
+        ]}
+      >
         <Ionicons
           name="calendar-outline"
           size={18}
-          color={ACCENT}
+          color={accent.ramp[400]}
           accessible={false}
           accessibilityElementsHidden
           aria-hidden={true}
@@ -417,6 +427,7 @@ function ScheduleCard({
   index: number;
   today: string;
 }) {
+  const accent = useAccent();
   const imageUrl = item.show?.backdropUrl ?? item.show?.posterUrl ?? null;
   const dateLabel = getScheduleCardDateLabel(item, today);
   const isTonight = item.airDate === today;
@@ -445,7 +456,7 @@ function ScheduleCard({
           testID={`schedule-artwork-fallback-${item.show?._id ?? "show"}`}
           title={item.show?.title}
           subtitle={getScheduleCardVisibleSubline(item)}
-          accent={ACCENT}
+          accent={accent.ramp[400]}
           compact
           copyVisible={false}
           markVisible={false}
@@ -469,7 +480,12 @@ function ScheduleCard({
 
       <View
         testID={`schedule-date-chip-${item.show?._id ?? "show"}`}
-        style={[styles.dateBadge, isTonight ? styles.dateBadgeTonight : null]}
+        style={[
+          styles.dateBadge,
+          isTonight
+            ? [styles.dateBadgeTonight, { backgroundColor: accent.rgba(400, 0.92) }]
+            : null,
+        ]}
       >
         <Text
           className={
@@ -572,7 +588,6 @@ const styles = StyleSheet.create({
     top: 12,
   },
   dateBadgeTonight: {
-    backgroundColor: "rgba(56,189,248,0.92)",
     borderColor: "transparent",
   },
   bottomContent: {
@@ -589,8 +604,6 @@ const styles = StyleSheet.create({
   },
   tailIcon: {
     alignItems: "center",
-    backgroundColor: "rgba(56,189,248,0.12)",
-    borderColor: "rgba(56,189,248,0.28)",
     borderRadius: 999,
     borderWidth: 1,
     height: 34,

@@ -16,6 +16,15 @@ import { GlassSurface } from "../../components/NativeGlass";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { Screen } from "../../components/Screen";
 import { TextField } from "../../components/TextField";
+import { ACCENT_THEMES, type AccentTheme } from "../../lib/appearance";
+import { setAccentKey, useAccent } from "../../lib/appearanceStore";
+import {
+  APP_ICONS_SUPPORTED,
+  APP_ICON_VARIANTS,
+  DEFAULT_APP_ICON_PREVIEW,
+  getCurrentAppIcon,
+  setAppIcon,
+} from "../../lib/appIcon";
 import { api } from "../../lib/plotlist/api";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import { clearAuthTokens, getStoredSignInPhone } from "../../lib/authStorage";
@@ -133,6 +142,7 @@ function NotificationToggleRow({
   onChange: (value: boolean) => void;
   isLast?: boolean;
 }) {
+  const accent = useAccent();
   return (
     <View
       className={`flex-row items-center gap-3 px-4 py-3.5 ${
@@ -149,9 +159,152 @@ function NotificationToggleRow({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onChange(next);
         }}
-        trackColor={{ true: "#0EA5E9", false: "#2A2F3A" }}
+        trackColor={{ true: accent.ramp[500], false: "#2A2F3A" }}
         thumbColor="#F1F3F7"
       />
+    </View>
+  );
+}
+
+function AccentThemeRow({
+  isPro,
+  ensurePro,
+}: {
+  isPro: boolean;
+  ensurePro: () => Promise<boolean>;
+}) {
+  const accent = useAccent();
+
+  const handleSelect = (theme: AccentTheme) => {
+    void (async () => {
+      if (theme.key === accent.key) return;
+      if (theme.pro && !isPro && !(await ensurePro())) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setAccentKey(theme.key);
+    })();
+  };
+
+  return (
+    <View className="flex-row items-start justify-between px-4 py-3.5">
+      {ACCENT_THEMES.map((theme) => {
+        const selected = theme.key === accent.key;
+        const locked = theme.pro && !isPro;
+        return (
+          <Pressable
+            key={theme.key}
+            onPress={() => handleSelect(theme)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`${theme.label} accent${locked ? " · Plotlist Pro" : ""}`}
+            className="items-center gap-1.5 active:opacity-70"
+          >
+            <View
+              className="items-center justify-center rounded-full border-2"
+              style={{
+                width: 42,
+                height: 42,
+                borderColor: selected ? "#F1F3F7" : "transparent",
+              }}
+            >
+              <View
+                className="rounded-full"
+                style={{ width: 30, height: 30, backgroundColor: theme.ramp[400] }}
+              />
+              {locked ? (
+                <View className="absolute bottom-0 right-0 rounded-full bg-black/70 p-1">
+                  <Ionicons name="lock-closed" size={8} color="#FACC15" />
+                </View>
+              ) : null}
+            </View>
+            <Text
+              className={`text-[11px] ${
+                selected ? "font-semibold text-text-primary" : "text-text-tertiary"
+              }`}
+            >
+              {theme.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function AppIconRow({
+  isPro,
+  ensurePro,
+}: {
+  isPro: boolean;
+  ensurePro: () => Promise<boolean>;
+}) {
+  // The choice lives in iOS itself — no preference storage.
+  const [currentIcon, setCurrentIcon] = useState<string | null>(() => getCurrentAppIcon());
+  const [switching, setSwitching] = useState(false);
+
+  const options: Array<{ key: string | null; label: string; preview: number }> = [
+    { key: null, label: "Midnight", preview: DEFAULT_APP_ICON_PREVIEW },
+    ...APP_ICON_VARIANTS,
+  ];
+
+  const handleSelect = (key: string | null) => {
+    void (async () => {
+      if (switching || key === currentIcon) return;
+      if (key !== null && !isPro && !(await ensurePro())) return;
+      setSwitching(true);
+      try {
+        // iOS shows its own confirmation alert here — expected.
+        if (await setAppIcon(key)) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setCurrentIcon(key);
+        } else {
+          notifyError("Could not change icon", "Try again in a moment.");
+        }
+      } finally {
+        setSwitching(false);
+      }
+    })();
+  };
+
+  return (
+    <View className="flex-row items-start justify-between px-4 py-3.5">
+      {options.map((option) => {
+        const selected = option.key === currentIcon;
+        const locked = option.key !== null && !isPro;
+        return (
+          <Pressable
+            key={option.key ?? "default"}
+            onPress={() => handleSelect(option.key)}
+            disabled={switching}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`${option.label} app icon${locked ? " · Plotlist Pro" : ""}`}
+            className="items-center gap-1.5 active:opacity-70"
+          >
+            <View
+              className="overflow-hidden rounded-xl border-2"
+              style={{ borderColor: selected ? "#F1F3F7" : "transparent" }}
+            >
+              <Image
+                source={option.preview}
+                style={{ width: 46, height: 46, borderRadius: 10 }}
+                contentFit="cover"
+              />
+              {locked ? (
+                <View className="absolute bottom-0.5 right-0.5 rounded-full bg-black/70 p-1">
+                  <Ionicons name="lock-closed" size={8} color="#FACC15" />
+                </View>
+              ) : null}
+            </View>
+            <Text
+              className={`text-[11px] ${
+                selected ? "font-semibold text-text-primary" : "text-text-tertiary"
+              }`}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -226,6 +379,7 @@ export default function SettingsScreen() {
   } | null>(null);
   const [signInPhoneLabel, setSignInPhoneLabel] = useState<string | null>(null);
   const proStatus = useProStatus();
+  const accent = useAccent();
   const [proPaywallBusy, setProPaywallBusy] = useState(false);
   const [restoringPurchases, setRestoringPurchases] = useState(false);
 
@@ -804,7 +958,7 @@ export default function SettingsScreen() {
           <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
             <SettingsRow
               icon={me?.isPrivate ? "lock-closed-outline" : "shield-outline"}
-              iconColor="#38bdf8"
+              iconColor={accent.ramp[400]}
               label="Privacy & blocked accounts"
               href="/settings/privacy"
             />
@@ -822,7 +976,7 @@ export default function SettingsScreen() {
           <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
             <SettingsRow
               icon="tv-outline"
-              iconColor="#38bdf8"
+              iconColor={accent.ramp[400]}
               label="My streaming services"
               href="/settings/streaming"
             />
@@ -857,7 +1011,7 @@ export default function SettingsScreen() {
               )}
               <SettingsRow
                 icon="calendar-outline"
-                iconColor="#38bdf8"
+                iconColor={accent.ramp[400]}
                 label="Calendar feed for your shows"
                 onPress={handleCalendarFeed}
                 loading={calendarBusy}
@@ -886,6 +1040,25 @@ export default function SettingsScreen() {
             </Text>
           </View>
         ) : null}
+
+        {/* ── Appearance ── */}
+        <View className="mt-10">
+          <SectionHeader title="Appearance" />
+          <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+            <AccentThemeRow isPro={isPro} ensurePro={ensurePro} />
+          </GlassSurface>
+          {APP_ICONS_SUPPORTED ? (
+            <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
+              <AppIconRow isPro={isPro} ensurePro={ensurePro} />
+            </GlassSurface>
+          ) : null}
+          <Text className="mt-2 text-xs leading-4 text-text-tertiary">
+            {APP_ICONS_SUPPORTED
+              ? "Accent recolors buttons, links, and highlights; the icon swaps on your Home Screen."
+              : "Recolors buttons, links, and highlights across Plotlist."}
+            {isPro ? "" : " Beyond the defaults, a Plotlist Pro perk."}
+          </Text>
+        </View>
 
         {/* ── Notifications ── */}
         <View className="mt-10">
@@ -992,7 +1165,7 @@ export default function SettingsScreen() {
               <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
                 <SettingsRow
                   icon="call-outline"
-                  iconColor="#38bdf8"
+                  iconColor={accent.ramp[400]}
                   label="Verify your number to be found by friends"
                   href="/settings/verify-phone"
                 />
@@ -1028,13 +1201,13 @@ export default function SettingsScreen() {
           <GlassSurface radius={8} variant="surface" style={{ marginTop: 8 }}>
             <SettingsRow
               icon="sparkles-outline"
-              iconColor="#0ea5e9"
+              iconColor={accent.ramp[500]}
               label="Replay the welcome tour"
               href="/onboarding/welcome"
             />
             <SettingsRow
               icon="chatbubble-ellipses-outline"
-              iconColor="#0ea5e9"
+              iconColor={accent.ramp[500]}
               label="Share feedback"
               onPress={() => showFeedbackForm()}
             />
@@ -1073,7 +1246,7 @@ export default function SettingsScreen() {
               <>
                 <SettingsRow
                   icon="shield-checkmark-outline"
-                  iconColor="#0ea5e9"
+                  iconColor={accent.ramp[500]}
                   label="Admin reports"
                   href="/admin/reports"
                 />
@@ -1082,7 +1255,7 @@ export default function SettingsScreen() {
             ) : null}
             <SettingsRow
               icon="swap-vertical-outline"
-              iconColor="#0ea5e9"
+              iconColor={accent.ramp[500]}
               label="Import from Trakt"
               href="/settings/import-trakt"
             />

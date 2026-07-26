@@ -5,6 +5,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Platform, View, StyleSheet } from "react-native";
 
+import { useAccent } from "../../lib/appearanceStore";
 import { useIsDesktopWeb } from "../../lib/webLayout";
 
 const iconSize = 22;
@@ -18,8 +19,9 @@ function tabPressHaptic() {
 // materials on older versions, native pop-to-top/scroll-to-top). Android and
 // web keep the JS tab bar below.
 function NativeTabsLayout() {
+  const accent = useAccent();
   return (
-    <NativeTabs tintColor="#0ea5e9">
+    <NativeTabs tintColor={accent.ramp[500]}>
       <NativeTabs.Trigger name="home">
         <Icon sf={{ default: "house", selected: "house.fill" }} />
         <Label>Home</Label>
@@ -41,12 +43,13 @@ function NativeTabsLayout() {
 function JsTabsLayout() {
   // Desktop web navigates through the persistent sidebar (see WebShell);
   // the bottom tab bar only renders on narrow viewports.
+  const accent = useAccent();
   const isDesktopWeb = useIsDesktopWeb();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#0ea5e9",
+        tabBarActiveTintColor: accent.ramp[500],
         tabBarInactiveTintColor: "#5A6070",
         tabBarStyle: {
           position: "absolute",

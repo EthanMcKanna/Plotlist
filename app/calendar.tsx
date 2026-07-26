@@ -19,6 +19,7 @@ import { FlashList } from "../components/FlashList";
 import { LinkPressable } from "../components/LinkPressable";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
+import { useAccent } from "../lib/appearanceStore";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import {
   getLocalDateString,
@@ -38,7 +39,6 @@ import {
   type ReleaseDiaryRow,
 } from "../lib/releaseDiary";
 
-const ACCENT = "#38BDF8";
 const DAY_RAIL_WIDTH = 44;
 const THUMB_WIDTH = 96;
 const THUMB_HEIGHT = 54;
@@ -105,6 +105,7 @@ export function getReleaseRowAccessibilityLabel(row: ReleaseDiaryEventRow) {
 // Seven slim bars for the week ahead; tonight reads brand-blue. Mirrors the
 // Log page's trailing-week sparkline, pointed forward instead of back.
 function WeekAheadPulse({ days }: { days: ReleaseDiaryDayActivity[] }) {
+  const accent = useAccent();
   const max = Math.max(1, ...days.map((day) => day.count));
   const active = days.filter((day) => day.count > 0).length;
   return (
@@ -122,9 +123,9 @@ function WeekAheadPulse({ days }: { days: ReleaseDiaryDayActivity[] }) {
               {
                 height,
                 backgroundColor: day.isToday
-                  ? ACCENT
+                  ? accent.ramp[400]
                   : day.count > 0
-                    ? "rgba(125,211,252,0.42)"
+                    ? accent.rgba(300, 0.42)
                     : "rgba(255,255,255,0.12)",
               },
             ]}
@@ -138,19 +139,20 @@ function WeekAheadPulse({ days }: { days: ReleaseDiaryDayActivity[] }) {
 /* ─── Spine + rows ────────────────────────────────────────────────── */
 
 function DayRail({ label }: { label: ReleaseDiaryDayLabel | null }) {
+  const accent = useAccent();
   return (
     <View style={styles.dayRail}>
       {label ? (
         <>
           <Text
             className="text-[17px] font-bold"
-            style={{ color: label.isToday ? ACCENT : "#F1F3F7" }}
+            style={{ color: label.isToday ? accent.ramp[400] : "#F1F3F7" }}
           >
             {label.day}
           </Text>
           <Text
             className="text-[10px] font-semibold tracking-widest"
-            style={{ color: label.isToday ? "rgba(56,189,248,0.75)" : "#5A6070" }}
+            style={{ color: label.isToday ? accent.rgba(400, 0.75) : "#5A6070" }}
           >
             {label.isToday ? "TODAY" : label.weekday}
           </Text>
@@ -182,14 +184,15 @@ function EventBadge({
   label: string;
   tone: "primary" | "accent" | "neutral";
 }) {
+  const accent = useAccent();
   const bg =
     tone === "primary"
-      ? "rgba(14, 165, 233, 0.12)"
+      ? accent.rgba(500, 0.12)
       : tone === "accent"
         ? "rgba(34, 197, 94, 0.12)"
         : "rgba(90, 96, 112, 0.14)";
   const fg =
-    tone === "primary" ? "#7dd3fc" : tone === "accent" ? "#4ade80" : "#9BA1B0";
+    tone === "primary" ? accent.ramp[300] : tone === "accent" ? "#4ade80" : "#9BA1B0";
 
   return (
     <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: bg }}>
@@ -321,6 +324,7 @@ function ReleasesHeader({
   days: ReleaseDiaryDayActivity[];
   refreshing: boolean;
 }) {
+  const accent = useAccent();
   return (
     <View className="px-6 pb-2 pt-1">
       {SHOW_BACK_BUTTON ? (
@@ -349,7 +353,7 @@ function ReleasesHeader({
       </Text>
       {refreshing ? (
         <View className="mt-3 flex-row items-center gap-2">
-          <ActivityIndicator size="small" color={ACCENT} />
+          <ActivityIndicator size="small" color={accent.ramp[400]} />
           <Text className="text-[12px] font-semibold text-text-tertiary">
             Checking latest episode dates
           </Text>
@@ -375,6 +379,7 @@ export function CalendarSurface({
   isAuthenticated: boolean;
   today: string;
 }) {
+  const accent = useAccent();
   const insets = useSafeAreaInsets();
   const rows = useMemo(
     () => (data ? buildReleaseDiaryRows(data.groups, today) : []),
@@ -429,7 +434,7 @@ export function CalendarSurface({
         ListEmptyComponent={
           !data ? (
             <View className="items-center justify-center py-16">
-              <ActivityIndicator size="small" color={ACCENT} />
+              <ActivityIndicator size="small" color={accent.ramp[400]} />
             </View>
           ) : (
             <View className="px-6 pt-8">

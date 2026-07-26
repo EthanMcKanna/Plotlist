@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 const KEY_CONTACTS_SYNC_DISMISSED = "contactsSyncDismissed";
 const KEY_CONTACTS_AUTO_SYNCED_AT = "contactsAutoSyncedAt";
 const KEY_WELCOME_TOUR_SEEN = "welcomeTourSeen";
+const KEY_ACCENT_THEME = "accentTheme";
 const nativeFallbackStorage = new Map<string, string>();
 
 // Kept in sync with storage so AuthGate can read it synchronously inside its
@@ -100,6 +101,20 @@ export async function getWelcomeTourSeen(): Promise<boolean> {
 
 export function getWelcomeTourSeenCached(): boolean | null {
   return welcomeTourSeenCache;
+}
+
+export async function getAccentThemePreference(): Promise<string | null> {
+  const storage = await getStorage();
+  return storage.getItem(KEY_ACCENT_THEME);
+}
+
+export async function setAccentThemePreference(key: string | null): Promise<void> {
+  const storage = await getStorage();
+  if (key === null) {
+    await storage.removeItem(KEY_ACCENT_THEME);
+  } else {
+    await storage.setItem(KEY_ACCENT_THEME, key);
+  }
 }
 
 export async function setWelcomeTourSeen(seen: boolean): Promise<void> {

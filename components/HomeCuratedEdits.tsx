@@ -10,6 +10,7 @@ import {
   getFeatureCardVisibleMetaLine,
   type SignatureRailItem,
 } from "./SignatureRail";
+import { useAccent } from "../lib/appearanceStore";
 import { getHomeDisplayMetaLine } from "../lib/homeDisplayMeta";
 import {
   getHomeCuratedEditCardMetrics,
@@ -92,8 +93,13 @@ function CuratedEditCard({
   compact: boolean;
   onPressItem: (item: SignatureRailItem) => void;
 }) {
+  const themeAccent = useAccent();
   const lead = edit.items[0];
   const metaLine = getFeatureCardVisibleMetaLine(lead);
+  // lib/homeCuratedEdits must stay importable from node scripts, so its data
+  // carries the static sky hex; the brand-colored edit rethemes here instead.
+  const editAccent =
+    edit.accent.toLowerCase() === "#38bdf8" ? themeAccent.ramp[400] : edit.accent;
 
   return (
     <Pressable
@@ -107,16 +113,16 @@ function CuratedEditCard({
       style={[
         styles.card,
         compact ? styles.cardCompact : null,
-        { width, borderColor: `${edit.accent}4D` },
+        { width, borderColor: `${editAccent}4D` },
       ]}
     >
       <LinearGradient
-        colors={[`${edit.accent}24`, "rgba(20,24,32,0.98)"]}
+        colors={[`${editAccent}24`, "rgba(20,24,32,0.98)"]}
         locations={[0, 0.54]}
         style={[StyleSheet.absoluteFill, styles.pointerNone]}
       />
 
-      <CuratedLeadArtwork item={lead} accent={edit.accent} />
+      <CuratedLeadArtwork item={lead} accent={editAccent} />
 
       <View
         testID={`curated-caption-${lead.key}`}

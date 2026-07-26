@@ -18,6 +18,7 @@ import Animated, {
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as Haptics from "expo-haptics";
 
+import { useAccent } from "../lib/appearanceStore";
 import { useIsDesktopWeb } from "../lib/webLayout";
 
 // Crop box tracks the viewport but is capped so desktop web (and resizes)
@@ -46,6 +47,7 @@ export function AvatarCropModal({
   onCrop,
   onCancel,
 }: Props) {
+  const accent = useAccent();
   const [cropping, setCropping] = useState(false);
   const { width: screenW, height: screenH } = useWindowDimensions();
   // Centered dialog on desktop web and wide iPad windows; phones keep the
@@ -253,9 +255,17 @@ export function AvatarCropModal({
           accessibilityLabel="Crop and use photo"
         >
           {cropping ? (
-            <ActivityIndicator color="#0ea5e9" size="small" />
+            <ActivityIndicator color={accent.ramp[500]} size="small" />
           ) : (
-            <Text style={[styles.headerButton, styles.headerDone]}>Done</Text>
+            <Text
+              style={[
+                styles.headerButton,
+                styles.headerDone,
+                { color: accent.ramp[500] },
+              ]}
+            >
+              Done
+            </Text>
           )}
         </Pressable>
       </View>
@@ -366,7 +376,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   headerDone: {
-    color: "#0ea5e9",
     fontWeight: "600",
   },
   headerTitle: {

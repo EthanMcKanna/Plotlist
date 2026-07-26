@@ -22,6 +22,7 @@ import { ListForm } from "../../components/ListForm";
 import { EmptyState } from "../../components/EmptyState";
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
+import { useAccent } from "../../lib/appearanceStore";
 import { useAuth, useMutation, usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
 import { guardedPush } from "../../lib/navigation";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
@@ -42,10 +43,9 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 // widening to more columns as the desktop web content column grows.
 const LIST_CARD_HEIGHT = 200;
 
-// Own lists lean brand-sky, private ones go quiet slate, followed lists get
-// the people-green from the search scope actions.
+// Own public lists lean the live accent, private ones go quiet slate, followed
+// lists get the people-green from the search scope actions.
 const LIST_ACCENTS = {
-  public: "#38BDF8",
   private: "#94A3B8",
   followed: "#34D399",
 };
@@ -105,6 +105,7 @@ function CardHoverActions({
 }
 
 export default function ListsScreen() {
+  const accent = useAccent();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { create } = useLocalSearchParams<{ create?: string }>();
@@ -409,7 +410,7 @@ export default function ListsScreen() {
         >
           <FanPreviewCard
             title={item.title}
-            accent={item.isPublic ? LIST_ACCENTS.public : LIST_ACCENTS.private}
+            accent={item.isPublic ? accent.ramp[400] : LIST_ACCENTS.private}
             posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
             meta={formatListMeta(item)}
             cornerIcon={item.isPublic ? undefined : "lock-closed"}
@@ -432,7 +433,7 @@ export default function ListsScreen() {
         </CardHoverActions>
       );
     },
-    [listCardWidth, openList],
+    [accent, listCardWidth, openList],
   );
 
   const renderFollowedList = useCallback(
@@ -511,7 +512,7 @@ export default function ListsScreen() {
             style={
               !showForm
                 ? {
-                    boxShadow: "0 0 8px rgba(14,165,233,0.3)",
+                    boxShadow: `0 0 8px ${accent.rgba(500, 0.3)}`,
                   }
                 : undefined
             }

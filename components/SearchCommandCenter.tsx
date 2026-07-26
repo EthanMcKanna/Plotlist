@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { useAccent } from "../lib/appearanceStore";
 import { withAlpha } from "../lib/genreExplorer";
 import { guardedPush } from "../lib/navigation";
 import { useIsDesktopWeb } from "../lib/webLayout";
@@ -20,12 +21,13 @@ export type SearchMode = "shows" | "vibe" | "people";
 
 // Show search is the default; vibe and people are scoped actions the user
 // opts into. While scoped, a dismissible token sits inside the field instead
-// of a persistent segmented control.
+// of a persistent segmented control. A null accent is the brand color,
+// resolved from the live theme at render.
 const SCOPE_META: Record<
   Exclude<SearchMode, "shows">,
-  { label: string; icon: IconName; accent: string }
+  { label: string; icon: IconName; accent: string | null }
 > = {
-  vibe: { label: "Vibe", icon: "sparkles", accent: "#38BDF8" },
+  vibe: { label: "Vibe", icon: "sparkles", accent: null },
   people: { label: "People", icon: "people", accent: "#34D399" },
 };
 
@@ -57,7 +59,9 @@ function ScopeToken({
   mode: Exclude<SearchMode, "shows">;
   onDismiss: () => void;
 }) {
+  const accent = useAccent();
   const meta = SCOPE_META[mode];
+  const metaAccent = meta.accent ?? accent.ramp[400];
   return (
     <Pressable
       onPress={onDismiss}
@@ -73,8 +77,8 @@ function ScopeToken({
       style={[
         styles.scopeToken,
         {
-          backgroundColor: withAlpha(meta.accent, 0.14),
-          borderColor: withAlpha(meta.accent, 0.42),
+          backgroundColor: withAlpha(metaAccent, 0.14),
+          borderColor: withAlpha(metaAccent, 0.42),
         },
       ]}
       className="hover:opacity-80 active:opacity-70 web:transition-opacity"
@@ -82,19 +86,19 @@ function ScopeToken({
       <Ionicons
         name={meta.icon}
         size={12}
-        color={meta.accent}
+        color={metaAccent}
         accessible={false}
         accessibilityElementsHidden
         aria-hidden={true}
         importantForAccessibility="no"
       />
-      <Text className="text-[12px] font-bold" style={{ color: meta.accent }}>
+      <Text className="text-[12px] font-bold" style={{ color: metaAccent }}>
         {meta.label}
       </Text>
       <Ionicons
         name="close"
         size={12}
-        color={meta.accent}
+        color={metaAccent}
         accessible={false}
         accessibilityElementsHidden
         aria-hidden={true}
@@ -215,7 +219,11 @@ export function SearchCommandCenter({
 }) {
   const copy = getSearchCommandCenterCopy(mode);
   const isDesktopWeb = useIsDesktopWeb();
-  const scopeAccent = mode === "shows" ? "#38BDF8" : SCOPE_META[mode].accent;
+  const accent = useAccent();
+  const scopeAccent =
+    mode === "shows"
+      ? accent.ramp[400]
+      : SCOPE_META[mode].accent ?? accent.ramp[400];
   const showScopeActions = mode === "shows" && query.length === 0;
 
   return (
@@ -244,7 +252,7 @@ export function SearchCommandCenter({
           <Ionicons
             name="search-outline"
             size={20}
-            color={isFocused ? "#38BDF8" : "#9BA1B0"}
+            color={isFocused ? accent.ramp[400] : "#9BA1B0"}
             accessible={false}
             accessibilityElementsHidden
             aria-hidden={true}
@@ -297,7 +305,7 @@ export function SearchCommandCenter({
                 <ActivityIndicator
                   testID="search-command-busy-indicator"
                   size="small"
-                  color="#38BDF8"
+                  color={accent.ramp[400]}
                 />
               ) : null}
             </View>
@@ -329,7 +337,7 @@ export function SearchCommandCenter({
               for older code paths that still set mode="vibe". */}
           <ScopeAction
             icon="sparkles"
-            accent={SCOPE_META.vibe.accent}
+            accent={SCOPE_META.vibe.accent ?? accent.ramp[400]}
             title="Ask Plotlist"
             subtitle="What should I watch?"
             accessibilityLabel="Ask Plotlist for a recommendation"
@@ -338,7 +346,7 @@ export function SearchCommandCenter({
           />
           <ScopeAction
             icon="people"
-            accent={SCOPE_META.people.accent}
+            accent={SCOPE_META.people.accent ?? accent.ramp[400]}
             title="Find people"
             subtitle="Who to follow"
             accessibilityLabel="Switch to people search"

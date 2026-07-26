@@ -10,6 +10,9 @@ import {
   ViewStyle,
 } from "react-native";
 
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
+
 type GlassVariant = "surface" | "control" | "prominent" | "sheet";
 
 // Apple's Liquid Glass guidance: glass belongs on the control/navigation
@@ -30,7 +33,20 @@ type VariantTokens = {
   tintColor: string;
 };
 
-const VARIANT_TOKENS: Record<GlassVariant, VariantTokens> = {
+// "prominent" is the only brand-tinted variant, so its tokens follow the
+// active accent theme; the neutral variants stay static.
+function variantTokens(variant: GlassVariant, accent: AccentTheme): VariantTokens {
+  if (variant === "prominent") {
+    return {
+      borderColor: accent.rgba(300, 0.28),
+      fallbackColor: accent.rgba(500, 0.2),
+      tintColor: accent.rgba(500, 0.16),
+    };
+  }
+  return STATIC_VARIANT_TOKENS[variant];
+}
+
+const STATIC_VARIANT_TOKENS: Record<Exclude<GlassVariant, "prominent">, VariantTokens> = {
   surface: {
     borderColor: "rgba(255,255,255,0.11)",
     fallbackColor: "rgba(22,26,34,0.88)",
@@ -40,11 +56,6 @@ const VARIANT_TOKENS: Record<GlassVariant, VariantTokens> = {
     borderColor: "rgba(255,255,255,0.14)",
     fallbackColor: "rgba(255,255,255,0.07)",
     tintColor: "rgba(16,20,28,0.24)",
-  },
-  prominent: {
-    borderColor: "rgba(125,211,252,0.28)",
-    fallbackColor: "rgba(14,165,233,0.20)",
-    tintColor: "rgba(14,165,233,0.16)",
   },
   sheet: {
     borderColor: "rgba(255,255,255,0.14)",
@@ -114,7 +125,7 @@ export function GlassSurface({
   borderColor?: string;
   interactive?: boolean;
 }) {
-  const tokens = VARIANT_TOKENS[variant];
+  const tokens = variantTokens(variant, useAccent());
   const resolvedBorderColor = borderColor ?? tokens.borderColor;
   const resolvedFallbackColor = fallbackColor ?? tokens.fallbackColor;
   const resolvedTintColor = tintColor ?? tokens.tintColor;

@@ -16,6 +16,7 @@ import Animated, { FadeInRight } from "react-native-reanimated";
 import type { Id } from "../lib/plotlist/types";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
+import { useAccent } from "../lib/appearanceStore";
 import { formatShortDate } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
@@ -68,7 +69,6 @@ type ContinueWatchingRailProps = {
   index?: number;
 };
 
-const ACCENT = "#0EA5E9";
 const CARD_GAP = 14;
 const ENABLE_ENTRY_ANIMATIONS = Platform.OS !== "web";
 export const CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET = 44;
@@ -327,6 +327,7 @@ export function shouldRenderContinueWatchingEmptyState(
 }
 
 export function ContinueWatchingRailSkeleton({ index = 1 }: { index?: number }) {
+  const accent = useAccent();
   const { width } = useWindowDimensions();
   const { cardWidth, cardHeight } = getContinueWatchingCardMetrics(width);
   return (
@@ -334,7 +335,7 @@ export function ContinueWatchingRailSkeleton({ index = 1 }: { index?: number }) 
       index={index}
       kicker="Resume"
       title="Continue"
-      accent={ACCENT}
+      accent={accent.ramp[500]}
       icon="play"
       variant="banner"
       cardWidth={cardWidth}
@@ -348,6 +349,7 @@ export function ContinueWatchingRail({
   hideWhenEmpty = false,
   index = 1,
 }: ContinueWatchingRailProps = {}) {
+  const accent = useAccent();
   const { width } = useWindowDimensions();
   const { cardWidth, cardHeight, gap } = getContinueWatchingCardMetrics(width);
   const queriedItems = useContinueWatchingItems(providedItems === undefined);
@@ -402,7 +404,7 @@ export function ContinueWatchingRail({
           kicker="Resume"
           title="Continue"
           accessibilityTitle="Continue watching"
-          accent={ACCENT}
+          accent={accent.ramp[500]}
           icon="play"
         />
         <View className="mt-4 px-6">
@@ -421,9 +423,9 @@ export function ContinueWatchingRail({
               accessibilityElementsHidden
               aria-hidden={true}
               importantForAccessibility="no-hide-descendants"
-              style={styles.emptyIcon}
+              style={[styles.emptyIcon, { backgroundColor: accent.rgba(500, 0.16) }]}
             >
-              <Ionicons name="play" size={20} color={ACCENT} />
+              <Ionicons name="play" size={20} color={accent.ramp[500]} />
             </View>
             <View className="flex-1 ml-4">
               <Text className="text-[15px] font-bold text-text-primary">
@@ -455,7 +457,7 @@ export function ContinueWatchingRail({
           kicker="Resume"
           title="Continue"
           accessibilityTitle="Continue watching"
-          accent={ACCENT}
+          accent={accent.ramp[500]}
           icon="play"
         />
         <View className="mt-4 px-6">
@@ -474,9 +476,9 @@ export function ContinueWatchingRail({
               accessibilityElementsHidden
               aria-hidden={true}
               importantForAccessibility="no-hide-descendants"
-              style={styles.emptyIcon}
+              style={[styles.emptyIcon, { backgroundColor: accent.rgba(500, 0.16) }]}
             >
-              <Ionicons name="checkmark" size={20} color={ACCENT} />
+              <Ionicons name="checkmark" size={20} color={accent.ramp[500]} />
             </View>
             <View className="flex-1 ml-4">
               <Text className="text-[15px] font-bold text-text-primary">
@@ -505,7 +507,7 @@ export function ContinueWatchingRail({
         kicker="Resume"
         title="Continue"
         accessibilityTitle="Continue watching"
-        accent={ACCENT}
+        accent={accent.ramp[500]}
         icon="play"
         actionLabel="All shows"
         actionHref="/continue"
@@ -544,6 +546,7 @@ export function ContinueWatchingCard({
   cardHeight: number;
   onMarkWatched: (item: ContinueWatchingItem) => void;
 }) {
+  const accent = useAccent();
   const epLabel = getContinueWatchingVisibleBadgeLabel(item);
   const freshnessLabel = getContinueWatchingFreshnessLabel(item);
   const imageUrl =
@@ -596,7 +599,7 @@ export function ContinueWatchingCard({
               testID={`continue-artwork-fallback-${item.showId}`}
               title={item.show.title}
               subtitle={null}
-              accent={ACCENT}
+              accent={accent.ramp[500]}
               compact
               markVisible={false}
             />
@@ -630,7 +633,7 @@ export function ContinueWatchingCard({
             {freshnessLabel ? (
               <View
                 testID={`continue-freshness-chip-${item.showId}`}
-                style={styles.freshBadge}
+                style={[styles.freshBadge, { backgroundColor: accent.rgba(500, 0.92) }]}
               >
                 <Text className="text-[10px] font-black text-white" style={{ letterSpacing: 0.4 }}>
                   {freshnessLabel}
@@ -670,7 +673,13 @@ export function ContinueWatchingCard({
             >
               <View
                 testID={`continue-progress-fill-${item.showId}`}
-                style={[styles.progressFill, { width: `${Math.round(progressRatio * 100)}%` }]}
+                style={[
+                  styles.progressFill,
+                  {
+                    backgroundColor: accent.ramp[500],
+                    width: `${Math.round(progressRatio * 100)}%`,
+                  },
+                ]}
               />
             </View>
           ) : null}
@@ -692,7 +701,10 @@ export function ContinueWatchingCard({
           >
             <View
               testID={`continue-mark-watched-glyph-${item.showId}`}
-              style={styles.checkButtonGlyph}
+              style={[
+                styles.checkButtonGlyph,
+                { backgroundColor: accent.rgba(500, 0.92) },
+              ]}
             >
               <Ionicons
                 name="checkmark"
@@ -749,7 +761,6 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   freshBadge: {
-    backgroundColor: "rgba(14,165,233,0.92)",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -772,7 +783,6 @@ const styles = StyleSheet.create({
     right: 0,
   },
   progressFill: {
-    backgroundColor: ACCENT,
     height: "100%",
   },
   checkButton: {
@@ -786,7 +796,6 @@ const styles = StyleSheet.create({
   },
   checkButtonGlyph: {
     alignItems: "center",
-    backgroundColor: "rgba(14,165,233,0.92)",
     borderColor: "rgba(255,255,255,0.18)",
     borderRadius: 999,
     borderWidth: 1,
@@ -806,7 +815,6 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     alignItems: "center",
-    backgroundColor: "rgba(14,165,233,0.16)",
     borderRadius: 8,
     height: 44,
     justifyContent: "center",

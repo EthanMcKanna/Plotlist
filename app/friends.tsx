@@ -23,6 +23,7 @@ import { GlassPressable } from "../components/NativeGlass";
 import { HorizontalRail } from "../components/HorizontalRail";
 import { Screen } from "../components/Screen";
 import { ShimmerBlock } from "../components/ShowDetailSkeleton";
+import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsActivity";
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
@@ -46,6 +47,7 @@ function ActivityRowSkeleton() {
 }
 
 export default function FriendsScreen() {
+  const accent = useAccent();
   const { isAuthenticated } = useAuth();
   const isDesktopWeb = useIsDesktopWeb();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
@@ -227,14 +229,14 @@ export default function FriendsScreen() {
                 <RefreshControl
                   refreshing={refreshing}
                   onRefresh={handleRefresh}
-                  tintColor="#38BDF8"
+                  tintColor={accent.ramp[400]}
                 />
               }
               ListHeaderComponent={listHeader}
               ListFooterComponent={
                 status === "LoadingMore" ? (
                   <View className="items-center py-6">
-                    <ActivityIndicator color="#38BDF8" />
+                    <ActivityIndicator color={accent.ramp[400]} />
                   </View>
                 ) : null
               }

@@ -25,6 +25,7 @@ import { LinkPressable } from "../../components/LinkPressable";
 import { Poster } from "../../components/Poster";
 import { ActionSheet, type ActionSheetOption } from "../../components/ActionSheet";
 import { ReportModal } from "../../components/ReportModal";
+import { useAccent } from "../../lib/appearanceStore";
 import { api } from "../../lib/plotlist/api";
 import { confirmAction, notify, notifyError } from "../../lib/dialogs";
 import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
@@ -255,6 +256,7 @@ function formatMemberSince(timestamp: number | null) {
 }
 
 export default function ProfileScreen() {
+  const accent = useAccent();
   const router = useRouter();
   const params = useLocalSearchParams();
   const webPageStyle = useWebPageStyle(WEB_PROFILE_MAX_WIDTH);
@@ -320,7 +322,7 @@ export default function ProfileScreen() {
       <FanPreviewCard
         key={item._id}
         title={item.title}
-        accent="#38BDF8"
+        accent={accent.ramp[400]}
         posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
         meta={
           typeof item.itemCount === "number"
@@ -336,7 +338,7 @@ export default function ProfileScreen() {
         }}
       />
     ),
-    [publicListCardWidth],
+    [publicListCardWidth, accent],
   );
 
   const relationshipSummary = useMemo(() => {
@@ -663,7 +665,7 @@ export default function ProfileScreen() {
               ) : null}
               {relationshipSummary ? (
                 <View className="flex-row items-center gap-1">
-                  <Ionicons name="people-outline" size={12} color="#38bdf8" />
+                  <Ionicons name="people-outline" size={12} color={accent.ramp[400]} />
                   <Text className="text-xs text-brand-400">{relationshipSummary}</Text>
                 </View>
               ) : null}

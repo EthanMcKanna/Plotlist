@@ -536,7 +536,7 @@ describe("ContinueWatchingRail helpers", () => {
 
     expect(chipStyle.backgroundColor).toBe("rgba(13,15,20,0.55)");
     expect(chipStyle.borderColor).toBe("rgba(255,255,255,0.10)");
-    expect(glyphStyle.backgroundColor).toBe("rgba(14,165,233,0.92)");
+    expect(glyphStyle.backgroundColor).toBe("rgba(14, 165, 233, 0.92)");
     expect(glyphStyle.borderColor).toBe("rgba(255,255,255,0.18)");
     expect(glyphStyle.height).toBeLessThan(
       CONTINUE_WATCHING_MARK_WATCHED_TOUCH_TARGET,

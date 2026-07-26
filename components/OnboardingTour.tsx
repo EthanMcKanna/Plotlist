@@ -25,6 +25,7 @@ import Animated, {
 
 import { PrimaryButton } from "./PrimaryButton";
 import { WELCOME_SLIDES, WelcomeSlideIllustration } from "./WelcomeTourSlides";
+import { useAccent } from "../lib/appearanceStore";
 import { setWelcomeTourSeen } from "../lib/preferences";
 
 const SLIDE_COUNT = WELCOME_SLIDES.length;
@@ -82,6 +83,7 @@ export function OnboardingTour({
   ctaLabel: string;
   onDone: () => void;
 }) {
+  const accent = useAccent();
   const { width: windowWidth } = useWindowDimensions();
   // The pager can be narrower than the window (web renders the app in a
   // phone-width column), so pages size to the measured layout width.
@@ -233,7 +235,13 @@ export function OnboardingTour({
                 />
               ))}
             </View>
-            <Animated.View style={[styles.dotIndicator, dotIndicatorStyle]} />
+            <Animated.View
+              style={[
+                styles.dotIndicator,
+                { backgroundColor: accent.ramp[500] },
+                dotIndicatorStyle,
+              ]}
+            />
           </View>
         </View>
         <PrimaryButton
@@ -247,7 +255,6 @@ export function OnboardingTour({
 
 const styles = StyleSheet.create({
   dotIndicator: {
-    backgroundColor: "#0ea5e9",
     borderRadius: DOT_SIZE / 2,
     height: DOT_SIZE,
     left: 0,

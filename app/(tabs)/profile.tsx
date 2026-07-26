@@ -4,6 +4,7 @@ import { Link, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
+import { useAccent } from "../../lib/appearanceStore";
 import { api } from "../../lib/plotlist/api";
 import { Screen } from "../../components/Screen";
 import { Avatar } from "../../components/Avatar";
@@ -111,6 +112,7 @@ function MenuRow({ item, isLast }: { item: MenuItemDef; isLast: boolean }) {
 }
 
 export default function ProfileTab() {
+  const accent = useAccent();
   const router = useRouter();
   const isDesktopWeb = useIsDesktopWeb();
   const me = useQuery(api.users.me);
@@ -167,7 +169,7 @@ export default function ProfileTab() {
     {
       icon: "bookmark",
       iconBg: "bg-brand-500/15",
-      iconColor: "#38BDF8",
+      iconColor: accent.ramp[400],
       label: "Watchlist",
       route: "/me/watchlist?filter=watchlist",
       count: counts.watchlist,
@@ -213,7 +215,7 @@ export default function ProfileTab() {
                 <Text className="text-xs font-semibold text-brand-400">
                   View public profile
                 </Text>
-                <Ionicons name="chevron-forward" size={11} color="#38bdf8" />
+                <Ionicons name="chevron-forward" size={11} color={accent.ramp[400]} />
               </View>
             </View>
           </LinkPressable>
@@ -262,30 +264,30 @@ export default function ProfileTab() {
               radius={16}
               // Content-layer card: solid tinted surface, no Liquid Glass.
               variant="surface"
-              fallbackColor="rgba(14,165,233,0.20)"
-              borderColor="rgba(125,211,252,0.28)"
+              fallbackColor={accent.rgba(500, 0.2)}
+              borderColor={accent.rgba(300, 0.28)}
               style={{ marginTop: 12 }}
               contentStyle={{ padding: 18 }}
             >
               <View className="flex-row items-center justify-between">
-                <Text className="text-xs font-bold uppercase tracking-widest text-sky-200/80">
+                <Text className="text-xs font-bold uppercase tracking-widest text-brand-200/80">
                   Watch stats
                 </Text>
                 <View className="flex-row items-center gap-1">
-                  <Text className="text-xs font-semibold text-sky-100">See all</Text>
+                  <Text className="text-xs font-semibold text-brand-100">See all</Text>
                   <Ionicons name="chevron-forward" size={13} color="#E0F2FE" />
                 </View>
               </View>
               <View className="mt-3 flex-row items-end justify-between">
                 <View>
                   <Text className="text-3xl font-black text-white">{time.value}</Text>
-                  <Text className="mt-1 text-xs text-sky-100/70">watched all time</Text>
+                  <Text className="mt-1 text-xs text-brand-100/70">watched all time</Text>
                 </View>
                 <View className="items-end">
-                  <Text className="text-sm font-semibold text-sky-100">
+                  <Text className="text-sm font-semibold text-brand-100">
                     {insights.totals.episodes.toLocaleString()} episodes
                   </Text>
-                  <Text className="mt-0.5 text-xs text-sky-100/70">
+                  <Text className="mt-0.5 text-xs text-brand-100/70">
                     {insights.streaks.current > 0
                       ? `${insights.streaks.current}-day streak`
                       : `${insights.totals.shows.toLocaleString()} shows tracked`}

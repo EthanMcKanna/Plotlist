@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
+import { useAccent } from "../lib/appearanceStore";
 import type { WatchInsightsYearToDate } from "../lib/watchInsights";
 
 // Story-format (9:16) share cards for the "Year so far" flow. Every card is
@@ -15,7 +16,6 @@ export const STORY_CARD_BASE_HEIGHT = 640;
 const TEXT_PRIMARY = "#F1F3F7";
 const TEXT_SECONDARY = "#9AA3B5";
 const TEXT_TERTIARY = "#6B7280";
-const ACCENT = "#38BDF8";
 const CARD_BG = "#0D0F14";
 
 type CardProps = {
@@ -54,6 +54,7 @@ function CardShell({
 }
 
 function CardHeader({ u, eyebrow }: { u: number; eyebrow: string }) {
+  const accent = useAccent();
   return (
     <View style={{ alignItems: "center", gap: 10 * u, marginTop: 8 * u }}>
       <Image
@@ -64,7 +65,7 @@ function CardHeader({ u, eyebrow }: { u: number; eyebrow: string }) {
       />
       <Text
         style={{
-          color: "rgba(125,211,252,0.9)",
+          color: accent.rgba(300, 0.9),
           fontSize: 11 * u,
           fontWeight: "800",
           letterSpacing: 3 * u,
@@ -252,6 +253,7 @@ export function YearHeroCard({ ytd, width, username }: CardProps) {
 // Card 2 — the obsession: #1 show poster with its own blurred art behind it,
 // plus the biggest binge as the brag line.
 export function TopShowCard({ ytd, width, username }: CardProps) {
+  const accent = useAccent();
   const u = width / STORY_CARD_BASE_WIDTH;
   const show = ytd.topShows[0];
   if (!show) return null;
@@ -309,7 +311,7 @@ export function TopShowCard({ ytd, width, username }: CardProps) {
         </Text>
         <Text
           style={{
-            color: ACCENT,
+            color: accent.ramp[400],
             fontSize: 14.5 * u,
             fontWeight: "700",
             fontVariant: ["tabular-nums"],
@@ -350,6 +352,7 @@ export function TopShowCard({ ytd, width, username }: CardProps) {
 // Card 3 — the taste card: top genre in oversized type over a fan of that
 // genre's most-watched posters, runner-up genres below.
 export function TopGenreCard({ ytd, width, username }: CardProps) {
+  const accent = useAccent();
   const u = width / STORY_CARD_BASE_WIDTH;
   const genre = ytd.topGenres[0];
   if (!genre) return null;
@@ -398,7 +401,7 @@ export function TopGenreCard({ ytd, width, username }: CardProps) {
         </Text>
         <Text
           style={{
-            color: ACCENT,
+            color: accent.ramp[400],
             fontSize: 14.5 * u,
             fontWeight: "700",
             fontVariant: ["tabular-nums"],

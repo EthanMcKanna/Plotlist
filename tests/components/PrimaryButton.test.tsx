@@ -46,9 +46,9 @@ describe("PrimaryButton", () => {
     const nativeStyle = getPrimaryButtonSurfaceShadowStyle("ios");
 
     expect((webStyle as Record<string, unknown>).boxShadow).toBe(
-      "0 0 14px rgba(56,189,248,0.20)",
+      "0 0 14px rgba(56, 189, 248, 0.2)",
     );
     expect((webStyle as Record<string, unknown>).shadowColor).toBeUndefined();
-    expect((nativeStyle as Record<string, unknown>).shadowColor).toBe("#38BDF8");
+    expect((nativeStyle as Record<string, unknown>).shadowColor).toBe("#38bdf8");
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "../../components/SearchCommandCenter";
 import { SearchDiscoveryRail } from "../../components/SearchDiscoveryRail";
 import { SearchResultRow } from "../../components/SearchResultRow";
+import { useAccent } from "../../lib/appearanceStore";
 import type { SearchDiscoverSection } from "../../lib/searchDiscover";
 
 const previewSections: SearchDiscoverSection[] = [
@@ -90,6 +91,7 @@ const previewResults = [
 ];
 
 export default function SearchPreviewScreen() {
+  const accent = useAccent();
   const params = useLocalSearchParams();
   const initialQuery = typeof params.q === "string" ? params.q : "";
   const inputRef = useRef<TextInput>(null);
@@ -146,7 +148,7 @@ export default function SearchPreviewScreen() {
               key={section.key}
               index={index + 1}
               section={section}
-              accent={index === 0 ? "#F59E0B" : "#38BDF8"}
+              accent={index === 0 ? "#F59E0B" : accent.ramp[400]}
               onPressItem={() => undefined}
             />
           ))

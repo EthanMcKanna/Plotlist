@@ -10,6 +10,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 
+import { useAccent } from "../lib/appearanceStore";
 import {
   INITIAL_VISIBLE_SEASONS,
   getSeasonToggleLabel,
@@ -110,6 +111,7 @@ function EpisodeGuideComponent({
   onToggleEpisode,
   onSelectEpisode,
 }: EpisodeGuideProps) {
+  const accent = useAccent();
   if (seasons.length === 0) {
     return null;
   }
@@ -208,7 +210,7 @@ function EpisodeGuideComponent({
                     <Text
                       className="shrink text-xs font-bold uppercase tracking-widest"
                       numberOfLines={2}
-                      style={{ color: allWatched ? "#0ea5e9" : "#5A6070" }}
+                      style={{ color: allWatched ? accent.ramp[500] : "#5A6070" }}
                     >
                       {season.name}
                     </Text>
@@ -216,7 +218,7 @@ function EpisodeGuideComponent({
                       className="h-px flex-1"
                       style={{
                         backgroundColor: allWatched
-                          ? "rgba(14, 165, 233, 0.2)"
+                          ? accent.rgba(500, 0.2)
                           : "rgba(42, 46, 56, 0.8)",
                       }}
                     />
@@ -263,7 +265,7 @@ function EpisodeGuideComponent({
                             !hasAvailableEpisodes
                               ? "#404654"
                               : allWatched
-                                ? "#0ea5e9"
+                                ? accent.ramp[500]
                                 : "#5A6070"
                           }
                         />
@@ -278,12 +280,12 @@ function EpisodeGuideComponent({
                         variant="surface"
                         fallbackColor={
                           allWatched
-                            ? "rgba(14,165,233,0.14)"
+                            ? accent.rgba(500, 0.14)
                             : "rgba(255,255,255,0.04)"
                         }
                         borderColor={
                           allWatched
-                            ? "rgba(14,165,233,0.24)"
+                            ? accent.rgba(500, 0.24)
                             : "rgba(255,255,255,0.07)"
                         }
                         contentStyle={{ paddingHorizontal: 8, paddingVertical: 2 }}
@@ -291,7 +293,7 @@ function EpisodeGuideComponent({
                         <Text
                           className="text-xs font-medium"
                           style={{
-                            color: allWatched ? "#38bdf8" : "#5A6070",
+                            color: allWatched ? accent.ramp[400] : "#5A6070",
                           }}
                         >
                           {allWatched
@@ -343,7 +345,7 @@ function EpisodeGuideComponent({
                   className="mx-6 mb-3 h-1 overflow-hidden rounded-full"
                   style={{
                     backgroundColor: allWatched
-                      ? "rgba(14, 165, 233, 0.15)"
+                      ? accent.rgba(500, 0.15)
                       : "#1E2028",
                   }}
                 >
@@ -351,7 +353,7 @@ function EpisodeGuideComponent({
                     className="h-full rounded-full"
                     style={{
                       width: `${(watchedInSeason / totalEpisodeCount) * 100}%`,
-                      backgroundColor: allWatched ? "#0ea5e9" : "#0ea5e9",
+                      backgroundColor: accent.ramp[500],
                     }}
                   />
                 </View>
@@ -359,7 +361,7 @@ function EpisodeGuideComponent({
 
               {isLoading ? (
                 <View className="items-center justify-center py-12">
-                  <ActivityIndicator color="#38bdf8" size="small" />
+                  <ActivityIndicator color={accent.ramp[400]} size="small" />
                   <Text className="mt-2 text-sm text-text-tertiary">
                     Loading episodes...
                   </Text>
@@ -432,7 +434,7 @@ function EpisodeGuideComponent({
                             width: 144,
                             height: 180,
                             borderColor: isWatched
-                              ? "rgba(14, 165, 233, 0.35)"
+                              ? accent.rgba(500, 0.35)
                               : "rgba(42, 46, 56, 0.8)",
                           }}
                         >
@@ -462,8 +464,8 @@ function EpisodeGuideComponent({
                                 className="absolute bottom-1.5 left-1.5 flex-row items-center gap-1 rounded-full px-1.5 py-0.5"
                                 style={{ backgroundColor: "rgba(0,0,0,0.62)" }}
                               >
-                                <Ionicons name="repeat" size={9} color="#7DD3FC" />
-                                <Text className="text-[9px] font-bold" style={{ color: "#7DD3FC" }}>
+                                <Ionicons name="repeat" size={9} color={accent.ramp[300]} />
+                                <Text className="text-[9px] font-bold" style={{ color: accent.ramp[300] }}>
                                   ×{logCount}
                                 </Text>
                               </View>
@@ -474,10 +476,10 @@ function EpisodeGuideComponent({
                                 variant={isWatched ? "prominent" : "control"}
                                 fallbackColor={
                                   isWatched
-                                    ? "rgba(14,165,233,0.82)"
+                                    ? accent.rgba(500, 0.82)
                                     : "rgba(0,0,0,0.44)"
                                 }
-                                tintColor={isWatched ? "rgba(14,165,233,0.18)" : "rgba(255,255,255,0.08)"}
+                                tintColor={isWatched ? accent.rgba(500, 0.18) : "rgba(255,255,255,0.08)"}
                                 style={{
                                   position: "absolute",
                                   right: 4,

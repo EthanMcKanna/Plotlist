@@ -56,6 +56,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassSurface } from "../../components/NativeGlass";
 import { PrimaryButton } from "../../components/PrimaryButton";
 import { api } from "../../lib/plotlist/api";
+import type { AccentTheme } from "../../lib/appearance";
+import { useAccent } from "../../lib/appearanceStore";
 import {
   getAppleButtonComponent,
   getAppleButtonProps,
@@ -106,14 +108,14 @@ const prefersReducedMotion =
   typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function brandGlow(opacity: number, radius: number): ViewStyle {
+function brandGlow(accent: AccentTheme, opacity: number, radius: number): ViewStyle {
   if (Platform.OS === "web") {
     return {
-      boxShadow: `0 0 ${radius}px rgba(56,189,248,${opacity})`,
+      boxShadow: `0 0 ${radius}px ${accent.rgba(400, opacity)}`,
     } as ViewStyle;
   }
   return {
-    shadowColor: "#38BDF8",
+    shadowColor: accent.ramp[400],
     shadowOpacity: opacity,
     shadowRadius: radius,
     shadowOffset: { width: 0, height: 0 },
@@ -438,6 +440,7 @@ function Kicker({ children }: { children: ReactNode }) {
 
 // ── BlinkingCaret — insertion point inside the active code cell ──
 function BlinkingCaret() {
+  const accent = useAccent();
   const opacity = useSharedValue(1);
   useEffect(() => {
     opacity.value = withRepeat(
@@ -450,7 +453,11 @@ function BlinkingCaret() {
     );
   }, [opacity]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return <Animated.View style={[styles.caret, style]} />;
+  return (
+    <Animated.View
+      style={[styles.caret, { backgroundColor: accent.ramp[400] }, style]}
+    />
+  );
 }
 
 // ── CodeCells — split OTP digit input ─────────────────────────────
@@ -463,6 +470,7 @@ const CodeCells = forwardRef<
   CodeCellsHandle,
   { value: string; onChange: (code: string) => void }
 >(function CodeCells({ value, onChange }, ref) {
+  const accent = useAccent();
   const inputRef = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
   const shakeX = useSharedValue(0);
@@ -505,8 +513,19 @@ const CodeCells = forwardRef<
               key={i}
               style={[
                 styles.codeCell,
-                ch ? styles.codeCellFilled : null,
-                active ? styles.codeCellActive : null,
+                ch
+                  ? [
+                      styles.codeCellFilled,
+                      { borderColor: accent.rgba(300, 0.3) },
+                    ]
+                  : null,
+                active
+                  ? {
+                      backgroundColor: accent.rgba(500, 0.09),
+                      borderColor: accent.ramp[400],
+                      ...brandGlow(accent, 0.3, 10),
+                    }
+                  : null,
               ]}
             >
               {ch ? (
@@ -543,6 +562,7 @@ const CodeCells = forwardRef<
 
 // ── SignInScreen ───────────────────────────────────────────────────
 export default function SignInScreen() {
+  const accent = useAccent();
   const { signIn } = useAuthActions();
   const startVerification = useAction(api.phone.startVerification);
   const insets = useSafeAreaInsets();
@@ -890,13 +910,13 @@ export default function SignInScreen() {
                     variant="surface"
                     borderColor={
                       phoneFocused
-                        ? "rgba(56,189,248,0.55)"
+                        ? accent.rgba(400, 0.55)
                         : "rgba(255,255,255,0.12)"
                     }
                     fallbackColor="rgba(18,22,30,0.92)"
                     style={[
                       styles.phoneField,
-                      phoneFocused ? styles.phoneFieldFocused : null,
+                      phoneFocused ? brandGlow(accent, 0.25, 12) : null,
                     ]}
                     contentStyle={styles.phoneFieldContent}
                   >
@@ -923,7 +943,7 @@ export default function SignInScreen() {
                       keyboardType="phone-pad"
                       textContentType="telephoneNumber"
                       autoComplete="tel"
-                      selectionColor="#38bdf8"
+                      selectionColor={accent.ramp[400]}
                       style={styles.phoneInput}
                       onSubmitEditing={
                         Platform.OS === "web" ? handleSend : undefined
@@ -1079,7 +1099,6 @@ export default function SignInScreen() {
 
 const styles = StyleSheet.create({
   caret: {
-    backgroundColor: "#38bdf8",
     borderRadius: 1,
     height: 22,
     width: 2,
@@ -1096,14 +1115,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 0,
   },
-  codeCellActive: {
-    backgroundColor: "rgba(14,165,233,0.09)",
-    borderColor: "#38bdf8",
-    ...brandGlow(0.3, 10),
-  },
   codeCellFilled: {
     backgroundColor: "rgba(22,26,34,0.92)",
-    borderColor: "rgba(125,211,252,0.3)",
   },
   codeDigit: {
     color: "#F1F3F7",
@@ -1139,9 +1152,6 @@ const styles = StyleSheet.create({
   },
   phoneField: {
     borderWidth: 1,
-  },
-  phoneFieldFocused: {
-    ...brandGlow(0.25, 12),
   },
   phoneFieldContent: {
     alignItems: "center",

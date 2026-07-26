@@ -12,6 +12,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import type { AccentTheme } from "../lib/appearance";
+import { useAccent } from "../lib/appearanceStore";
 import {
   useIsDesktopWeb,
   useIsWideLayout,
@@ -35,14 +37,16 @@ type StatusSelectorProps = {
 
 // Every displayable status, including the auto-managed tiers the server sets
 // (caught_up/finished) — the button surface renders whichever the show holds.
-const STATUS_CONFIG = {
+// A function of the accent theme so the watchlist tint follows the live
+// accent instead of capturing a hex at import.
+const statusConfig = (accent: AccentTheme) => ({
   watchlist: {
     label: "Watchlist",
     icon: "bookmark" as const,
     iconOutline: "bookmark-outline" as const,
-    color: "#0ea5e9",
-    bg: "rgba(14, 165, 233, 0.13)",
-    borderColor: "rgba(14, 165, 233, 0.25)",
+    color: accent.ramp[500],
+    bg: accent.rgba(500, 0.13),
+    borderColor: accent.rgba(500, 0.25),
     description: "Save to watch later",
   },
   watching: {
@@ -90,7 +94,7 @@ const STATUS_CONFIG = {
     borderColor: "rgba(239, 68, 68, 0.25)",
     description: "Stopped watching",
   },
-} as const;
+}) as const;
 
 // The sheet offers one "Watched" choice instead of caught-up vs finished —
 // the server marks every released episode watched and lands on the right
@@ -124,6 +128,8 @@ export function StatusSelector({
   onSelect,
   onRemove,
 }: StatusSelectorProps) {
+  const accent = useAccent();
+  const STATUS_CONFIG = statusConfig(accent);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<
     WatchStatus | "completed" | null | undefined

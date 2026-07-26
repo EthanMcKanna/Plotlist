@@ -10,6 +10,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useAccent } from "../lib/appearanceStore";
 import { Avatar } from "./Avatar";
 import { LinkPressable } from "./LinkPressable";
 
@@ -88,6 +89,7 @@ export function HomeTopBar({
   notificationCount = 0,
 }: HomeTopBarProps) {
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
   const firstName = getHomeTopBarFirstName(displayName);
 
   // Blur opacity ramps in over the first 80px of scroll.
@@ -191,7 +193,10 @@ export function HomeTopBar({
             importantForAccessibility="no"
           />
           {notificationCount > 0 ? (
-            <View style={styles.badge} pointerEvents="none">
+            <View
+              style={[styles.badge, { backgroundColor: accent.ramp[400] }]}
+              pointerEvents="none"
+            >
               <Text style={styles.badgeText} accessible={false}>
                 {getHomeTopBarNotificationsBadgeLabel(notificationCount)}
               </Text>
@@ -255,7 +260,6 @@ const styles = StyleSheet.create({
   },
   badge: {
     alignItems: "center",
-    backgroundColor: "#38BDF8",
     borderRadius: 8,
     height: 16,
     justifyContent: "center",

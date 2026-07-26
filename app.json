@@ -71,6 +71,16 @@
       ],
       "@react-native-community/datetimepicker",
       [
+        "expo-alternate-app-icons",
+        [
+          { "name": "Ember", "ios": "./assets/app-icons/ember.png" },
+          { "name": "Violet", "ios": "./assets/app-icons/violet.png" },
+          { "name": "Emerald", "ios": "./assets/app-icons/emerald.png" },
+          { "name": "Gold", "ios": "./assets/app-icons/gold.png" },
+          { "name": "Mono", "ios": "./assets/app-icons/mono.png" }
+        ]
+      ],
+      [
         "@sentry/react-native/expo",
         {
           "url": "https://sentry.io/",

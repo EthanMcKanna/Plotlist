@@ -52,6 +52,8 @@ import {
   sortCatalogResults,
   type CatalogSortKey,
 } from "../../lib/searchExperience";
+import type { AccentTheme } from "../../lib/appearance";
+import { useAccent } from "../../lib/appearanceStore";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import { queryClient } from "../../lib/queryClient";
 import { useIsDesktopWeb } from "../../lib/webLayout";
@@ -71,16 +73,17 @@ const VIBE_EXAMPLE_PROMPTS = [
 ];
 
 const DISCOVER_FETCH_LIMIT = 18;
+// `null` accents are the brand color, resolved from the live theme at render.
 const DISCOVER_SKELETONS = [
   { accent: "#F59E0B", kicker: "Discover", title: "Trending Today" },
-  { accent: "#38BDF8", kicker: "Discover", title: "Fresh Premieres" },
+  { accent: null, kicker: "Discover", title: "Fresh Premieres" },
   { accent: "#F472B6", kicker: "Discover", title: "Hidden Gems" },
 ];
-const DISCOVER_ACCENTS: Record<string, string> = {
+const DISCOVER_ACCENTS: Record<string, string | null> = {
   airing_today: "#A3E635",
   apple_tv: "#F1F3F7",
   disney_plus: "#60A5FA",
-  fresh_premieres: "#38BDF8",
+  fresh_premieres: null,
   genre_comedy: "#FDE68A",
   genre_crime: "#FB7185",
   genre_drama: "#C084FC",
@@ -89,7 +92,7 @@ const DISCOVER_ACCENTS: Record<string, string> = {
   hulu: "#22C55E",
   max: "#818CF8",
   netflix: "#F87171",
-  prime_video: "#38BDF8",
+  prime_video: null,
   top_rated: "#FACC15",
   trending_day: "#F59E0B",
 };
@@ -100,12 +103,12 @@ let searchDiscoverCache:
 
 export function getSearchSectionAccent(
   section: Pick<SearchDiscoverSection<any>, "key">,
+  accent: AccentTheme,
   index = 0,
 ) {
-  return (
-    DISCOVER_ACCENTS[section.key] ??
-    ["#38BDF8", "#22C55E", "#F59E0B", "#F472B6"][index % 4]
-  );
+  const mapped = DISCOVER_ACCENTS[section.key];
+  if (mapped !== undefined) return mapped ?? accent.ramp[400];
+  return [accent.ramp[400], "#22C55E", "#F59E0B", "#F472B6"][index % 4];
 }
 
 function getVibeShowId(item: any): string | null {
@@ -167,6 +170,7 @@ function SearchLoadingRows() {
 }
 
 function SearchDiscoverSkeletons() {
+  const accent = useAccent();
   return (
     <View style={styles.discoverSkeletonStack}>
       {DISCOVER_SKELETONS.map((section, index) => (
@@ -175,7 +179,7 @@ function SearchDiscoverSkeletons() {
           index={index + 1}
           kicker={section.kicker}
           title={section.title}
-          accent={section.accent}
+          accent={section.accent ?? accent.ramp[400]}
           variant="poster"
         />
       ))}
@@ -226,6 +230,7 @@ export default function SearchScreen() {
   const params = useLocalSearchParams();
   const inputRef = useRef<TextInput>(null);
   const isDesktopWeb = useIsDesktopWeb();
+  const accent = useAccent();
 
   // Web deep-links carry the query in the URL (?q=); start from it so reload,
   // back, and shared links restore the search. Native params never carry q.
@@ -734,7 +739,7 @@ export default function SearchScreen() {
                   key={section.key}
                   index={sectionIndex + 1}
                   section={section}
-                  accent={getSearchSectionAccent(section, sectionIndex)}
+                  accent={getSearchSectionAccent(section, accent, sectionIndex)}
                   actionLabel={section.logoUrl ? "All" : undefined}
                   onAction={
                     section.logoUrl
@@ -792,10 +797,10 @@ export default function SearchScreen() {
                       style={(state) => [
                         {
                           backgroundColor: isActive
-                            ? "rgba(56,189,248,0.16)"
+                            ? accent.rgba(400, 0.16)
                             : "rgba(255,255,255,0.06)",
                           borderColor: isActive
-                            ? "rgba(56,189,248,0.55)"
+                            ? accent.rgba(400, 0.55)
                             : "rgba(255,255,255,0.09)",
                           borderWidth: StyleSheet.hairlineWidth,
                         },
@@ -808,7 +813,7 @@ export default function SearchScreen() {
                     >
                       <Text
                         className="text-xs font-semibold"
-                        style={{ color: isActive ? "#38BDF8" : "#9BA1B0" }}
+                        style={{ color: isActive ? accent.ramp[400] : "#9BA1B0" }}
                       >
                         {option.label}
                       </Text>
@@ -897,7 +902,7 @@ export default function SearchScreen() {
                       <Ionicons
                         name="sparkles-outline"
                         size={14}
-                        color="#38BDF8"
+                        color={accent.ramp[400]}
                         accessible={false}
                         accessibilityElementsHidden
                         aria-hidden={true}

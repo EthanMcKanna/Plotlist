@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
 import { PrimaryButton } from "./PrimaryButton";
+import { useAccent } from "../lib/appearanceStore";
 
 // Optional last onboarding stage, shown only when the server has Trakt
 // import configured and the account isn't already connected: offer to bring
@@ -17,6 +18,7 @@ export function OnboardingImportStep({
   onImport: () => Promise<void>;
   onSkip: () => Promise<void>;
 }) {
+  const accent = useAccent();
   const [importing, setImporting] = useState(false);
   const [skipping, setSkipping] = useState(false);
 
@@ -79,7 +81,7 @@ export function OnboardingImportStep({
           className="items-center justify-center rounded-full bg-dark-elevated"
           style={{ width: 72, height: 72 }}
         >
-          <Ionicons name="swap-vertical" size={30} color="#38bdf8" />
+          <Ionicons name="swap-vertical" size={30} color={accent.ramp[400]} />
         </View>
       </View>
 

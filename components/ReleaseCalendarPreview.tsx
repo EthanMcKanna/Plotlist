@@ -7,6 +7,7 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 
+import { useAccent } from "../lib/appearanceStore";
 import { guardedPush } from "../lib/navigation";
 import { api } from "../lib/plotlist/api";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
@@ -22,6 +23,7 @@ const CARD_WIDTH = 240;
 
 export function ReleaseCalendarPreview() {
   const { isAuthenticated } = useAuth();
+  const accent = useAccent();
   const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
   const today = useMemo(() => getLocalDateString(), []);
   const preview = useQuery(
@@ -137,7 +139,7 @@ export function ReleaseCalendarPreview() {
                   >
                     {formatEpisodeCode(item.seasonNumber, item.episodeNumber)}
                   </Text>
-                  <View className="rounded-full px-1.5 py-0.5" style={{ backgroundColor: isTonight ? "rgba(56, 189, 248, 0.85)" : "rgba(255,255,255,0.2)" }}>
+                  <View className="rounded-full px-1.5 py-0.5" style={{ backgroundColor: isTonight ? accent.rgba(400, 0.85) : "rgba(255,255,255,0.2)" }}>
                     <Text className="text-[10px] font-bold text-white">
                       {item.airDate === today
                         ? "Tonight"

@@ -14,6 +14,21 @@
   /* Dark-scheme browser chrome: form controls, autofill, native pickers,
      and default scrollbars all render dark instead of light-on-dark. */
   color-scheme: dark;
+  /* Sky accent defaults (R G B triplets consumed by the tailwind brand ramp).
+     AppearanceProvider overrides these on the root element when a different
+     accent theme is active; they must exist here so portal-rendered content
+     (react-native-web Modal) and the pre-hydration paint resolve. */
+  --brand-50: 240 249 255;
+  --brand-100: 224 242 254;
+  --brand-200: 186 230 253;
+  --brand-300: 125 211 252;
+  --brand-400: 56 189 248;
+  --brand-500: 14 165 233;
+  --brand-600: 2 132 199;
+  --brand-700: 3 105 161;
+  --brand-800: 7 89 133;
+  --brand-900: 12 74 110;
+  --brand-glow: 14 165 233;
 }
 
 html,
@@ -60,10 +75,10 @@ img {
 
 /* Visible keyboard focus without flashing outlines on mouse clicks. */
 :focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.65);
+  outline: 2px solid rgb(var(--brand-400) / 0.65);
   outline-offset: 2px;
 }
 
 ::selection {
-  background: rgba(56, 189, 248, 0.35);
+  background: rgb(var(--brand-400) / 0.35);
 }
