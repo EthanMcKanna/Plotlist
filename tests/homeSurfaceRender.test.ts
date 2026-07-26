@@ -236,6 +236,7 @@ describe("HomeSurface rendered preview", () => {
       expect(sectionIds).toEqual([
         "home-section-continue-watching",
         "home-section-tonight",
+        "home-section-ask",
         "home-section-heat",
         "home-section-for-you",
         "home-section-fresh",
@@ -248,6 +249,7 @@ describe("HomeSurface rendered preview", () => {
           homeSectionId: "home-section-continue-watching",
         },
         { homeSection: "tonight", homeSectionId: "home-section-tonight" },
+        { homeSection: "ask", homeSectionId: "home-section-ask" },
         { homeSection: "heat", homeSectionId: "home-section-heat" },
         { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "fresh", homeSectionId: "home-section-fresh" },

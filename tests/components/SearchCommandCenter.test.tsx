@@ -1,11 +1,20 @@
-import { describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
+
+const mockGuardedPush = jest.fn();
+jest.mock("../../lib/navigation", () => ({
+  guardedPush: (...args: unknown[]) => mockGuardedPush(...args),
+}));
 
 import {
   SearchCommandCenter,
   getSearchCommandCenterCopy,
 } from "../../components/SearchCommandCenter";
+
+beforeEach(() => {
+  mockGuardedPush.mockClear();
+});
 
 describe("SearchCommandCenter", () => {
   it("renders a compact search surface and forwards query edits", () => {
@@ -32,7 +41,7 @@ describe("SearchCommandCenter", () => {
     expect(onQueryChange).toHaveBeenCalledWith("the");
   });
 
-  it("offers vibe and people as scoped actions from the idle shows surface", () => {
+  it("offers Ask Plotlist and people as scoped actions from the idle shows surface", () => {
     const onModeChange = jest.fn();
 
     render(
@@ -48,11 +57,14 @@ describe("SearchCommandCenter", () => {
       />,
     );
 
-    fireEvent.press(screen.getByLabelText("Switch to vibe search"));
+    // The old vibe chip now routes to the Ask Plotlist screen instead of
+    // toggling in-place vibe mode.
+    fireEvent.press(screen.getByLabelText("Ask Plotlist for a recommendation"));
     fireEvent.press(screen.getByLabelText("Switch to people search"));
 
-    expect(onModeChange).toHaveBeenNthCalledWith(1, "vibe");
-    expect(onModeChange).toHaveBeenNthCalledWith(2, "people");
+    expect(mockGuardedPush).toHaveBeenCalledWith("/ask");
+    expect(onModeChange).toHaveBeenCalledWith("people");
+    expect(onModeChange).not.toHaveBeenCalledWith("vibe");
   });
 
   it("hides the scope actions while a query is in flight", () => {
@@ -69,7 +81,7 @@ describe("SearchCommandCenter", () => {
       />,
     );
 
-    expect(screen.queryByLabelText("Switch to vibe search")).toBeNull();
+    expect(screen.queryByLabelText("Ask Plotlist for a recommendation")).toBeNull();
     expect(screen.queryByLabelText("Switch to people search")).toBeNull();
   });
 

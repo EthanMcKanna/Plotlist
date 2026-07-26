@@ -52,10 +52,11 @@ describe("home section plan", () => {
         hasProfile: true,
         showContactSyncNudge: false,
         contactNudgeDismissed: null,
-      }).slice(0, 3),
+      }).slice(0, 4),
     ).toEqual([
       "continue-watching",
       "tonight",
+      "ask",
       "heat",
     ]);
   });
@@ -73,7 +74,7 @@ describe("home section plan", () => {
           critics: { itemCount: 8, currentCount: 1, explicitCurrentCount: 0 },
           quick: { itemCount: 4, currentCount: 1, explicitCurrentCount: 0 },
         },
-      }).slice(2, 6),
+      }).slice(3, 7),
     ).toEqual(["fresh", "for-you", "taste-rails", "heat"]);
   });
 
@@ -135,10 +136,11 @@ describe("home section plan", () => {
           tonightCount: 2,
           upcomingCount: 4,
         },
-      }).slice(0, 3),
+      }).slice(0, 4),
     ).toEqual([
       "continue-watching",
       "tonight",
+      "ask",
       "heat",
     ]);
   });
@@ -154,10 +156,11 @@ describe("home section plan", () => {
           tonightCount: 0,
           upcomingCount: 3,
         },
-      }).slice(0, 3),
+      }).slice(0, 4),
     ).toEqual([
       "continue-watching",
       "tonight",
+      "ask",
       "heat",
     ]);
   });
@@ -271,9 +274,10 @@ describe("home section plan", () => {
         },
       });
 
-    expect(plan.slice(0, 7)).toEqual([
+    expect(plan.slice(0, 8)).toEqual([
       "continue-watching",
       "tonight",
+      "ask",
       "fresh",
       "for-you",
       "taste-rails",
@@ -304,7 +308,7 @@ describe("home section plan", () => {
           heat: { itemCount: 3, currentCount: 1, explicitCurrentCount: 1 },
           fresh: { itemCount: 8, currentCount: 6, explicitCurrentCount: 5 },
         },
-      }).slice(2, 7),
+      }).slice(3, 8),
     ).toEqual(["fresh", "friends", "for-you", "taste-rails", "heat"]);
 
     expect(
@@ -448,7 +452,7 @@ describe("home section plan", () => {
         sectionSignals: {
           fresh: { itemCount: 5, currentCount: 5, explicitCurrentCount: 5 },
         },
-      }).slice(2, 6),
+      }).slice(3, 7),
     ).toEqual(["fresh", "for-you", "taste-rails", "heat"]);
   });
 });

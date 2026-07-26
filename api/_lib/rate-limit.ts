@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { createHmac } from "node:crypto";
 
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { rateLimits } from "../../db/schema";
 import { db } from "./db";
@@ -62,4 +62,57 @@ export async function enforceRateLimit(key: string, limit: number, windowMs: num
   if ((rows[0]?.count ?? 0) > limit) {
     throw new ApiError(429, "rate_limited", "Too many requests");
   }
+}
+
+// Non-throwing sibling of enforceRateLimit for user-facing quotas (Ask
+// Plotlist free sessions). Same rate_limits upsert, but returns the verdict
+// instead of throwing, and never increments past limit + 1 so a burst of
+// denied attempts can't push the counter into the next window's budget.
+export async function consumeQuota(
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<{ allowed: boolean; remaining: number }> {
+  const now = Date.now();
+  const resetAt = now + windowMs;
+  const rows = await db
+    .insert(rateLimits)
+    .values({
+      id: createId("rate"),
+      key,
+      count: 1,
+      resetAt,
+    })
+    .onConflictDoUpdate({
+      target: rateLimits.key,
+      set: {
+        count: sql<number>`case when ${rateLimits.resetAt} <= ${now} then 1 else min(${rateLimits.count} + 1, ${limit + 1}) end`,
+        resetAt: sql<number>`case when ${rateLimits.resetAt} <= ${now} then ${resetAt} else ${rateLimits.resetAt} end`,
+      },
+    })
+    .returning({
+      count: rateLimits.count,
+    });
+
+  const count = rows[0]?.count ?? limit + 1;
+  return { allowed: count <= limit, remaining: Math.max(0, limit - count) };
+}
+
+// Read-only view of a quota key for status pills ("2 free asks left") —
+// never increments.
+export async function peekQuota(
+  key: string,
+  limit: number,
+): Promise<{ remaining: number }> {
+  const now = Date.now();
+  const rows = await db
+    .select({ count: rateLimits.count, resetAt: rateLimits.resetAt })
+    .from(rateLimits)
+    .where(eq(rateLimits.key, key))
+    .limit(1);
+  const row = rows[0];
+  if (!row || row.resetAt <= now) {
+    return { remaining: limit };
+  }
+  return { remaining: Math.max(0, limit - row.count) };
 }

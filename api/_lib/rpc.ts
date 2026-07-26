@@ -40,6 +40,7 @@ import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
 import { moderateText } from "./moderation";
+import { askPlotlist, getAskStatus } from "./ask-plotlist";
 import { createCalendarFeedToken } from "./calendar-feed";
 import { requirePro, userHasPro } from "./pro";
 import { ensurePhoneIdentity } from "./auth";
@@ -4997,6 +4998,11 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ showId: z.string() }).parse(args ?? {});
     return await getShowFacets(parsed.showId);
   },
+  // Ask Plotlist quota pill: peek without consuming.
+  "embeddings:getAskStatus": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await getAskStatus(user);
+  },
   "releaseCalendar:getHomePreview": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ today: z.string().optional() }).parse(args ?? {});
@@ -7099,6 +7105,30 @@ export const actionHandlers: Record<string, RpcHandler> = {
       console.warn("[recs] taste experience vector path failed; using stub", error);
     }
     return { topGenres: [], favoriteShows: [], tasteSummary: null, tasteMatch: null };
+  },
+  // Ask Plotlist: constraint-aware personalized picks with reasons. Quota
+  // and sessions are enforced inside the pipeline (Pro unlimited, free users
+  // get 3 sessions/month; a session's refinements are free for 15 minutes).
+  "embeddings:askPlotlist": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        text: z.string().max(400).optional(),
+        chips: z
+          .object({
+            time: z.enum(["quick", "full", "binge"]).nullish(),
+            mood: z
+              .enum(["cozy", "funny", "tense", "mind_bending", "background", "surprise"])
+              .nullish(),
+            onMyServices: z.boolean().optional(),
+          })
+          .optional(),
+        refinement: z.string().max(40).optional(),
+        sessionId: z.string().max(500).optional(),
+        excludeShowIds: z.array(z.string()).max(24).optional(),
+      })
+      .parse(args ?? {});
+    return await askPlotlist(user, parsed);
   },
   // Recs v2 surfaces: free-text semantic search and facet/category browsing.
   "embeddings:searchByVibe": async ({ args }) => {

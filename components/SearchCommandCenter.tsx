@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { withAlpha } from "../lib/genreExplorer";
+import { guardedPush } from "../lib/navigation";
 import { useIsDesktopWeb } from "../lib/webLayout";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -324,14 +325,16 @@ export function SearchCommandCenter({
 
       {showScopeActions ? (
         <View style={styles.scopeRow}>
+          {/* Routes to Ask Plotlist; the in-place vibe mode plumbing stays
+              for older code paths that still set mode="vibe". */}
           <ScopeAction
             icon="sparkles"
             accent={SCOPE_META.vibe.accent}
-            title="Vibe search"
-            subtitle="Describe a mood"
-            accessibilityLabel="Switch to vibe search"
+            title="Ask Plotlist"
+            subtitle="What should I watch?"
+            accessibilityLabel="Ask Plotlist for a recommendation"
             isDesktopWeb={isDesktopWeb}
-            onPress={() => onModeChange("vibe")}
+            onPress={() => guardedPush("/ask")}
           />
           <ScopeAction
             icon="people"

@@ -173,6 +173,8 @@ export const api = {
     getShowTasteSocialProof: ref("action", "embeddings:getShowTasteSocialProof"),
     getProfileTasteExperience: ref("action", "embeddings:getProfileTasteExperience"),
     searchByVibe: ref("action", "embeddings:searchByVibe"),
+    askPlotlist: ref("action", "embeddings:askPlotlist"),
+    getAskStatus: ref("query", "embeddings:getAskStatus"),
     getFacetBrowse: ref("action", "embeddings:getFacetBrowse"),
     getFacetPreviews: ref("action", "embeddings:getFacetPreviews"),
     getFacetShows: ref("action", "embeddings:getFacetShows"),

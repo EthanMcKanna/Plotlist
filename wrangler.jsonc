@@ -33,7 +33,10 @@
   "vectorize": [
     {
       "binding": "VECTORIZE",
-      "index_name": "plotlist-shows-v2"
+      "index_name": "plotlist-shows-v2",
+      // Dev-only: Vectorize has no local emulation, so `wrangler dev`
+      // proxies this binding to the real index (ignored by deploy).
+      "remote": true
     }
   ],
   "triggers": {

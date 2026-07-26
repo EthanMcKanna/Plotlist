@@ -7,6 +7,7 @@ import {
 export type HomeSection =
   | { kind: "continue-watching" }
   | { kind: "tonight" }
+  | { kind: "ask" }
   | { kind: "for-you" }
   | { kind: "taste-rails" }
   | { kind: "heat" }
@@ -265,6 +266,9 @@ export function getHomeSectionPlan({
           { kind: "continue-watching" as const },
           ...(showUrgentSchedule ? [{ kind: "tonight" as const }] : []),
           ...(showUpcomingSchedule ? [{ kind: "tonight" as const }] : []),
+          // Static Ask Plotlist entry card — deliberately unconditional and
+          // data-free so it's safe inside the warm-start cache.
+          { kind: "ask" as const },
           ...openingDiscoverySections,
           ...(promoteFriends ? [{ kind: "friends" as const }] : []),
           { kind: "for-you" as const },

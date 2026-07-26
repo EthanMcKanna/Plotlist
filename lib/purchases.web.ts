@@ -183,7 +183,7 @@ function chooseProPackage(packages: Package[]): Promise<Package | null> {
     card.innerHTML = `
       <div style="font-size:22px;font-weight:800;margin-bottom:6px;">Plotlist Pro</div>
       <div style="font-size:13px;line-height:18px;color:#9BA1B0;margin-bottom:18px;">
-        Unlimited vibe search, streaming arrival alerts, custom notifications,
+        Unlimited Ask Plotlist, streaming arrival alerts, custom notifications,
         calendar sync, backdrops, and more.
       </div>
     `;

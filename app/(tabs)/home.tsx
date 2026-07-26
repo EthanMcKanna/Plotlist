@@ -30,6 +30,7 @@ import { useAction, useQuery } from "../../lib/plotlist/react";
 import { api } from "../../lib/plotlist/api";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
+import { GlassPressable } from "../../components/NativeGlass";
 import {
   ContinueWatchingRail,
   type ContinueWatchingItem,
@@ -933,6 +934,52 @@ export function HomeSurface({
             index={getSectionDisplayIndex(item.kind)}
           />
         );
+      case "ask":
+        // Static entry card — no RPC on mount, safe for the warm-start cache.
+        if (!data.hasProfile) return null;
+        return (
+          <View className="mt-6 px-6">
+            <GlassPressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                guardedPush("/ask");
+              }}
+              radius={16}
+              accessibilityRole="button"
+              accessibilityLabel="Ask Plotlist what to watch tonight"
+              contentStyle={styles.askCardContent}
+            >
+              <View style={styles.askCardIcon}>
+                <Ionicons
+                  name="sparkles"
+                  size={17}
+                  color="#38BDF8"
+                  accessible={false}
+                  accessibilityElementsHidden
+                  aria-hidden={true}
+                  importantForAccessibility="no"
+                />
+              </View>
+              <View className="min-w-0 flex-1">
+                <Text className="text-[15px] font-bold text-text-primary">
+                  Ask Plotlist
+                </Text>
+                <Text className="mt-0.5 text-[12px] text-text-tertiary" numberOfLines={1}>
+                  Tell me what you're in the mood for
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={15}
+                color="#5A6070"
+                accessible={false}
+                accessibilityElementsHidden
+                aria-hidden={true}
+                importantForAccessibility="no"
+              />
+            </GlassPressable>
+          </View>
+        );
       case "for-you": {
         if (data.loading.forYou && forYouItems.length === 0) {
           return (
@@ -1285,6 +1332,21 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  askCardContent: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  askCardIcon: {
+    alignItems: "center",
+    backgroundColor: "rgba(56,189,248,0.16)",
+    borderRadius: 12,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
   root: {
     backgroundColor: "#0D0F14",
     flex: 1,

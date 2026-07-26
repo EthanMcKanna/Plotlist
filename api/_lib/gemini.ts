@@ -1,8 +1,10 @@
-// Thin fetch-based Gemini embeddings client, usable from the Worker and from
-// Node scripts (no SDK dependency). See docs/recommendations-v2.md.
+// Thin fetch-based Gemini embeddings + generation client, usable from the
+// Worker and from Node scripts (no SDK dependency). See
+// docs/recommendations-v2.md.
 
 import { normalizeVector } from "../../lib/plotlist/embeddingUtils";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "../../lib/plotlist/embeddingDoc";
+import { ApiError } from "./errors";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 // batchEmbedContents accepts up to 100 requests per call.
@@ -119,4 +121,96 @@ export async function embedTexts(texts: string[], options: EmbedOptions): Promis
 export async function embedText(text: string, options: EmbedOptions) {
   const [vector] = await embedTexts([text], options);
   return vector;
+}
+
+// ── Structured generation (Ask Plotlist) ────────────────────────────────────
+
+// The 2.5-era models 404 for this project's key ("no longer available to new
+// users", verified 2026-07-25), so Ask runs on the 3.5 fast tier.
+const GENERATION_MODEL = "gemini-3.5-flash-lite";
+const GENERATION_FALLBACK_MODEL = "gemini-3.5-flash";
+
+function extractJsonText(result: any): string {
+  const parts = result?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+    .join("");
+}
+
+// One structured-output call: system + user prompt constrained by a Gemini
+// responseSchema (OpenAPI-ish subset, uppercase type names). Retries the
+// generation once on a JSON parse failure, then surfaces a 502 the ask
+// pipeline can catch and degrade from.
+export async function generateJson<T>(args: {
+  system: string;
+  user: string;
+  schema: object;
+  maxOutputTokens?: number;
+}): Promise<T> {
+  const apiKey = resolveApiKey();
+  const body = {
+    systemInstruction: { parts: [{ text: args.system }] },
+    contents: [{ role: "user", parts: [{ text: args.user }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: args.schema,
+      temperature: 0.4,
+      maxOutputTokens: args.maxOutputTokens ?? 1024,
+    },
+  };
+
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let model = GENERATION_MODEL;
+    let response = await fetch(
+      `${GEMINI_BASE_URL}/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (response.status === 404) {
+      model = GENERATION_FALLBACK_MODEL;
+      response = await fetch(
+        `${GEMINI_BASE_URL}/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      lastError = new Error(
+        `Gemini generate failed (${response.status}): ${text.slice(0, 300)}`,
+      );
+      if (response.status === 429 || response.status >= 500) {
+        continue;
+      }
+      break;
+    }
+    const result = (await response.json()) as any;
+    const usage = result?.usageMetadata;
+    console.info(
+      "[ask] llm",
+      model,
+      `prompt=${usage?.promptTokenCount ?? "?"}`,
+      `output=${usage?.candidatesTokenCount ?? "?"}`,
+      `total=${usage?.totalTokenCount ?? "?"}`,
+    );
+    try {
+      return JSON.parse(extractJsonText(result)) as T;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw new ApiError(
+    502,
+    "ask_generation_failed",
+    "The recommendation model returned an unusable response",
+    lastError?.message,
+  );
 }
