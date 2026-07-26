@@ -142,6 +142,7 @@ import {
   resolveNotificationPreferences,
 } from "../../lib/notificationContent";
 import { getWatchInsightsForUser } from "./watch-insights";
+import { redactAllTimeInsights } from "../../lib/watchInsights";
 import { isTraktConfigured } from "./trakt";
 import {
   cancelTraktImportJob,
@@ -4472,7 +4473,9 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsed = z
       .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
       .parse(args ?? {});
-    return await getWatchInsightsForUser(user.id, parsed.utcOffsetMinutes ?? 0);
+    const insights = await getWatchInsightsForUser(user.id, parsed.utcOffsetMinutes ?? 0);
+    // Deep all-time breakdowns are Pro; year-to-date and pace stay free.
+    return userHasPro(user) ? insights : redactAllTimeInsights(insights);
   },
   "episodeProgress:getProgressForShow": async ({ args, req }) => {
     const user = await requireAuthUser(req);

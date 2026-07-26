@@ -3,6 +3,7 @@ import { describe, expect, it } from "@jest/globals";
 import {
   buildWatchInsights,
   extractShowRuntimeMinutes,
+  redactAllTimeInsights,
   WATCH_INSIGHTS_DEFAULT_RUNTIME_MINUTES,
 } from "../lib/watchInsights";
 
@@ -338,5 +339,50 @@ describe("extractShowRuntimeMinutes", () => {
     expect(extractShowRuntimeMinutes({ episode_run_time: [0, -5, 100000] })).toBeNull();
     expect(extractShowRuntimeMinutes(null)).toBeNull();
     expect(extractShowRuntimeMinutes({})).toBeNull();
+  });
+});
+
+describe("redactAllTimeInsights", () => {
+  it("strips all-time depth but keeps the free surface", () => {
+    const insights = buildWatchInsights({
+      now: NOW,
+      episodes: [
+        episode({ watchedAt: NOW - DAY, runtimeMinutes: 50 }),
+        episode({ watchedAt: NOW - 400 * DAY, episodeNumber: 2, runtimeMinutes: 50 }),
+      ],
+      shows: [SHOW],
+    });
+    const redacted = redactAllTimeInsights(insights);
+
+    // Gated sections empty out.
+    expect(redacted.allTimeLocked).toBe(true);
+    expect(redacted.monthlyActivity).toEqual([]);
+    expect(redacted.weekdayActivity).toEqual([]);
+    expect(redacted.daypartActivity).toEqual([]);
+    expect(redacted.topShows).toEqual([]);
+    expect(redacted.topGenres).toEqual([]);
+    expect(redacted.busiestDay).toBeNull();
+    expect(redacted.streaks.longest).toBe(0);
+
+    // Free surface survives untouched.
+    expect(redacted.totals).toEqual(insights.totals);
+    expect(redacted.window).toEqual(insights.window);
+    expect(redacted.yearToDate).toEqual(insights.yearToDate);
+    expect(redacted.library).toEqual(insights.library);
+    expect(redacted.reviews).toEqual(insights.reviews);
+    expect(redacted.recentEpisodes).toEqual(insights.recentEpisodes);
+    expect(redacted.streaks.current).toBe(insights.streaks.current);
+  });
+
+  it("does not mutate the source insights", () => {
+    const insights = buildWatchInsights({
+      now: NOW,
+      episodes: [episode({ watchedAt: NOW - DAY, runtimeMinutes: 50 })],
+      shows: [SHOW],
+    });
+    const monthlyBefore = insights.monthlyActivity.length;
+    redactAllTimeInsights(insights);
+    expect(insights.monthlyActivity.length).toBe(monthlyBefore);
+    expect(insights.streaks.longest).toBeGreaterThanOrEqual(1);
   });
 });

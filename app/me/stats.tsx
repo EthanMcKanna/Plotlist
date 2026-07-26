@@ -14,7 +14,9 @@ import { api } from "../../lib/plotlist/api";
 import { guardedPush } from "../../lib/navigation";
 import { formatEpisodeCode, formatShortDate, formatWatchTimeLabel } from "../../lib/format";
 import { useAuth, useQuery } from "../../lib/plotlist/react";
-import type { WatchInsights } from "../../lib/watchInsights";
+import { presentProPaywall } from "../../lib/purchases";
+import { queryClient } from "../../lib/queryClient";
+import type { WatchInsights, WatchInsightsPayload } from "../../lib/watchInsights";
 import { SHOW_BACK_BUTTON } from "../../lib/webLayout";
 
 function SectionTitle({ title, aside }: { title: string; aside?: string | null }) {
@@ -106,6 +108,60 @@ function MonthlyChart({ months }: { months: WatchInsights["monthlyActivity"] }) 
 const DAYPART_COLORS = ["#38BDF8", "#F59E0B", "#A78BFA", "#22D3EE"];
 const GENRE_COLORS = ["#38BDF8", "#22C55E", "#F59E0B", "#A78BFA", "#F472B6"];
 
+// Shown to free accounts in place of the all-time sections. A successful
+// purchase invalidates every cached query so the redacted insights refetch
+// unredacted immediately.
+function AllTimeLockedCard() {
+  const handleUnlock = async () => {
+    const outcome = await presentProPaywall();
+    if (outcome === "purchased" || outcome === "restored") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await queryClient.invalidateQueries();
+    } else if (outcome === "unavailable") {
+      guardedPush("/settings");
+    }
+  };
+
+  return (
+    <View className="mt-8">
+      <SectionTitle title="All-time insights" aside="Plotlist Pro" />
+      <GlassSurface
+        radius={12}
+        variant="surface"
+        fallbackColor="rgba(250,204,21,0.08)"
+        borderColor="rgba(250,204,21,0.22)"
+        contentStyle={{ padding: 20 }}
+      >
+        <View className="flex-row items-center gap-2">
+          <Ionicons name="lock-closed" size={14} color="#FACC15" />
+          <Text className="text-sm font-bold text-text-primary">
+            Your full watch history, unlocked
+          </Text>
+        </View>
+        <Text className="mt-2 text-xs leading-5 text-text-secondary">
+          Every month you've watched, your all-time most-watched shows and
+          genres, when you watch, and your best streak — across your whole
+          history, not just this year.
+        </Text>
+        <GlassPressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            void handleUnlock();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Unlock all-time insights with Plotlist Pro"
+          radius={10}
+          variant="prominent"
+          style={{ marginTop: 14 }}
+          contentStyle={{ alignItems: "center", paddingVertical: 11 }}
+        >
+          <Text className="text-sm font-bold text-sky-100">Unlock with Pro</Text>
+        </GlassPressable>
+      </GlassSurface>
+    </View>
+  );
+}
+
 export default function WatchStatsScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading } = useAuth();
@@ -113,7 +169,7 @@ export default function WatchStatsScreen() {
   const insights = useQuery(
     api.watchStats.getInsights,
     isAuthenticated ? { utcOffsetMinutes } : "skip",
-  ) as WatchInsights | undefined;
+  ) as WatchInsightsPayload | undefined;
 
   if (isLoading || (isAuthenticated && !insights)) {
     return (
@@ -282,7 +338,7 @@ export default function WatchStatsScreen() {
                   <StatChip
                     icon="trophy"
                     color="#22C55E"
-                    value={`${insights.streaks.longest}d`}
+                    value={insights.allTimeLocked ? "Pro" : `${insights.streaks.longest}d`}
                     label="Best streak"
                   />
                   <View className="w-px self-stretch bg-dark-border" />
@@ -295,6 +351,12 @@ export default function WatchStatsScreen() {
                 </View>
               </GlassSurface>
 
+              {/* All-time depth is Pro; free accounts get one upsell card in
+                  place of the four sections (server already redacted data). */}
+              {insights.allTimeLocked ? (
+                <AllTimeLockedCard />
+              ) : (
+                <>
               {/* Monthly pace */}
               <View className="mt-8">
                 <SectionTitle
@@ -398,6 +460,8 @@ export default function WatchStatsScreen() {
                   ))}
                 </GlassSurface>
               </View>
+                </>
+              )}
 
               {/* Library mix */}
               <View className="mt-8">

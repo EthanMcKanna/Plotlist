@@ -135,6 +135,29 @@ export type WatchInsights = {
   };
 };
 
+// The wire shape of watchStats:getInsights — identical to WatchInsights,
+// plus a flag set when the server redacted the all-time sections for a
+// free (non-Pro) account.
+export type WatchInsightsPayload = WatchInsights & { allTimeLocked?: boolean };
+
+// Server-side redaction for free accounts: deep all-time breakdowns are a
+// Plotlist Pro feature. The hero totals, pace window, current streak,
+// year-to-date (and its share cards), library mix, ratings, and recent
+// episodes stay free. Redacting here keeps gated data off the wire.
+export function redactAllTimeInsights(insights: WatchInsights): WatchInsightsPayload {
+  return {
+    ...insights,
+    streaks: { current: insights.streaks.current, longest: 0 },
+    monthlyActivity: [],
+    weekdayActivity: [],
+    daypartActivity: [],
+    topShows: [],
+    topGenres: [],
+    busiestDay: null,
+    allTimeLocked: true,
+  };
+}
+
 export type WatchInsightsEpisodeInput = {
   id?: unknown;
   showId?: unknown;
