@@ -20,6 +20,7 @@ import uploadsBlobRoute from "../api/uploads/blob";
 import calendarFeedRoute from "../api/calendar/feed";
 import revenuecatWebhookRoute from "../api/webhooks/revenuecat";
 import { initDb } from "../api/_lib/db";
+import { applyLinkPreview, getLinkPreview, isPreviewablePath } from "./link-previews";
 import { runNodeRoute, type NodeStyleHandler } from "./shim";
 import { runScheduledTasks } from "./scheduled";
 import { initUploadsBucket, getUploadsBucket, type UploadsBucket } from "./storage";
@@ -168,7 +169,41 @@ const workerHandler = {
       }
     }
 
-    return await env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+
+    // Shareable pages (shows, profiles, lists, reviews) get their og:*/
+    // twitter:* tags rewritten with entity data so links unfurl with real
+    // titles and artwork instead of the generic site card.
+    if (
+      (request.method === "GET" || request.method === "HEAD") &&
+      isPreviewablePath(url.pathname) &&
+      assetResponse.status === 200 &&
+      (assetResponse.headers.get("content-type") ?? "").includes("text/html")
+    ) {
+      try {
+        const preview = await getLinkPreview(url.pathname);
+        if (preview) {
+          const html = applyLinkPreview(await assetResponse.text(), preview);
+          const headers = new Headers(assetResponse.headers);
+          // Body changed: the asset's validators and length no longer apply.
+          headers.delete("content-length");
+          headers.delete("etag");
+          headers.set("cache-control", "public, max-age=300");
+          return new Response(request.method === "HEAD" ? null : html, {
+            status: 200,
+            headers,
+          });
+        }
+      } catch (error) {
+        // Preview rewriting is best-effort; the plain SPA shell (with its
+        // default site-wide card) is always an acceptable fallback.
+        console.error("[worker] link preview failed", url.pathname, error);
+        Sentry.captureException(error);
+        return await env.ASSETS.fetch(request);
+      }
+    }
+
+    return assetResponse;
   },
 
   async scheduled(event: { cron: string }, env: WorkerEnv, ctx: { waitUntil(p: Promise<unknown>): void }) {

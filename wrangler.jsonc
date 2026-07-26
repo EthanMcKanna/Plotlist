@@ -14,7 +14,18 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/files/*", "/.well-known/*", "/apple-app-site-association"]
+    // Show/profile/list/review pages hit the worker so it can rewrite the
+    // og:*/twitter:* tags with entity data (worker/link-previews.ts).
+    "run_worker_first": [
+      "/api/*",
+      "/files/*",
+      "/.well-known/*",
+      "/apple-app-site-association",
+      "/show/*",
+      "/profile/*",
+      "/list/*",
+      "/review/*"
+    ]
   },
   "d1_databases": [
     {

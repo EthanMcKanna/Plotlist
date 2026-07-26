@@ -47,6 +47,12 @@
       "port": 3001
     },
     {
+      "name": "worker-api-2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "3005"],
+      "port": 3005
+    },
+    {
       "name": "rewatch-worktree-web",
       "runtimeExecutable": "bash",
       "runtimeArgs": [
