@@ -41,6 +41,9 @@ import { ApiError } from "./errors";
 import { createId } from "./ids";
 import { moderateText } from "./moderation";
 import { askPlotlist, getAskStatus } from "./ask-plotlist";
+import { searchMemory } from "./memory-search";
+import { createVibeList } from "./vibe-lists";
+import { appendVibeExclusion } from "../../lib/vibeLists";
 import { createCalendarFeedToken } from "./calendar-feed";
 import { requirePro, userHasPro } from "./pro";
 import { ensurePhoneIdentity } from "./auth";
@@ -1326,7 +1329,17 @@ async function getTmdbDetailRowsForShows(showRows: Array<typeof shows.$inferSele
 }
 
 function listToDoc(list: typeof lists.$inferSelect | null | undefined) {
-  return toDoc(list);
+  const doc = toDoc(list) as Record<string, unknown> | null;
+  if (doc) {
+    // Smart-list internals never leave the server: the stored query vector
+    // is ~1536 floats per row and the exclusion memory is owner-private.
+    // Clients get the query text + freshness for the badge/subtitle.
+    delete doc.vibeVector;
+    delete doc.vibeConstraints;
+    delete doc.vibeExcludedShowIds;
+    doc.isSmartList = Boolean(doc.vibeQuery);
+  }
+  return doc;
 }
 
 // Loads a list and applies the shared visibility rules: owners always see
@@ -6150,6 +6163,29 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     }
     return id;
   },
+  // "Save this vibe": turn an Ask Plotlist query into a smart list that
+  // refreshes as new shows are ingested. Pro-only (enforced inside).
+  "lists:createFromVibe": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        query: z.string().min(2).max(300),
+        constraints: z.object({
+          semanticQuery: z.string().min(2).max(500),
+          maxEpisodeMinutes: z.number().nullish(),
+          finishedOnly: z.boolean().optional(),
+          airingOnly: z.boolean().optional(),
+          yearMin: z.number().nullish(),
+          yearMax: z.number().nullish(),
+          excludeTerms: z.array(z.string().max(60)).max(12).optional(),
+          onMyServices: z.boolean().optional(),
+          moods: z.array(z.string().max(40)).max(8).optional(),
+        }),
+        title: z.string().max(100).optional(),
+      })
+      .parse(args ?? {});
+    return await createVibeList(user, parsed);
+  },
   "lists:update": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z
@@ -6249,7 +6285,15 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const existing = await db.select().from(listItems).where(and(eq(listItems.listId, parsed.listId), eq(listItems.showId, parsed.showId))).limit(1);
     if (existing[0]) {
       await db.delete(listItems).where(eq(listItems.id, existing[0].id));
-      await db.update(lists).set({ updatedAt: now }).where(eq(lists.id, parsed.listId));
+      const removalUpdates: Partial<typeof lists.$inferInsert> = { updatedAt: now };
+      if (listRows[0].vibeQuery) {
+        // Smart lists remember owner removals so refresh never re-adds them.
+        removalUpdates.vibeExcludedShowIds = appendVibeExclusion(
+          listRows[0].vibeExcludedShowIds,
+          parsed.showId,
+        );
+      }
+      await db.update(lists).set(removalUpdates).where(eq(lists.id, parsed.listId));
       return false;
     }
     // MAX(position) instead of COUNT: removals leave gaps, and count-based
@@ -6267,7 +6311,17 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       position: Number(maxRows[0]?.maxPosition ?? 0) + 1,
       addedAt: now,
     });
-    await db.update(lists).set({ updatedAt: now }).where(eq(lists.id, parsed.listId));
+    const addUpdates: Partial<typeof lists.$inferInsert> = { updatedAt: now };
+    if (
+      listRows[0].vibeQuery &&
+      (listRows[0].vibeExcludedShowIds ?? []).includes(parsed.showId)
+    ) {
+      // Manually re-adding a show forgives its earlier removal.
+      addUpdates.vibeExcludedShowIds = (listRows[0].vibeExcludedShowIds ?? []).filter(
+        (excludedId) => excludedId !== parsed.showId,
+      );
+    }
+    await db.update(lists).set(addUpdates).where(eq(lists.id, parsed.listId));
     return true;
   },
   "listItems:reorder": async ({ args, req }) => {
@@ -7132,6 +7186,19 @@ export const actionHandlers: Record<string, RpcHandler> = {
       })
       .parse(args ?? {});
     return await askPlotlist(user, parsed);
+  },
+  // Memory search: semantic search scoped to the caller's own watch history
+  // ("that show with the time loop I watched last winter"). Free for
+  // everyone — one embedding call, no LLM, burst-limited inside.
+  "embeddings:searchMemory": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        text: z.string().min(2).max(300),
+        utcOffsetMinutes: z.number().int().min(-840).max(840).optional(),
+      })
+      .parse(args ?? {});
+    return await searchMemory(user, parsed);
   },
   // Recs v2 surfaces: free-text semantic search and facet/category browsing.
   "embeddings:searchByVibe": async ({ args }) => {

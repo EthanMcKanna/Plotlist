@@ -47,6 +47,12 @@ export const notificationTypeValues = [
   // Pro power-tracking alerts (season premieres/returns, streaming arrivals).
   "premiere",
   "streaming",
+  // Smart lists (saved vibes): a member show just hit one of the owner's
+  // services / new shows matched the vibe on refresh.
+  "vibe_arrival",
+  "vibe_digest",
+  // Pro mini-wrapped push on the 1st of each month.
+  "monthly_recap",
 ] as const;
 export const pushPlatformValues = ["ios", "android"] as const;
 export const feedItemTypeValues = ["review", "log", "follow", "list"] as const;
@@ -511,6 +517,17 @@ export const lists = sqliteTable(
     isPublic: boolean("is_public").notNull(),
     commentsEnabled: boolean("comments_enabled").default(true).notNull(),
     coverUrl: text("cover_url"),
+    // Smart lists ("saved vibes"): non-null vibeQuery marks a list whose
+    // membership is generated from a saved Ask Plotlist query and refreshed
+    // by cron as new shows are ingested. The query vector is stored so
+    // refreshes and arrival alerts never re-embed.
+    vibeQuery: text("vibe_query"),
+    vibeConstraints: jsonb("vibe_constraints"),
+    vibeVector: vector("vibe_vector"),
+    vibeRefreshedAt: timestampMs("vibe_refreshed_at"),
+    // Shows the owner manually removed — never re-added by refresh.
+    vibeExcludedShowIds: jsonb("vibe_excluded_show_ids").$type<string[]>(),
+    vibeAlertsEnabled: boolean("vibe_alerts_enabled"),
     createdAt: timestampMs("created_at").notNull(),
     updatedAt: timestampMs("updated_at").notNull(),
   },

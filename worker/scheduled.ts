@@ -8,7 +8,12 @@ import {
   deleteExpiredReleaseEvents,
   refreshStaleTrackedReleases,
 } from "../api/_lib/release-refresh";
+import { runMonthlyRecapNotifications } from "../api/_lib/monthly-recap";
 import { runStreamingArrivalNotifications } from "../api/_lib/streaming-arrivals";
+import {
+  notifyVibeArrivalsForShows,
+  runVibeListRefreshTick,
+} from "../api/_lib/vibe-lists";
 import { refreshStaleHomeCatalogCategories } from "../api/_lib/rpc";
 import { runEmbeddingRefreshTick } from "../api/_lib/embedding-refresh";
 import { runShowIngestTick } from "../api/_lib/show-ingest";
@@ -81,8 +86,36 @@ export async function runScheduledTasks(cron: string) {
         console.error("[cron] streaming arrivals failed", error);
         return null;
       });
+      // Cross-breed: arrivals × smart-list membership → "a show matching
+      // your vibe just hit Netflix". Fed by the arrivals pass above.
+      const vibeArrivals = streaming?.arrivalDetails?.length
+        ? await notifyVibeArrivalsForShows(streaming.arrivalDetails).catch((error) => {
+            console.error("[cron] vibe arrivals failed", error);
+            return null;
+          })
+        : null;
+      // Refresh stale smart lists (append newly-ingested matches).
+      const vibeRefresh = await runVibeListRefreshTick().catch((error) => {
+        console.error("[cron] vibe list refresh failed", error);
+        return null;
+      });
+      // Pro mini-wrapped on the 1st; exits instantly away from month
+      // boundaries.
+      const recap = await runMonthlyRecapNotifications().catch((error) => {
+        console.error("[cron] monthly recap failed", error);
+        return null;
+      });
       const receipts = await checkExpoPushReceipts();
-      console.info("[cron] notifications", { digest, streaming, receipts });
+      console.info("[cron] notifications", {
+        digest,
+        streaming: streaming
+          ? { checked: streaming.checked, arrivals: streaming.arrivals, created: streaming.created, sent: streaming.sent }
+          : null,
+        vibeArrivals,
+        vibeRefresh,
+        recap,
+        receipts,
+      });
       return;
     }
 

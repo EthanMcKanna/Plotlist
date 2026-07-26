@@ -63,6 +63,10 @@ export type AskResult = {
   sessionId: string;
   picks: AskPick[];
   remaining: number | null;
+  // Echoed back so "Save this vibe" can persist the exact parsed query
+  // without a second LLM parse. Old clients ignore these.
+  constraints: AskConstraints;
+  displayQuery: string;
 };
 
 // ── Sessions + quota ────────────────────────────────────────────────────────
@@ -135,7 +139,7 @@ const TASTE_ANCHOR_LIMIT = 12;
 const MIN_LLM_PICKS = 3;
 const MAX_PICKS = 6;
 
-async function loadShowsByIds(ids: string[]) {
+export async function loadShowsByIds(ids: string[]) {
   const byId = new Map<string, typeof shows.$inferSelect>();
   for (const chunk of chunkForSqlParams(ids, 1)) {
     const rows = await db.select().from(shows).where(inArray(shows.id, chunk));
@@ -156,13 +160,13 @@ async function loadWatchStatusByShow(userId: string, showIds: string[]) {
   return byShow;
 }
 
-type ShowDetails = {
+export type ShowDetails = {
   episodeRunTimeMinutes: number | null;
   status: string | null;
   providerKeys: string[];
 };
 
-async function loadDetailsByShowId(
+export async function loadDetailsByShowId(
   showRows: Array<typeof shows.$inferSelect>,
 ): Promise<Map<string, ShowDetails>> {
   const byShowId = new Map<string, ShowDetails>();
@@ -326,6 +330,11 @@ export async function askPlotlist(user: UserRow, input: AskInput): Promise<AskRe
     : createAskSessionToken(user.id);
 
   const constraints = await composeConstraints(user, input);
+  const { time: timeLabel, mood: moodLabel } = chipLabels(input.chips);
+  const displayQuery =
+    input.text?.trim() ||
+    [moodLabel, timeLabel].filter(Boolean).join(" · ") ||
+    "tonight";
 
   // Retrieve: embed the query and pull a wide candidate pool. Vectorize
   // metadata filters aren't assumed — everything is post-filtered here.
@@ -342,7 +351,7 @@ export async function askPlotlist(user: UserRow, input: AskInput): Promise<AskRe
     `candidates=${matches.length}`,
   );
   if (matches.length === 0) {
-    return { sessionId, picks: [], remaining };
+    return { sessionId, picks: [], remaining, constraints, displayQuery };
   }
 
   // Load context: show rows + the user's watch states for the pool.
@@ -438,12 +447,6 @@ export async function askPlotlist(user: UserRow, input: AskInput): Promise<AskRe
     };
   });
 
-  const { time: timeLabel, mood: moodLabel } = chipLabels(input.chips);
-  const displayQuery =
-    input.text?.trim() ||
-    [moodLabel, timeLabel].filter(Boolean).join(" · ") ||
-    "tonight";
-
   const candidateIds = new Set(ranked.map((item) => item.showId));
   let orderedPicks: Array<{ showId: string; reason: string }> = [];
   if (ranked.length > 0) {
@@ -503,7 +506,7 @@ export async function askPlotlist(user: UserRow, input: AskInput): Promise<AskRe
     `pro=${isPro}`,
     `session=${hasValidSession ? "reused" : "new"}`,
   );
-  return { sessionId, picks, remaining };
+  return { sessionId, picks, remaining, constraints, displayQuery };
 }
 
 // Read-only status for the "N free asks left" pill.

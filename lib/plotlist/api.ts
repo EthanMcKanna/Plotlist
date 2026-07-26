@@ -138,6 +138,7 @@ export const api = {
   },
   lists: {
     create: ref("mutation", "lists:create"),
+    createFromVibe: ref("mutation", "lists:createFromVibe"),
     update: ref("mutation", "lists:update"),
     deleteList: ref("mutation", "lists:deleteList"),
     follow: ref("mutation", "lists:follow"),
@@ -175,6 +176,7 @@ export const api = {
     searchByVibe: ref("action", "embeddings:searchByVibe"),
     askPlotlist: ref("action", "embeddings:askPlotlist"),
     getAskStatus: ref("query", "embeddings:getAskStatus"),
+    searchMemory: ref("action", "embeddings:searchMemory"),
     getFacetBrowse: ref("action", "embeddings:getFacetBrowse"),
     getFacetPreviews: ref("action", "embeddings:getFacetPreviews"),
     getFacetShows: ref("action", "embeddings:getFacetShows"),

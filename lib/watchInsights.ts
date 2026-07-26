@@ -784,6 +784,98 @@ export function buildWatchInsights(input: BuildWatchInsightsInput): WatchInsight
   };
 }
 
+const FULL_MONTH_LABELS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+export type WatchInsightsMonthlyRecap = {
+  monthKey: string;
+  monthLabel: string;
+  year: number;
+  episodes: number;
+  minutes: number;
+  shows: number;
+  activeDays: number;
+  topShow: (WatchInsightsShowRef & { episodes: number; minutes: number }) | null;
+  topGenre: string | null;
+};
+
+// Rollup of the most recent *completed* local calendar month — powers the
+// monthly recap push on the 1st. Same tz-aware bucketing as everything else
+// in this engine (never UTC month math). Returns null when that month had no
+// watched episodes, so callers can skip the notification entirely.
+export function buildMonthlyRecap(
+  input: BuildWatchInsightsInput,
+): WatchInsightsMonthlyRecap | null {
+  const now = readNumber(input.now) ?? Date.now();
+  const utcOffsetMinutes = clampUtcOffset(input.utcOffsetMinutes);
+  const showsById = normalizeShows(input.shows ?? []);
+  const episodes = normalizeEpisodes(input.episodes ?? [], now);
+  const runtimeResolver = buildRuntimeResolver(
+    showsById,
+    input.seasonRuntimes ?? [],
+    input.showRuntimes ?? [],
+  );
+
+  const nowParts = localParts(now, utcOffsetMinutes);
+  const previousMonth = new Date(Date.UTC(nowParts.year, nowParts.monthIndex - 1, 1));
+  const year = previousMonth.getUTCFullYear();
+  const monthIndex = previousMonth.getUTCMonth();
+  const monthKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+
+  const activeDays = new Set<string>();
+  const showTotals = new Map<string, { episodes: number; minutes: number }>();
+  const genreMinutes = new Map<number, number>();
+  let totalEpisodes = 0;
+  let totalMinutes = 0;
+
+  for (const episode of episodes) {
+    const parts = localParts(episode.watchedAt, utcOffsetMinutes);
+    if (parts.monthKey !== monthKey) continue;
+    const { minutes } = runtimeResolver.resolve(episode);
+    totalEpisodes += 1;
+    totalMinutes += minutes;
+    activeDays.add(parts.dayKey);
+
+    const showEntry = showTotals.get(episode.showId) ?? { episodes: 0, minutes: 0 };
+    showEntry.episodes += 1;
+    showEntry.minutes += minutes;
+    showTotals.set(episode.showId, showEntry);
+
+    for (const genreId of showsById.get(episode.showId)?.genreIds ?? []) {
+      if (!TV_GENRE_LABELS[genreId]) continue;
+      genreMinutes.set(genreId, (genreMinutes.get(genreId) ?? 0) + minutes);
+    }
+  }
+
+  if (totalEpisodes === 0) return null;
+
+  const topShowEntry = Array.from(showTotals.entries()).sort(
+    (left, right) =>
+      right[1].episodes - left[1].episodes ||
+      right[1].minutes - left[1].minutes ||
+      left[0].localeCompare(right[0]),
+  )[0];
+  const topGenreEntry = Array.from(genreMinutes.entries()).sort(
+    (left, right) => right[1] - left[1] || left[0] - right[0],
+  )[0];
+
+  return {
+    monthKey,
+    monthLabel: FULL_MONTH_LABELS[monthIndex],
+    year,
+    episodes: totalEpisodes,
+    minutes: totalMinutes,
+    shows: showTotals.size,
+    activeDays: activeDays.size,
+    topShow: topShowEntry
+      ? { ...showRef(showsById, topShowEntry[0]), ...topShowEntry[1] }
+      : null,
+    topGenre: topGenreEntry ? TV_GENRE_LABELS[topGenreEntry[0]] ?? null : null,
+  };
+}
+
 // Extract a show-level runtime (median of TMDB's episode_run_time list) from
 // a cached details payload. Used as a fallback when no per-episode runtime is
 // cached for a show.

@@ -8,9 +8,12 @@ import {
   watchStates,
 } from "../../db/schema";
 import {
+  buildMonthlyRecap,
   buildWatchInsights,
   extractShowRuntimeMinutes,
+  type BuildWatchInsightsInput,
   type WatchInsights,
+  type WatchInsightsMonthlyRecap,
   type WatchInsightsSeasonRuntimeInput,
 } from "../../lib/watchInsights";
 import { db } from "./db";
@@ -52,10 +55,11 @@ async function getDetailPayloadsChunked(externalIds: string[]) {
   return rows;
 }
 
-export async function getWatchInsightsForUser(
+// Shared loader for every insights consumer (full stats RPC + monthly recap
+// cron): episode progress, states, reviews, show rows, and runtime sources.
+async function loadWatchInsightsInputs(
   userId: string,
-  utcOffsetMinutes: number,
-): Promise<WatchInsights> {
+): Promise<Omit<BuildWatchInsightsInput, "now" | "utcOffsetMinutes">> {
   const [episodeRows, stateRows, reviewRows] = await Promise.all([
     db
       .select({
@@ -151,13 +155,31 @@ export async function getWatchInsightsForUser(
     return runtimeMinutes !== null ? [{ externalId: row.externalId, runtimeMinutes }] : [];
   });
 
-  return buildWatchInsights({
+  return {
     episodes: episodeRows,
     watchStates: stateRows,
     reviews: reviewRows,
     shows: showRows,
     seasonRuntimes,
     showRuntimes,
-    utcOffsetMinutes,
-  });
+  };
+}
+
+export async function getWatchInsightsForUser(
+  userId: string,
+  utcOffsetMinutes: number,
+): Promise<WatchInsights> {
+  const inputs = await loadWatchInsightsInputs(userId);
+  return buildWatchInsights({ ...inputs, utcOffsetMinutes });
+}
+
+// Last completed local month's rollup for the monthly recap push. Null when
+// that month had no watched episodes.
+export async function getMonthlyRecapForUser(
+  userId: string,
+  utcOffsetMinutes: number,
+  now: number,
+): Promise<WatchInsightsMonthlyRecap | null> {
+  const inputs = await loadWatchInsightsInputs(userId);
+  return buildMonthlyRecap({ ...inputs, utcOffsetMinutes, now });
 }

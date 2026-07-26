@@ -38,6 +38,9 @@ const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   contact_joined: "people",
   premiere: "sparkles",
   streaming: "play-circle",
+  vibe_arrival: "sparkles",
+  vibe_digest: "sparkles",
+  monthly_recap: "stats-chart",
 };
 
 const typeIconColors = (accent: AccentTheme): Record<string, string> => ({
@@ -51,6 +54,9 @@ const typeIconColors = (accent: AccentTheme): Record<string, string> => ({
   contact_joined: accent.ramp[400],
   premiere: "#FACC15",
   streaming: accent.ramp[400],
+  vibe_arrival: accent.ramp[400],
+  vibe_digest: accent.ramp[400],
+  monthly_recap: "#F472B6",
 });
 
 function notificationHref(item: any): Href | null {

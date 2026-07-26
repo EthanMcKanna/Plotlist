@@ -27,8 +27,8 @@ import {
 } from "../lib/askPlotlist";
 import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
-import { useAuth, useAction, useQuery } from "../lib/plotlist/react";
-import { notifyError } from "../lib/dialogs";
+import { useAuth, useAction, useMutation, useQuery } from "../lib/plotlist/react";
+import { notify, notifyError } from "../lib/dialogs";
 import { guardedPush } from "../lib/navigation";
 import { presentProPaywall } from "../lib/purchases";
 import { STREAMING_PROVIDER_OPTIONS } from "../lib/streamingProviders";
@@ -47,6 +47,14 @@ const EXAMPLE_PROMPTS = [
   "or describe a vibe… “short sci-fi I can finish this week”",
 ];
 
+const MEMORY_EXAMPLE_PROMPTS = [
+  "“that show with the time loop I watched last winter”",
+  "“the cooking competition we binged in 2023”",
+  "“that dark mystery about a missing girl”",
+];
+
+type AskMode = "discover" | "memory";
+
 type AskPick = {
   showId: string;
   title: string;
@@ -57,10 +65,42 @@ type AskPick = {
   providerKeys: string[];
 };
 
+type AskConstraintsPayload = {
+  semanticQuery: string;
+  [key: string]: unknown;
+};
+
 type AskResult = {
   sessionId: string;
   picks: AskPick[];
   remaining: number | null;
+  // Present once the deployed worker echoes the parsed query back; old
+  // responses simply hide the save button.
+  constraints?: AskConstraintsPayload;
+  displayQuery?: string;
+};
+
+type MemoryMatch = {
+  showId: string;
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  watchedLabel: string | null;
+  status: string | null;
+};
+
+type MemoryResult = {
+  matches: MemoryMatch[];
+  windowLabel: string | null;
+};
+
+const MEMORY_STATUS_LABELS: Record<string, string> = {
+  watching: "Watching",
+  caught_up: "Caught up",
+  finished: "Finished",
+  completed: "Finished",
+  paused: "Paused",
+  dropped: "Dropped",
 };
 
 function lightHaptic() {
@@ -199,16 +239,74 @@ function PickRow({ pick, rank }: { pick: AskPick; rank: number }) {
   );
 }
 
+function MemoryRow({ match }: { match: MemoryMatch }) {
+  const statusLabel = match.status ? MEMORY_STATUS_LABELS[match.status] ?? null : null;
+  return (
+    <Pressable
+      onPress={() => {
+        lightHaptic();
+        guardedPush(`/show/${match.showId}`);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${match.title}`}
+      style={styles.pickRow}
+      className="web:transition-colors hover:bg-dark-hover active:opacity-80"
+    >
+      {match.posterUrl ? (
+        <Image
+          source={{ uri: match.posterUrl }}
+          style={styles.pickPoster}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={150}
+        />
+      ) : (
+        <View style={[styles.pickPoster, styles.pickPosterFallback]}>
+          <Ionicons name="tv-outline" size={18} color="#5A6070" />
+        </View>
+      )}
+      <View className="ml-3 flex-1">
+        <Text className="text-[15px] font-bold text-text-primary" numberOfLines={1}>
+          {match.title}
+          {match.year ? (
+            <Text className="text-[13px] font-semibold text-text-tertiary">
+              {"  "}
+              {match.year}
+            </Text>
+          ) : null}
+        </Text>
+        {match.watchedLabel || statusLabel ? (
+          <Text className="mt-1 text-[13px] text-text-secondary" numberOfLines={1}>
+            {[match.watchedLabel, statusLabel].filter(Boolean).join(" · ")}
+          </Text>
+        ) : null}
+      </View>
+      <Ionicons
+        name="chevron-forward"
+        size={16}
+        color="#5A6070"
+        accessible={false}
+        accessibilityElementsHidden
+        aria-hidden={true}
+        importantForAccessibility="no"
+      />
+    </Pressable>
+  );
+}
+
 export default function AskPlotlistScreen() {
   const accent = useAccent();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const insets = useSafeAreaInsets();
   const askPlotlist = useAction(api.embeddings.askPlotlist);
+  const searchMemory = useAction(api.embeddings.searchMemory);
+  const createFromVibe = useMutation(api.lists.createFromVibe);
   const askStatus = useQuery(
     api.embeddings.getAskStatus,
     isAuthenticated ? {} : "skip",
   ) as { isPro: boolean; remaining: number | null } | undefined;
 
+  const [mode, setMode] = useState<AskMode>("discover");
   const [time, setTime] = useState<AskTimeChipId | null>(null);
   const [mood, setMood] = useState<AskMoodChipId | null>(null);
   const [onMyServices, setOnMyServices] = useState(false);
@@ -216,6 +314,11 @@ export default function AskPlotlistScreen() {
   const [loading, setLoading] = useState(false);
   const [refiningChip, setRefiningChip] = useState<string | null>(null);
   const [result, setResult] = useState<AskResult | null>(null);
+  const [memoryResult, setMemoryResult] = useState<MemoryResult | null>(null);
+  const [savedList, setSavedList] = useState<{ listId: string; title: string } | null>(
+    null,
+  );
+  const [saving, setSaving] = useState(false);
   const [remainingOverride, setRemainingOverride] = useState<number | null | undefined>(
     undefined,
   );
@@ -255,6 +358,7 @@ export default function AskPlotlistScreen() {
           ...args,
         })) as AskResult;
         setResult(response);
+        setSavedList(null);
         setRemainingOverride(response.remaining);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
@@ -294,6 +398,65 @@ export default function AskPlotlistScreen() {
     [result, runAsk],
   );
 
+  const runMemorySearch = useCallback(async () => {
+    const query = text.trim();
+    if (busyRef.current || query.length < 2) return;
+    busyRef.current = true;
+    setLoading(true);
+    try {
+      const response = (await searchMemory({
+        text: query,
+        utcOffsetMinutes: -new Date().getTimezoneOffset(),
+      })) as MemoryResult;
+      setMemoryResult(response);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      notifyError("Couldn't search your history", "Something went wrong. Try again in a moment.");
+    } finally {
+      busyRef.current = false;
+      setLoading(false);
+    }
+  }, [searchMemory, text]);
+
+  // "Save this vibe" → a smart list that keeps updating as new shows are
+  // ingested. Pro-only server-side; the paywall handles the upsell.
+  const handleSaveVibe = useCallback(async () => {
+    if (saving || !result?.constraints) return;
+    if (savedList) {
+      guardedPush(`/list/${savedList.listId}`);
+      return;
+    }
+    lightHaptic();
+    setSaving(true);
+    try {
+      const saved = (await createFromVibe({
+        query: result.displayQuery ?? text.trim() ?? "My vibe",
+        constraints: result.constraints,
+      })) as { listId: string; added: number; title: string };
+      setSavedList({ listId: saved.listId, title: saved.title });
+      notify(
+        "Vibe saved",
+        `“${saved.title}” will keep updating as new matches are ingested.`,
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      const code = (error as { code?: string })?.code ?? "";
+      const message = String((error as Error)?.message ?? error);
+      if (code === "pro_required" || message.includes("pro_required")) {
+        const outcome = await presentProPaywall();
+        if (outcome === "purchased" || outcome === "restored") {
+          setSaving(false);
+          await handleSaveVibe();
+          return;
+        }
+      } else {
+        notifyError("Couldn't save this vibe", "Something went wrong. Try again in a moment.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [saving, savedList, result, createFromVibe, text]);
+
   if (!authLoading && !isAuthenticated) {
     return (
       <Screen>
@@ -330,7 +493,7 @@ export default function AskPlotlistScreen() {
           ) : null}
           <View className="mt-2 flex-row items-center justify-between">
             <Text className="text-[34px] font-bold text-text-primary">Ask Plotlist</Text>
-            {!isPro && typeof remaining === "number" ? (
+            {mode === "discover" && !isPro && typeof remaining === "number" ? (
               <View
                 style={[
                   styles.quotaPill,
@@ -348,63 +511,99 @@ export default function AskPlotlistScreen() {
             ) : null}
           </View>
           <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">
-            Tell me what you're in the mood for — I'll pick tonight's show.
+            {mode === "discover"
+              ? "Tell me what you're in the mood for — I'll pick tonight's show."
+              : "Describe a show you half-remember — I'll find it in your history."}
           </Text>
-        </View>
-
-        <Text className="mt-6 text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
-          Time
-        </Text>
-        <View className="mt-2 flex-row flex-wrap" style={styles.chipRow}>
-          {ASK_TIME_CHIPS.map((chip) => (
-            <Chip
-              key={chip.id}
-              label={chip.label}
-              selected={time === chip.id}
-              onPress={() => {
-                lightHaptic();
-                setTime((current) => (current === chip.id ? null : chip.id));
-              }}
-            />
-          ))}
-        </View>
-
-        <Text className="mt-4 text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
-          Mood
-        </Text>
-        <View className="mt-2 flex-row flex-wrap" style={styles.chipRow}>
-          {ASK_MOOD_CHIPS.map((chip) => (
-            <Chip
-              key={chip.id}
-              label={chip.label}
-              selected={mood === chip.id}
-              onPress={() => {
-                lightHaptic();
-                setMood((current) => (current === chip.id ? null : chip.id));
-              }}
-            />
-          ))}
         </View>
 
         <View className="mt-4 flex-row" style={styles.chipRow}>
           <Chip
-            label="Only my services"
-            icon="tv-outline"
-            selected={onMyServices}
-            accessibilityLabel="Only shows on my streaming services"
+            label="Find something new"
+            icon="sparkles-outline"
+            selected={mode === "discover"}
             onPress={() => {
               lightHaptic();
-              setOnMyServices((current) => !current);
+              setMode("discover");
+            }}
+          />
+          <Chip
+            label="Search my history"
+            icon="time-outline"
+            selected={mode === "memory"}
+            accessibilityLabel="Search shows you've already watched"
+            onPress={() => {
+              lightHaptic();
+              setMode("memory");
             }}
           />
         </View>
 
+        {mode === "discover" ? (
+          <>
+            <Text className="mt-6 text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
+              Time
+            </Text>
+            <View className="mt-2 flex-row flex-wrap" style={styles.chipRow}>
+              {ASK_TIME_CHIPS.map((chip) => (
+                <Chip
+                  key={chip.id}
+                  label={chip.label}
+                  selected={time === chip.id}
+                  onPress={() => {
+                    lightHaptic();
+                    setTime((current) => (current === chip.id ? null : chip.id));
+                  }}
+                />
+              ))}
+            </View>
+
+            <Text className="mt-4 text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
+              Mood
+            </Text>
+            <View className="mt-2 flex-row flex-wrap" style={styles.chipRow}>
+              {ASK_MOOD_CHIPS.map((chip) => (
+                <Chip
+                  key={chip.id}
+                  label={chip.label}
+                  selected={mood === chip.id}
+                  onPress={() => {
+                    lightHaptic();
+                    setMood((current) => (current === chip.id ? null : chip.id));
+                  }}
+                />
+              ))}
+            </View>
+
+            <View className="mt-4 flex-row" style={styles.chipRow}>
+              <Chip
+                label="Only my services"
+                icon="tv-outline"
+                selected={onMyServices}
+                accessibilityLabel="Only shows on my streaming services"
+                onPress={() => {
+                  lightHaptic();
+                  setOnMyServices((current) => !current);
+                }}
+              />
+            </View>
+          </>
+        ) : null}
+
         <TextInput
           value={text}
           onChangeText={setText}
-          placeholder={EXAMPLE_PROMPTS[placeholderIndex]}
+          placeholder={
+            mode === "discover"
+              ? EXAMPLE_PROMPTS[placeholderIndex]
+              : MEMORY_EXAMPLE_PROMPTS[placeholderIndex % MEMORY_EXAMPLE_PROMPTS.length]
+          }
           placeholderTextColor="#6D7484"
-          accessibilityLabel="Describe what you want to watch"
+          accessibilityLabel={
+            mode === "discover"
+              ? "Describe what you want to watch"
+              : "Describe a show you watched"
+          }
           multiline
           className="mt-5 rounded-2xl border border-dark-border bg-dark-card px-4 py-3 text-[16px] text-text-primary"
           style={[
@@ -413,17 +612,25 @@ export default function AskPlotlistScreen() {
           ]}
           returnKeyType="search"
           blurOnSubmit
-          onSubmitEditing={() => void runAsk()}
+          onSubmitEditing={() =>
+            mode === "discover" ? void runAsk() : void runMemorySearch()
+          }
         />
 
         <Pressable
           onPress={() => {
             lightHaptic();
-            void runAsk();
+            if (mode === "discover") {
+              void runAsk();
+            } else {
+              void runMemorySearch();
+            }
           }}
           disabled={anyBusy}
           accessibilityRole="button"
-          accessibilityLabel="Find me something to watch"
+          accessibilityLabel={
+            mode === "discover" ? "Find me something to watch" : "Search my watch history"
+          }
           style={[
             styles.askButton,
             { backgroundColor: accent.ramp[400] },
@@ -435,18 +642,98 @@ export default function AskPlotlistScreen() {
           {loading ? (
             <ActivityIndicator color="#0D0F14" size="small" />
           ) : (
-            <Ionicons name="sparkles" size={16} color="#0D0F14" />
+            <Ionicons
+              name={mode === "discover" ? "sparkles" : "search"}
+              size={16}
+              color="#0D0F14"
+            />
           )}
           <Text className="text-[15px] font-bold" style={styles.askButtonLabel}>
-            {loading ? "Picking…" : "Find me something"}
+            {loading
+              ? mode === "discover"
+                ? "Picking…"
+                : "Searching…"
+              : mode === "discover"
+                ? "Find me something"
+                : "Search my history"}
           </Text>
         </Pressable>
 
-        {result ? (
-          <View className="mt-8" testID="ask-results">
+        {mode === "memory" ? (
+          <Text className="mt-2 text-[11px] text-text-tertiary">
+            Searches only shows you've watched — doesn't use your asks.
+          </Text>
+        ) : null}
+
+        {mode === "memory" && memoryResult ? (
+          <View className="mt-8" testID="memory-results">
             <Text className="text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
-              Tonight's picks
+              {memoryResult.windowLabel
+                ? `From your history · ${memoryResult.windowLabel}`
+                : "From your history"}
             </Text>
+            <View className="mt-3">
+              {memoryResult.matches.length === 0 ? (
+                <EmptyState
+                  title="Nothing rang a bell"
+                  description="Try describing the plot, setting, or a character — or widen the time frame."
+                />
+              ) : (
+                memoryResult.matches.map((match) => (
+                  <MemoryRow key={match.showId} match={match} />
+                ))
+              )}
+            </View>
+          </View>
+        ) : null}
+
+        {mode === "discover" && result ? (
+          <View className="mt-8" testID="ask-results">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-[12px] font-bold uppercase tracking-wider text-text-tertiary">
+                Tonight's picks
+              </Text>
+              {result.picks.length > 0 && result.constraints ? (
+                <Pressable
+                  onPress={() => void handleSaveVibe()}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    savedList ? "Open your saved vibe list" : "Save this vibe as a smart list"
+                  }
+                  style={[
+                    styles.saveVibeButton,
+                    {
+                      backgroundColor: accent.rgba(400, 0.12),
+                      borderColor: accent.rgba(400, 0.35),
+                    },
+                    saving ? styles.askButtonBusy : null,
+                  ]}
+                  className="web:transition-opacity hover:opacity-90 active:opacity-80"
+                  testID="ask-save-vibe"
+                >
+                  {saving ? (
+                    <ActivityIndicator color={accent.ramp[400]} size="small" />
+                  ) : (
+                    <Ionicons
+                      name={savedList ? "checkmark-circle" : "bookmark-outline"}
+                      size={13}
+                      color={accent.ramp[400]}
+                      accessible={false}
+                      accessibilityElementsHidden
+                      aria-hidden={true}
+                      importantForAccessibility="no"
+                    />
+                  )}
+                  <Text
+                    className="text-[12px] font-bold"
+                    style={{ color: accent.ramp[400] }}
+                  >
+                    {savedList ? "View list" : "Save this vibe"}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
             <View className="mt-3">
               {result.picks.length === 0 ? (
                 <EmptyState
@@ -565,6 +852,15 @@ const styles = StyleSheet.create({
   quotaPill: {
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  saveVibeButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 5,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },

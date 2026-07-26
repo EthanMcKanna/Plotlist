@@ -1,6 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 
 import {
+  listItems,
+  lists,
   showNotificationMutes,
   showProviderAvailability,
   shows,
@@ -62,13 +64,28 @@ export async function runStreamingArrivalNotifications(
   now = Date.now(),
   limit = 150,
 ) {
-  const watchlistShowRows = await db
-    .selectDistinct({ showId: watchStates.showId })
-    .from(watchStates)
-    .where(eq(watchStates.status, "watchlist" as any));
-  const watchlistShowIds = watchlistShowRows.map((row) => row.showId);
+  // Tracked pool = watchlisted shows ∪ smart-list members. Smart-list shows
+  // must be availability-diffed too or a vibe match nobody watchlisted would
+  // never register as "arriving".
+  const [watchlistShowRows, vibeListShowRows] = await Promise.all([
+    db
+      .selectDistinct({ showId: watchStates.showId })
+      .from(watchStates)
+      .where(eq(watchStates.status, "watchlist" as any)),
+    db
+      .selectDistinct({ showId: listItems.showId })
+      .from(listItems)
+      .innerJoin(lists, eq(listItems.listId, lists.id))
+      .where(isNotNull(lists.vibeQuery)),
+  ]);
+  const watchlistShowIds = Array.from(
+    new Set([
+      ...watchlistShowRows.map((row) => row.showId),
+      ...vibeListShowRows.map((row) => row.showId),
+    ]),
+  );
   if (watchlistShowIds.length === 0) {
-    return { checked: 0, arrivals: 0, created: 0, sent: 0 };
+    return { checked: 0, arrivals: 0, created: 0, sent: 0, arrivalDetails: [] };
   }
 
   const showRows: Array<
@@ -142,7 +159,7 @@ export async function runStreamingArrivalNotifications(
     })
     .slice(0, limit);
   if (candidates.length === 0) {
-    return { checked: 0, arrivals: 0, created: 0, sent: 0 };
+    return { checked: 0, arrivals: 0, created: 0, sent: 0, arrivalDetails: [] };
   }
 
   const arrivals: Array<{ showId: string; title: string; newKeys: string[] }> = [];
@@ -189,7 +206,13 @@ export async function runStreamingArrivalNotifications(
     }
   }
   if (arrivals.length === 0) {
-    return { checked: candidates.length, arrivals: 0, created: 0, sent: 0 };
+    return {
+      checked: candidates.length,
+      arrivals: 0,
+      created: 0,
+      sent: 0,
+      arrivalDetails: [],
+    };
   }
 
   const arrivalShowIds = arrivals.map((arrival) => arrival.showId);
@@ -272,5 +295,12 @@ export async function runStreamingArrivalNotifications(
   }
 
   const result = await createNotificationsAndPush(inputs);
-  return { checked: candidates.length, arrivals: arrivals.length, ...result };
+  return {
+    checked: candidates.length,
+    arrivals: arrivals.length,
+    ...result,
+    // Every newly-arrived show (regardless of who watchlisted it) — consumed
+    // by the smart-list vibe-arrival hook in worker/scheduled.ts.
+    arrivalDetails: arrivals,
+  };
 }

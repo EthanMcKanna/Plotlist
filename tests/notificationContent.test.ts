@@ -15,6 +15,10 @@ import {
   planPushesForRecipient,
   buildPremiereNotificationContent,
   buildStreamingArrivalNotificationContent,
+  buildVibeArrivalNotificationContent,
+  buildVibeDigestNotificationContent,
+  buildMonthlyRecapNotificationContent,
+  getUtcOffsetMinutesForTimezone,
   resolveDigestHour,
   resolveNotificationPreferences,
 } from "../lib/notificationContent";
@@ -28,6 +32,7 @@ describe("resolveNotificationPreferences", () => {
       comments: true,
       premieres: true,
       streaming: true,
+      recaps: true,
     });
   });
 
@@ -39,6 +44,7 @@ describe("resolveNotificationPreferences", () => {
       comments: true,
       premieres: true,
       streaming: true,
+      recaps: true,
     });
   });
 });
@@ -274,5 +280,107 @@ describe("planPushesForRecipient", () => {
     ]);
     expect(planned).toHaveLength(1);
     expect(planned[0].body).toBe("You have 4 new notifications.");
+  });
+});
+
+describe("smart list + recap notification content", () => {
+  it("maps the new types to categories", () => {
+    expect(categoryForNotificationType("vibe_arrival")).toBe("streaming");
+    expect(categoryForNotificationType("vibe_digest")).toBe("streaming");
+    expect(categoryForNotificationType("monthly_recap")).toBe("recaps");
+  });
+
+  it("builds a vibe arrival with a per-provider dedupe key", () => {
+    const content = buildVibeArrivalNotificationContent({
+      listId: "list_1",
+      showId: "show_1",
+      showTitle: "Dark",
+      vibeQuery: "cozy sci-fi",
+      providerLabels: ["Netflix"],
+      providerKeys: ["netflix"],
+    });
+    expect(content).not.toBeNull();
+    expect(content!.title).toContain("cozy sci-fi");
+    expect(content!.body).toContain("Dark");
+    expect(content!.body).toContain("Netflix");
+    expect(content!.dedupeKey).toBe("vibe_arrival:list_1:show_1:netflix");
+    expect(
+      buildVibeArrivalNotificationContent({
+        listId: "list_1",
+        showId: "show_1",
+        showTitle: "Dark",
+        vibeQuery: "cozy sci-fi",
+        providerLabels: [],
+        providerKeys: [],
+      }),
+    ).toBeNull();
+  });
+
+  it("builds a vibe digest capped at one per list per day", () => {
+    const content = buildVibeDigestNotificationContent({
+      listId: "list_1",
+      listTitle: "Cozy sci-fi",
+      vibeQuery: "cozy sci-fi",
+      addedTitles: ["Severance", "Silo", "Dark", "Counterpart"],
+      localDate: "2026-07-25",
+    });
+    expect(content).not.toBeNull();
+    expect(content!.title).toBe("4 new shows match “cozy sci-fi”");
+    expect(content!.body).toContain("Severance, Silo, Dark and 1 more");
+    expect(content!.dedupeKey).toBe("vibe_digest:list_1:2026-07-25");
+    expect(
+      buildVibeDigestNotificationContent({
+        listId: "list_1",
+        listTitle: "Cozy sci-fi",
+        vibeQuery: "cozy sci-fi",
+        addedTitles: [],
+        localDate: "2026-07-25",
+      }),
+    ).toBeNull();
+  });
+
+  it("builds a monthly recap keyed to the month", () => {
+    const content = buildMonthlyRecapNotificationContent({
+      monthKey: "2026-06",
+      monthLabel: "June",
+      episodes: 42,
+      minutes: 1830,
+      shows: 9,
+      topShowTitle: "Severance",
+    });
+    expect(content).not.toBeNull();
+    expect(content!.title).toBe("Your June in TV");
+    expect(content!.body).toContain("42 episodes");
+    expect(content!.body).toContain("31 hours");
+    expect(content!.body).toContain("9 shows");
+    expect(content!.body).toContain("Severance");
+    expect(content!.dedupeKey).toBe("monthly_recap:2026-06");
+    expect(
+      buildMonthlyRecapNotificationContent({
+        monthKey: "2026-06",
+        monthLabel: "June",
+        episodes: 0,
+        minutes: 0,
+        shows: 0,
+        topShowTitle: null,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("getUtcOffsetMinutesForTimezone", () => {
+  it("computes offsets including DST and half-hour zones", () => {
+    const july = new Date(Date.UTC(2026, 6, 15, 12, 0, 0));
+    expect(getUtcOffsetMinutesForTimezone("UTC", july)).toBe(0);
+    expect(getUtcOffsetMinutesForTimezone("America/New_York", july)).toBe(-240);
+    expect(getUtcOffsetMinutesForTimezone("Asia/Kolkata", july)).toBe(330);
+    const january = new Date(Date.UTC(2026, 0, 15, 12, 0, 0));
+    expect(getUtcOffsetMinutesForTimezone("America/New_York", january)).toBe(-300);
+  });
+
+  it("returns null for missing or bogus timezones", () => {
+    const now = new Date(Date.UTC(2026, 6, 15));
+    expect(getUtcOffsetMinutesForTimezone(null, now)).toBeNull();
+    expect(getUtcOffsetMinutesForTimezone("Not/AZone", now)).toBeNull();
   });
 });

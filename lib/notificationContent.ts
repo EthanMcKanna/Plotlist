@@ -12,6 +12,7 @@ export const NOTIFICATION_CATEGORIES = [
   "comments",
   "premieres",
   "streaming",
+  "recaps",
 ] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
@@ -25,7 +26,10 @@ export type NotificationType =
   | "list_follow"
   | "contact_joined"
   | "premiere"
-  | "streaming";
+  | "streaming"
+  | "vibe_arrival"
+  | "vibe_digest"
+  | "monthly_recap";
 
 export type NotificationPreferences = Record<NotificationCategory, boolean>;
 
@@ -73,6 +77,12 @@ const CATEGORY_BY_TYPE: Record<NotificationType, NotificationCategory> = {
   contact_joined: "follows",
   premiere: "premieres",
   streaming: "streaming",
+  // Smart-list alerts ride the streaming toggle — they're the same "on your
+  // services" moment, just discovered via a saved vibe instead of the
+  // watchlist.
+  vibe_arrival: "streaming",
+  vibe_digest: "streaming",
+  monthly_recap: "recaps",
 };
 
 export function categoryForNotificationType(type: NotificationType): NotificationCategory {
@@ -150,6 +160,48 @@ export function getLocalDateStringForTimezone(
       month: "2-digit",
       day: "2-digit",
     }).format(now);
+  } catch {
+    return null;
+  }
+}
+
+// Minutes east of UTC for an IANA timezone at a given instant — the same
+// convention as the client's `-new Date().getTimezoneOffset()`. Lets crons
+// hand tz-aware engines (lib/watchInsights.ts) an offset derived from the
+// timezone stored on push tokens.
+export function getUtcOffsetMinutesForTimezone(
+  timezone: string | null | undefined,
+  now: Date,
+): number | null {
+  if (!timezone) {
+    return null;
+  }
+  try {
+    // Truncate to the minute first — formatted parts drop seconds, so the
+    // subtraction below must compare minute-aligned instants.
+    const minuteAligned = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(minuteAligned);
+    const read = (type: string) =>
+      Number(parts.find((part) => part.type === type)?.value ?? NaN);
+    const localAsUtc = Date.UTC(
+      read("year"),
+      read("month") - 1,
+      read("day"),
+      read("hour") % 24,
+      read("minute"),
+    );
+    if (!Number.isFinite(localAsUtc)) {
+      return null;
+    }
+    return Math.round((localAsUtc - minuteAligned.getTime()) / 60_000);
   } catch {
     return null;
   }
@@ -275,6 +327,76 @@ export function buildStreamingArrivalNotificationContent(args: {
     title: "Now streaming",
     body: `${args.showTitle} just arrived on ${labels}. It's on your watchlist.`,
     dedupeKey: `streaming:${args.showId}:${[...args.providerKeys].sort().join("+")}`,
+  };
+}
+
+// Smart-list arrival: a show that matches one of the owner's saved vibes
+// just landed on one of their services. Membership in the smart list is the
+// match signal (no similarity thresholding at alert time).
+export function buildVibeArrivalNotificationContent(args: {
+  listId: string;
+  showId: string;
+  showTitle: string;
+  vibeQuery: string;
+  providerLabels: string[];
+  providerKeys: string[];
+}): { title: string; body: string; dedupeKey: string } | null {
+  if (args.providerLabels.length === 0) {
+    return null;
+  }
+  const labels =
+    args.providerLabels.length === 1
+      ? args.providerLabels[0]
+      : `${args.providerLabels.slice(0, -1).join(", ")} and ${args.providerLabels.at(-1)}`;
+  return {
+    title: `Your “${args.vibeQuery}” vibe just landed`,
+    body: `${args.showTitle} — a match for your saved vibe — just hit ${labels}.`,
+    dedupeKey: `vibe_arrival:${args.listId}:${args.showId}:${[...args.providerKeys].sort().join("+")}`,
+  };
+}
+
+// Smart-list refresh digest: new shows matched a saved vibe. At most one per
+// list per local day via the dedupe key.
+export function buildVibeDigestNotificationContent(args: {
+  listId: string;
+  listTitle: string;
+  vibeQuery: string;
+  addedTitles: string[];
+  localDate: string;
+}): { title: string; body: string; dedupeKey: string } | null {
+  const titles = args.addedTitles.filter((title) => title.trim().length > 0);
+  if (titles.length === 0) {
+    return null;
+  }
+  const preview = titles.slice(0, 3).join(", ");
+  const extra = titles.length > 3 ? ` and ${titles.length - 3} more` : "";
+  return {
+    title: `${titles.length === 1 ? "A new show matches" : `${titles.length} new shows match`} “${args.vibeQuery}”`,
+    body: `${preview}${extra} just joined ${args.listTitle}.`,
+    dedupeKey: `vibe_digest:${args.listId}:${args.localDate}`,
+  };
+}
+
+// Pro mini-wrapped on the 1st: last month's totals, deep-linking to /me/stats.
+export function buildMonthlyRecapNotificationContent(args: {
+  monthKey: string;
+  monthLabel: string;
+  episodes: number;
+  minutes: number;
+  shows: number;
+  topShowTitle: string | null;
+}): { title: string; body: string; dedupeKey: string } | null {
+  if (args.episodes <= 0) {
+    return null;
+  }
+  const hours = Math.round(args.minutes / 60);
+  const timePhrase = hours >= 1 ? `${hours} hour${hours === 1 ? "" : "s"}` : `${args.minutes} minutes`;
+  const showsPhrase = `${args.shows} show${args.shows === 1 ? "" : "s"}`;
+  const topShowPhrase = args.topShowTitle ? ` Top show: ${args.topShowTitle}.` : "";
+  return {
+    title: `Your ${args.monthLabel} in TV`,
+    body: `${args.episodes} episode${args.episodes === 1 ? "" : "s"} · ${timePhrase} across ${showsPhrase}.${topShowPhrase} See your recap.`,
+    dedupeKey: `monthly_recap:${args.monthKey}`,
   };
 }
 

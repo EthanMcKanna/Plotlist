@@ -413,7 +413,9 @@ export default function ListsScreen() {
             accent={item.isPublic ? accent.ramp[400] : LIST_ACCENTS.private}
             posters={Array.isArray(item.previewPosters) ? item.previewPosters : []}
             meta={formatListMeta(item)}
-            cornerIcon={item.isPublic ? undefined : "lock-closed"}
+            cornerIcon={
+              item.isSmartList ? "sparkles" : item.isPublic ? undefined : "lock-closed"
+            }
             width={listCardWidth}
             height={LIST_CARD_HEIGHT}
             accessibilityLabel={`Open list ${item.title}`}

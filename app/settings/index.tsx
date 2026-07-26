@@ -351,6 +351,7 @@ export default function SettingsScreen() {
     comments: true,
     streaming: true,
     premieres: true,
+    recaps: true,
     ...(notificationPrefs ?? {}),
     ...notificationOverrides,
   };
@@ -1099,6 +1100,12 @@ export default function SettingsScreen() {
               description="When a show on your watchlist premieres or comes back for a new season."
               value={resolvedNotificationPrefs.premieres}
               onChange={toggleProNotificationPref("premieres")}
+            />
+            <NotificationToggleRow
+              label="Monthly recap · Pro"
+              description="A mini-wrapped of your month in TV on the 1st."
+              value={resolvedNotificationPrefs.recaps}
+              onChange={toggleProNotificationPref("recaps")}
               isLast
             />
           </GlassSurface>

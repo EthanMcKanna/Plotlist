@@ -8,6 +8,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -49,6 +50,7 @@ import {
   useWebSheetStyle,
 } from "../../lib/webLayout";
 import { sharePlotlistLink } from "../../lib/share";
+import { useAccent } from "../../lib/appearanceStore";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import type { Id } from "../../lib/plotlist/types";
 import { PageTitle } from "../../components/PageTitle";
@@ -282,6 +284,7 @@ export default function ListScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const accent = useAccent();
   const { isAuthenticated } = useAuth();
   const listId = (typeof params.id === "string" ? params.id : "") as Id<"lists">;
   const list = useQuery(api.lists.get, { listId });
@@ -765,6 +768,30 @@ export default function ListScreen() {
                 .join(" · ")}
             </Text>
           </View>
+
+          {/* ── Smart list banner ── */}
+          {list.isSmartList ? (
+            <View
+              className="mt-3 flex-row items-center gap-2 self-start rounded-full px-3 py-1.5"
+              style={{
+                backgroundColor: accent.rgba(400, 0.12),
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: accent.rgba(400, 0.35),
+              }}
+              testID="smart-list-banner"
+            >
+              <Ionicons name="sparkles" size={13} color={accent.ramp[400]} />
+              <Text className="text-[12px] font-bold" style={{ color: accent.ramp[400] }}>
+                Smart list · updates automatically
+              </Text>
+            </View>
+          ) : null}
+          {list.isSmartList && list.vibeQuery ? (
+            <Text className="mt-2 text-[13px] leading-5 text-text-tertiary">
+              Living list for “{list.vibeQuery}” — new matches join as shows are
+              added to Plotlist. Remove a show and it stays gone.
+            </Text>
+          ) : null}
 
           {/* ── Description ── */}
           {list.description ? (
