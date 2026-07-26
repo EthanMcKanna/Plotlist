@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  findNodeHandle,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -540,6 +542,21 @@ export default function AskPlotlistScreen() {
   );
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const busyRef = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  // The input sits low on the page (below the mood grid), so iOS's automatic
+  // inset adjustment alone leaves it hidden behind the keyboard — scroll it
+  // into view explicitly once the keyboard is presenting.
+  const handleInputFocus = useCallback(() => {
+    if (Platform.OS !== "ios") return;
+    setTimeout(() => {
+      const node = findNodeHandle(inputRef.current);
+      if (node != null) {
+        scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(node, 96, true);
+      }
+    }, 120);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(
@@ -704,13 +721,15 @@ export default function AskPlotlistScreen() {
   const glowColor = isDiscover ? accent.rgba(500, 0.1) : memoryRgba(0.09);
 
   return (
-    <Screen scroll webMaxWidth={WEB_READING_MAX_WIDTH}>
+    <Screen
+      scroll
+      webMaxWidth={WEB_READING_MAX_WIDTH}
+      scrollRef={scrollRef}
+      backgroundOverlay={
+        <LinearGradient colors={[glowColor, "rgba(0,0,0,0)"]} style={styles.headerGlow} />
+      }
+    >
       <View style={{ paddingBottom: insets.bottom + 48 }} className="px-6">
-        <LinearGradient
-          colors={[glowColor, "rgba(0,0,0,0)"]}
-          style={styles.headerGlow}
-          pointerEvents="none"
-        />
         <View className="pt-1">
           {SHOW_BACK_BUTTON ? (
             <Pressable
@@ -955,8 +974,10 @@ export default function AskPlotlistScreen() {
             importantForAccessibility="no"
           />
           <TextInput
+            ref={inputRef}
             value={text}
             onChangeText={setText}
+            onFocus={handleInputFocus}
             placeholder={
               isDiscover
                 ? EXAMPLE_PROMPTS[placeholderIndex]
@@ -1266,15 +1287,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerGlow: {
-    // Large radius + low alpha keep the wash soft on desktop web, where the
-    // content column floats over the page background and hard gradient edges
-    // would read as a seam.
-    borderRadius: 48,
-    height: 260,
-    left: -24,
+    // Rendered via Screen's backgroundOverlay: full-bleed from the physical
+    // top of the screen (behind the status bar / notch), fading out before
+    // mid-page. Low alpha keeps it ambient on desktop web too.
+    height: 300,
+    left: 0,
     position: "absolute",
-    right: -24,
-    top: -12,
+    right: 0,
+    top: 0,
   },
   inputIcon: {
     left: 16,
