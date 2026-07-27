@@ -40,6 +40,8 @@ type CatchupResult = {
     storySoFar: Array<{ title: string; body: string }>;
     lastTime: string;
     keyPlayers: Array<{ name: string; note: string }>;
+    // Absent on cached v1 briefs.
+    openThreads?: string[];
   };
 };
 
@@ -287,6 +289,29 @@ export function CatchUpSheet({
                     </Text>
                     <Text className="flex-1 text-[14px] leading-5 text-text-secondary">
                       {player.note}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {brief.openThreads && brief.openThreads.length > 0 ? (
+            <View className="mt-6">
+              <Text className="text-xs font-bold uppercase tracking-widest text-text-tertiary">
+                Open questions
+              </Text>
+              <View className="mt-2 gap-2">
+                {brief.openThreads.map((thread) => (
+                  <View key={thread} className="flex-row gap-2">
+                    <Ionicons
+                      name="help-circle-outline"
+                      size={16}
+                      color={accent.ramp[400]}
+                      style={{ marginTop: 2 }}
+                    />
+                    <Text className="flex-1 text-[14px] leading-5 text-text-secondary">
+                      {thread}
                     </Text>
                   </View>
                 ))}

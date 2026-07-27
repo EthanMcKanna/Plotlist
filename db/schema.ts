@@ -666,6 +666,37 @@ export const tmdbSeasonCache = sqliteTable(
   }),
 );
 
+// Wikipedia episode-summary cache for catch-up briefs: parsed
+// {{Episode list}} ShortSummary text per (show, season). `pageTitle` null
+// marks a negative entry — no usable wiki data was found, so resolution
+// isn't retried until the row expires. externalSource/externalId identify
+// the show the same way tmdb_season_cache does.
+export const wikiEpisodeCache = sqliteTable(
+  "wiki_episode_cache",
+  {
+    id: text("id").primaryKey(),
+    externalSource: text("external_source").notNull(),
+    externalId: text("external_id").notNull(),
+    seasonNumber: integer("season_number").notNull(),
+    payload: jsonb("payload")
+      .$type<{
+        pageTitle: string | null;
+        episodes: Array<{ episodeNumber: number; title: string | null; summary: string }>;
+      }>()
+      .notNull(),
+    fetchedAt: timestampMs("fetched_at").notNull(),
+    expiresAt: timestampMs("expires_at").notNull(),
+  },
+  (table) => ({
+    externalSeasonIdx: uniqueIndex("wiki_episode_cache_external_season_idx").on(
+      table.externalSource,
+      table.externalId,
+      table.seasonNumber,
+    ),
+    expiresIdx: index("wiki_episode_cache_expires_idx").on(table.expiresAt),
+  }),
+);
+
 export const imdbRatingsCache = sqliteTable(
   "imdb_ratings_cache",
   {
@@ -705,6 +736,8 @@ export const catchupBriefs = sqliteTable(
         storySoFar: Array<{ title: string; body: string }>;
         lastTime: string;
         keyPlayers: Array<{ name: string; note: string }>;
+        // Added in catchup-v2; absent on v1 rows.
+        openThreads?: string[];
       }>()
       .notNull(),
     createdAt: timestampMs("created_at").notNull(),

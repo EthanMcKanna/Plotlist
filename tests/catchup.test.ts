@@ -87,6 +87,26 @@ describe("buildEpisodeDigest", () => {
     expect(digest).toContain("Most recent episodes");
     expect(digest).not.toContain("titles only");
   });
+
+  it("prefers the wiki summary over the TMDB overview when present", () => {
+    const digest = buildEpisodeDigest([
+      episode(1, 1, { wikiSummary: "Rex hides the ledger in the lighthouse." }),
+      episode(1, 2),
+    ]);
+    expect(digest).toContain("Rex hides the ledger in the lighthouse.");
+    expect(digest).not.toContain("Things happen in season 1 episode 1.");
+    expect(digest).toContain("Things happen in season 1 episode 2.");
+  });
+
+  it("gives wiki summaries a larger budget than TMDB overviews", () => {
+    const longText = "x".repeat(2000);
+    const wikiDigest = buildEpisodeDigest([episode(1, 1, { wikiSummary: longText })]);
+    const tmdbDigest = buildEpisodeDigest([episode(1, 1, { overview: longText })]);
+    const lineOf = (digest: string) =>
+      digest.split("\n").find((line) => line.startsWith("- S1E1"))!;
+    expect(lineOf(wikiDigest).length).toBeGreaterThan(1200);
+    expect(lineOf(tmdbDigest).length).toBeLessThan(600);
+  });
 });
 
 describe("buildCatchupPrompt", () => {
@@ -103,6 +123,19 @@ describe("buildCatchupPrompt", () => {
     expect(prompt.user).toContain("Severance (2022)");
     expect(prompt.user).toContain("The viewer stopped after S1E2.");
     expect(prompt.maxOutputTokens).toBeGreaterThan(1024);
+  });
+
+  it("keeps events data-bound while allowing entity enrichment, and demands specifics", () => {
+    const prompt = buildCatchupPrompt({
+      show,
+      episodes: [episode(1, 1), episode(1, 2)],
+      stop: { seasonNumber: 1, episodeNumber: 2 },
+    });
+    expect(prompt.system).toContain("Every EVENT you describe must come from the provided episode information");
+    expect(prompt.system).toContain("You MAY use your knowledge of this show to enrich");
+    expect(prompt.system).toContain("tensions rise");
+    expect(prompt.system).toContain("openThreads");
+    expect((prompt.schema as any).properties.openThreads).toBeDefined();
   });
 
   it("asks for a single short section on very short runs", () => {
@@ -141,6 +174,34 @@ describe("sanitizeCatchupBrief", () => {
     // A missing section title falls back rather than dropping the section.
     expect(brief!.storySoFar[1].title).toBe("The story so far");
     expect(brief!.keyPlayers).toEqual([{ name: "Mark", note: "Torn between selves." }]);
+  });
+
+  it("clamps openThreads and tolerates their absence", () => {
+    const withThreads = sanitizeCatchupBrief({
+      storySoFar: [{ title: "Arc", body: "Something happened." }],
+      lastTime: "A door opened.",
+      openThreads: [
+        "  Who is on the other side of the door?  ",
+        "",
+        42,
+        "Why did Milburn lie?",
+        "Thread 3",
+        "Thread 4",
+        "Thread 5 over the cap",
+      ],
+    });
+    expect(withThreads!.openThreads).toEqual([
+      "Who is on the other side of the door?",
+      "Why did Milburn lie?",
+      "Thread 3",
+      "Thread 4",
+    ]);
+
+    const withoutThreads = sanitizeCatchupBrief({
+      storySoFar: [{ title: "Arc", body: "Something happened." }],
+      lastTime: "A door opened.",
+    });
+    expect(withoutThreads!.openThreads).toEqual([]);
   });
 
   it("caps section and player counts", () => {

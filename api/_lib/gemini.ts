@@ -141,12 +141,15 @@ function extractJsonText(result: any): string {
 // One structured-output call: system + user prompt constrained by a Gemini
 // responseSchema (OpenAPI-ish subset, uppercase type names). Retries the
 // generation once on a JSON parse failure, then surfaces a 502 the ask
-// pipeline can catch and degrade from.
+// pipeline can catch and degrade from. `model` overrides the default fast
+// tier for callers whose output is globally cached (catch-up briefs) and so
+// can afford a stronger model per generation.
 export async function generateJson<T>(args: {
   system: string;
   user: string;
   schema: object;
   maxOutputTokens?: number;
+  model?: string;
 }): Promise<T> {
   const apiKey = resolveApiKey();
   const body = {
@@ -162,7 +165,7 @@ export async function generateJson<T>(args: {
 
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    let model = GENERATION_MODEL;
+    let model = args.model ?? GENERATION_MODEL;
     let response = await fetch(
       `${GEMINI_BASE_URL}/models/${model}:generateContent?key=${apiKey}`,
       {

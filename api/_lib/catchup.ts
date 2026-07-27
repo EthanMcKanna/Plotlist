@@ -10,6 +10,7 @@ import { catchupBriefs, episodeProgress, shows, users } from "../../db/schema";
 import {
   buildCatchupPrompt,
   CATCHUP_BRIEF_VERSION,
+  CATCHUP_DETAIL_EPISODE_COUNT,
   compareEpisodeOrder,
   episodesUpTo,
   sanitizeCatchupBrief,
@@ -31,6 +32,7 @@ import {
   seasonCacheKey,
   type CachedSeasonPayload,
 } from "./season-cache";
+import { loadWikiEpisodeSummaries } from "./wiki-episodes";
 
 type UserRow = typeof users.$inferSelect;
 
@@ -68,6 +70,11 @@ const CATCHUP_QUOTA_WINDOW_MS = 31 * 24 * 60 * 60 * 1000;
 // The most seasons we'll fetch from TMDB inline on a cache miss. Seasons
 // closest to the stop point win — they carry the recap's detail windows.
 const MAX_INLINE_SEASON_FETCHES = 8;
+
+// Briefs are globally cached per (show, episode, version), so generations
+// are rare and shared across the whole userbase — worth the full flash tier
+// over the lite default for noticeably better synthesis.
+const CATCHUP_GENERATION_MODEL = "gemini-3.5-flash";
 
 type CatchupSessionTokenPayload = {
   userId: string;
@@ -337,7 +344,7 @@ export async function getCatchupBrief(
       showId: show.id,
       stop: refs.stop,
       nextEpisode: refs.nextEpisode,
-      brief: cachedRows[0].brief,
+      brief: { openThreads: [], ...cachedRows[0].brief },
     };
   }
 
@@ -353,15 +360,44 @@ export async function getCatchupBrief(
     );
   }
 
+  // Ground the digest's detail windows in Wikipedia plot summaries — far
+  // richer than TMDB's teaser overviews. Best-effort: on any miss the brief
+  // falls back to the TMDB text per episode.
+  const detailEpisodes = episodes.slice(-CATCHUP_DETAIL_EPISODE_COUNT);
+  const tmdbNames = new Map<number, Map<number, string | null>>();
+  for (const [seasonNumber, payload] of bySeason) {
+    const names = new Map<number, string | null>();
+    for (const episode of payload.episodes) {
+      names.set(episode.episodeNumber, episode.name);
+    }
+    tmdbNames.set(seasonNumber, names);
+  }
+  const wikiSummaries = await loadWikiEpisodeSummaries({
+    externalId: show.externalId,
+    title: show.title,
+    year: show.year,
+    seasons: [...new Set(detailEpisodes.map((episode) => episode.seasonNumber))],
+    tmdbNames,
+  });
+  const groundedEpisodes = episodes.map((episode) => ({
+    ...episode,
+    wikiSummary:
+      wikiSummaries.get(episode.seasonNumber)?.get(episode.episodeNumber) ?? null,
+  }));
+  const wikiCovered = groundedEpisodes
+    .slice(-CATCHUP_DETAIL_EPISODE_COUNT)
+    .filter((episode) => episode.wikiSummary).length;
+
   let brief: CatchupBrief | null = null;
   try {
-    const raw = await generateJson<unknown>(
-      buildCatchupPrompt({
+    const raw = await generateJson<unknown>({
+      ...buildCatchupPrompt({
         show: { title: show.title, year: show.year, overview: show.overview },
-        episodes,
+        episodes: groundedEpisodes,
         stop: stopPoint,
       }),
-    );
+      model: CATCHUP_GENERATION_MODEL,
+    });
     brief = sanitizeCatchupBrief(raw);
   } catch (error) {
     console.warn("[catchup] generation failed", error);
@@ -392,6 +428,7 @@ export async function getCatchupBrief(
     show.id,
     `S${stopPoint.seasonNumber}E${stopPoint.episodeNumber}`,
     `episodes=${episodes.length}`,
+    `wiki=${wikiCovered}/${detailEpisodes.length}`,
     `ms=${Date.now() - startedAt}`,
     `pro=${isPro}`,
   );
