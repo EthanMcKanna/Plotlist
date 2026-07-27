@@ -1,144 +1,38 @@
 import { useCallback, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  RefreshControl,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Platform, Pressable, RefreshControl, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
-import { router, type Href } from "expo-router";
+import { router } from "expo-router";
 
-import { Avatar } from "../components/Avatar";
 import { EmptyState } from "../components/EmptyState";
 import { FlashList } from "../components/FlashList";
-import { LinkPressable } from "../components/LinkPressable";
 import { GlassPressable } from "../components/NativeGlass";
+import {
+  NotificationRow,
+  NotificationSkeletonList,
+  notificationHref,
+} from "../components/NotificationRow";
 import { Screen } from "../components/Screen";
-import type { AccentTheme } from "../lib/appearance";
 import { useAccent } from "../lib/appearanceStore";
-import { formatRelativeTime } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
+import {
+  notificationSections,
+  type NotificationItem,
+  type NotificationListEntry,
+} from "../lib/notificationDisplay";
 import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
 import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
 
-const TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  follow: "person-add",
-  follow_request: "person-add",
-  follow_accepted: "checkmark-circle",
-  like: "heart",
-  comment: "chatbubble-ellipses",
-  episode: "tv",
-  list_follow: "list",
-  contact_joined: "people",
-  premiere: "sparkles",
-  streaming: "play-circle",
-  vibe_arrival: "sparkles",
-  vibe_digest: "sparkles",
-  monthly_recap: "stats-chart",
-};
-
-const typeIconColors = (accent: AccentTheme): Record<string, string> => ({
-  follow: accent.ramp[400],
-  follow_request: "#F59E0B",
-  follow_accepted: "#22C55E",
-  like: "#F472B6",
-  comment: "#A78BFA",
-  episode: "#22C55E",
-  list_follow: accent.ramp[400],
-  contact_joined: accent.ramp[400],
-  premiere: "#FACC15",
-  streaming: accent.ramp[400],
-  vibe_arrival: accent.ramp[400],
-  vibe_digest: accent.ramp[400],
-  monthly_recap: "#F472B6",
-});
-
-function notificationHref(item: any): Href | null {
-  const url = item?.data?.url;
-  if (typeof url === "string" && url.startsWith("/") && url !== "/notifications") {
-    return url as Href;
-  }
-  return null;
-}
-
-function NotificationRow({
-  item,
-  onOpen,
-  onMarkRead,
-}: {
-  item: any;
-  onOpen: (item: any) => void;
-  onMarkRead: (item: any) => void;
-}) {
-  const accent = useAccent();
-  const unread = !item.readAt;
-  const href = notificationHref(item);
-  const rowClassName = `flex-row items-start gap-3 rounded-2xl px-4 py-3.5 active:bg-dark-hover hover:bg-dark-hover web:transition-colors ${
-    unread ? "bg-dark-elevated/60" : ""
-  }`;
-  const content = (
-    <>
-      {item.actor ? (
-        <Avatar
-          uri={item.actor.avatarUrl}
-          label={item.actor.displayName ?? item.actor.username}
-          size={40}
-        />
-      ) : (
-        <View className="h-10 w-10 items-center justify-center rounded-full bg-dark-elevated">
-          <Ionicons
-            name={TYPE_ICONS[item.type] ?? "notifications"}
-            size={18}
-            color={typeIconColors(accent)[item.type] ?? "#9BA1B0"}
-          />
-        </View>
-      )}
-      <View className="flex-1">
-        <Text className={`text-sm ${unread ? "font-semibold" : "font-medium"} text-text-primary`}>
-          {item.title}
-        </Text>
-        <Text className="mt-0.5 text-sm text-text-secondary" numberOfLines={2}>
-          {item.body}
-        </Text>
-        <Text className="mt-1 text-xs text-text-tertiary">
-          {formatRelativeTime(item.createdAt)}
-        </Text>
-      </View>
-      {unread ? <View className="mt-2 h-2 w-2 rounded-full bg-brand-400" /> : null}
-    </>
-  );
-  // Rows with a destination are real links on web (cmd/middle-click work);
-  // marking read stays a side effect of the press.
-  if (href) {
-    return (
-      <LinkPressable
-        href={href}
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onMarkRead(item);
-        }}
-        className={rowClassName}
-      >
-        {content}
-      </LinkPressable>
-    );
-  }
+function SectionHeader({ title }: { title: string }) {
   return (
-    <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onOpen(item);
-      }}
-      className={rowClassName}
-    >
-      {content}
-    </Pressable>
+    <View className="px-3 pb-1 pt-4">
+      <Text className="text-xs font-semibold uppercase tracking-wide text-text-tertiary">
+        {title}
+      </Text>
+    </View>
   );
 }
 
@@ -152,22 +46,51 @@ export default function NotificationsScreen() {
     loadMore,
   } = usePaginatedQuery(api.notifications.list, {}, { initialNumItems: 30 });
 
-  const markRead = useMutation(api.notifications.markRead);
-  const markAllRead = useMutation(api.notifications.markAllRead);
+  // Paginated pages are frozen in local state, so cache writes can't repaint
+  // rows on older pages. Local overrides are the row-level unread truth; the
+  // optimistic cache updates below only keep the bell badge in sync.
+  const [readOverrides, setReadOverrides] = useState<Set<string>>(() => new Set());
+  const [allReadLocally, setAllReadLocally] = useState(false);
 
-  const listContentStyle = useMemo(() => ({ paddingVertical: 12 }), []);
-
-  const markNotificationRead = useCallback(
-    (item: any) => {
-      if (!item.readAt) {
-        void markRead({ notificationId: item._id }).then(() => syncAppBadgeCount());
+  const markRead = useMutation(api.notifications.markRead).withOptimisticUpdate(
+    (localStore) => {
+      const current = localStore.getQuery(api.notifications.getUnreadCount, undefined);
+      if (typeof current === "number") {
+        localStore.setQuery(
+          api.notifications.getUnreadCount,
+          undefined,
+          Math.max(0, current - 1),
+        );
       }
     },
-    [markRead],
+  );
+  const markAllRead = useMutation(api.notifications.markAllRead).withOptimisticUpdate(
+    (localStore) => {
+      localStore.setQuery(api.notifications.getUnreadCount, undefined, 0);
+    },
+  );
+
+  const isUnread = useCallback(
+    (item: NotificationItem) =>
+      !item.readAt && !allReadLocally && !readOverrides.has(item._id),
+    [allReadLocally, readOverrides],
+  );
+
+  const markNotificationRead = useCallback(
+    (item: NotificationItem) => {
+      if (!isUnread(item)) return;
+      setReadOverrides((current) => {
+        const next = new Set(current);
+        next.add(item._id);
+        return next;
+      });
+      void markRead({ notificationId: item._id }).then(() => syncAppBadgeCount());
+    },
+    [isUnread, markRead],
   );
 
   const openNotification = useCallback(
-    (item: any) => {
+    (item: NotificationItem) => {
       markNotificationRead(item);
       const href = notificationHref(item);
       if (href) {
@@ -179,19 +102,31 @@ export default function NotificationsScreen() {
 
   const handleMarkAllRead = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAllReadLocally(true);
     void markAllRead({}).then(() => syncAppBadgeCount());
   }, [markAllRead]);
 
-  const renderItem = useCallback(
-    ({ item }: { item: any }) => (
-      <NotificationRow
-        item={item}
-        onOpen={openNotification}
-        onMarkRead={markNotificationRead}
-      />
-    ),
-    [markNotificationRead, openNotification],
+  const entries = useMemo(
+    () => notificationSections((items ?? []) as NotificationItem[]),
+    [items],
   );
+
+  const renderItem = useCallback(
+    ({ item: entry }: { item: NotificationListEntry }) =>
+      entry.kind === "header" ? (
+        <SectionHeader title={entry.title} />
+      ) : (
+        <NotificationRow
+          item={entry.item}
+          unread={isUnread(entry.item)}
+          onOpen={openNotification}
+          onMarkRead={markNotificationRead}
+        />
+      ),
+    [isUnread, markNotificationRead, openNotification],
+  );
+
+  const listContentStyle = useMemo(() => ({ paddingBottom: 24, paddingTop: 4 }), []);
 
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
@@ -257,17 +192,16 @@ export default function NotificationsScreen() {
           ) : null}
         </View>
 
-        <View className="mt-4 flex-1">
+        <View className="mt-3 flex-1">
           {status === "LoadingFirstPage" ? (
-            <View className="mt-16 items-center">
-              <ActivityIndicator color="#5A6070" />
-            </View>
-          ) : items.length > 0 ? (
+            <NotificationSkeletonList />
+          ) : entries.length > 0 ? (
             <FlashList
-              data={items}
+              data={entries}
               renderItem={renderItem}
-              keyExtractor={(item: any) => item._id}
-              estimatedItemSize={88}
+              keyExtractor={(entry: NotificationListEntry) => entry.key}
+              getItemType={(entry: NotificationListEntry) => entry.kind}
+              estimatedItemSize={72}
               contentContainerStyle={listContentStyle}
               refreshControl={
                 <RefreshControl
@@ -276,7 +210,6 @@ export default function NotificationsScreen() {
                   tintColor={accent.ramp[400]}
                 />
               }
-              ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
               onEndReached={() => {
                 if (status === "CanLoadMore") {
                   loadMore(30);

@@ -5185,12 +5185,32 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const showIds = Array.from(
       new Set(rows.map((row) => row.showId).filter((id): id is string => Boolean(id))),
     );
-    const [actorRows, showRows] = await Promise.all([
+    // Follow state powers the inline follow-back button on actor rows.
+    const [actorRows, showRows, viewerFollowRows, viewerRequestRows] = await Promise.all([
       actorIds.length > 0 ? db.select().from(users).where(inArray(users.id, actorIds)) : [],
       showIds.length > 0 ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
+      actorIds.length > 0
+        ? db
+            .select({ followeeId: follows.followeeId })
+            .from(follows)
+            .where(and(eq(follows.followerId, user.id), inArray(follows.followeeId, actorIds)))
+        : [],
+      actorIds.length > 0
+        ? db
+            .select({ targetId: followRequests.targetId })
+            .from(followRequests)
+            .where(
+              and(
+                eq(followRequests.requesterId, user.id),
+                inArray(followRequests.targetId, actorIds),
+              ),
+            )
+        : [],
     ]);
     const actorById = new Map(actorRows.map((actor) => [actor.id, actor] as const));
     const showById = new Map(showRows.map((show) => [show.id, show] as const));
+    const viewerFollowIds = new Set(viewerFollowRows.map((row) => row.followeeId));
+    const viewerRequestedIds = new Set(viewerRequestRows.map((row) => row.targetId));
 
     const page = rows.map((row) => {
       const actor = row.actorId ? actorById.get(row.actorId) : null;
@@ -5203,6 +5223,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
               username: actor.username,
               displayName: actor.displayName,
               avatarUrl: actor.avatarUrl ?? actor.image ?? null,
+              viewerFollows: viewerFollowIds.has(actor.id),
+              viewerRequested: viewerRequestedIds.has(actor.id),
             }
           : null,
         show: show ? toShowPreview(show) : null,
