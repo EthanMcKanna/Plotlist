@@ -181,6 +181,14 @@ export const api = {
     getFacetPreviews: ref("action", "embeddings:getFacetPreviews"),
     getFacetShows: ref("action", "embeddings:getFacetShows"),
   },
+  catchup: {
+    getBrief: ref("action", "catchup:getBrief"),
+    getStatus: ref("query", "catchup:getStatus"),
+  },
+  blends: {
+    getBlend: ref("action", "blends:getBlend"),
+    getStatus: ref("query", "blends:getStatus"),
+  },
   releaseCalendar: {
     refreshForMe: ref("action", "releaseCalendar:refreshForMe"),
     getHomePreview: ref("query", "releaseCalendar:getHomePreview"),

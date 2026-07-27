@@ -86,6 +86,7 @@ import {
   type EditableWatchLog,
   type LogWatchScope,
 } from "../../components/LogWatchSheet";
+import { CatchUpSheet } from "../../components/CatchUpSheet";
 import { formatWatchedDateLabel } from "../../lib/watchLogDates";
 import { ImdbLogo } from "../../components/ImdbBadge";
 import {
@@ -1025,6 +1026,7 @@ export default function ShowScreen() {
   const [newListTitle, setNewListTitle] = useState("");
   const [creatingList, setCreatingList] = useState(false);
   const [reviewSheetVisible, setReviewSheetVisible] = useState(false);
+  const [catchupVisible, setCatchupVisible] = useState(false);
   const [logSheetState, setLogSheetState] = useState<{
     scopes?: LogWatchScope[];
     initialScopeKey?: string;
@@ -2696,6 +2698,43 @@ export default function ShowScreen() {
               />
             </GlassPressable>
           </View>
+
+          {/* "Where was I?" — spoiler-safe catch-up for anyone with episode
+              progress on this show (a paused show months later is the hero
+              case, but a recap helps before any return). */}
+          {isAuthenticated && !isShowPreview && (episodeProgress?.length ?? 0) > 0 ? (
+            <View className="mt-2.5">
+              <GlassPressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setCatchupVisible(true);
+                }}
+                accessibilityLabel="Where was I? Get a spoiler-safe recap"
+                accessibilityRole="button"
+                radius={16}
+                variant="control"
+                fallbackColor="rgba(255,255,255,0.06)"
+                contentStyle={{
+                  alignItems: "center",
+                  flexDirection: "row",
+                  gap: 12,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                }}
+              >
+                <Ionicons name="sparkles" size={18} color={accent.ramp[400]} />
+                <View className="flex-1">
+                  <Text className="text-[14px] font-bold text-text-primary">
+                    Where was I?
+                  </Text>
+                  <Text className="mt-0.5 text-[12px] text-text-tertiary">
+                    Spoiler-safe recap up to your last episode
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#6B7280" />
+              </GlassPressable>
+            </View>
+          ) : null}
         </View>
 
         {/* ─── Overview ─── */}
@@ -4668,6 +4707,13 @@ export default function ShowScreen() {
         scopes={logSheetState?.scopes}
         initialScopeKey={logSheetState?.initialScopeKey}
         editLog={logSheetState?.editLog ?? null}
+      />
+
+      <CatchUpSheet
+        visible={catchupVisible}
+        onClose={() => setCatchupVisible(false)}
+        showId={showId as string}
+        showTitle={show?.title ?? "This show"}
       />
 
       <ReportModal

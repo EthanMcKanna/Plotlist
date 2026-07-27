@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -14,6 +14,7 @@ import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CatchUpSheet } from "../components/CatchUpSheet";
 import { EmptyState } from "../components/EmptyState";
 import { Screen } from "../components/Screen";
 import {
@@ -271,6 +272,16 @@ export default function ContinueScreen() {
     [setStatus],
   );
 
+  // "Where was I?" catch-up brief for a paused show.
+  const [catchupTarget, setCatchupTarget] = useState<{
+    showId: string;
+    title: string;
+  } | null>(null);
+  const handleCatchup = useCallback((entry: ContinueEntry) => {
+    lightHaptic();
+    setCatchupTarget({ showId: String(entry.showId), title: entry.show.title });
+  }, []);
+
   const showHref = useCallback(
     (entry: ContinueEntry): Href => ({
       pathname: "/show/[id]",
@@ -488,19 +499,31 @@ export default function ContinueScreen() {
                       href={showAtNextHref(entry)}
                       accessibilityLabel={`Open ${entry.show.title}. ${getPausedSubtitle(entry)}`}
                       trailing={
-                        <Pressable
-                          onPress={() => handleResume(entry)}
-                          style={styles.resumeAction}
-                          className="web:transition-opacity hover:opacity-90 active:opacity-70"
-                          accessibilityRole="button"
-                          accessibilityLabel={`Resume watching ${entry.show.title}`}
-                          hitSlop={6}
-                        >
-                          <Ionicons name="play" size={13} color="#0D0F14" />
-                          <Text className="text-[12px] font-bold" style={styles.resumeLabel}>
-                            Resume
-                          </Text>
-                        </Pressable>
+                        <>
+                          <Pressable
+                            onPress={() => handleCatchup(entry)}
+                            style={styles.catchupAction}
+                            className="web:transition-opacity hover:opacity-90 active:opacity-70"
+                            accessibilityRole="button"
+                            accessibilityLabel={`Where was I in ${entry.show.title}?`}
+                            hitSlop={6}
+                          >
+                            <Ionicons name="sparkles" size={14} color="#FBBF24" />
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleResume(entry)}
+                            style={styles.resumeAction}
+                            className="web:transition-opacity hover:opacity-90 active:opacity-70"
+                            accessibilityRole="button"
+                            accessibilityLabel={`Resume watching ${entry.show.title}`}
+                            hitSlop={6}
+                          >
+                            <Ionicons name="play" size={13} color="#0D0F14" />
+                            <Text className="text-[12px] font-bold" style={styles.resumeLabel}>
+                              Resume
+                            </Text>
+                          </Pressable>
+                        </>
                       }
                     />
                   ))}
@@ -536,6 +559,13 @@ export default function ContinueScreen() {
           </>
         )}
       </View>
+
+      <CatchUpSheet
+        visible={catchupTarget !== null}
+        onClose={() => setCatchupTarget(null)}
+        showId={catchupTarget?.showId ?? ""}
+        showTitle={catchupTarget?.title ?? ""}
+      />
     </Screen>
   );
 }
@@ -582,6 +612,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(245,158,11,0.9)",
     borderRadius: 999,
+    height: 32,
+    justifyContent: "center",
+    marginLeft: 10,
+    width: 32,
+  },
+  catchupAction: {
+    alignItems: "center",
+    backgroundColor: "rgba(251,191,36,0.12)",
+    borderColor: "rgba(251,191,36,0.35)",
+    borderRadius: 999,
+    borderWidth: 1,
     height: 32,
     justifyContent: "center",
     marginLeft: 10,

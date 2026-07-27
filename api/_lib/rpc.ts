@@ -41,6 +41,8 @@ import { ApiError } from "./errors";
 import { createId } from "./ids";
 import { moderateText } from "./moderation";
 import { askPlotlist, getAskStatus } from "./ask-plotlist";
+import { getCatchupBrief, getCatchupStatus } from "./catchup";
+import { getBlend, getBlendStatus } from "./blend";
 import { searchMemory } from "./memory-search";
 import { createVibeList } from "./vibe-lists";
 import { appendVibeExclusion } from "../../lib/vibeLists";
@@ -5019,6 +5021,16 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     return await getAskStatus(user);
   },
+  // Catch-up brief quota pill: peek without consuming.
+  "catchup:getStatus": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await getCatchupStatus(user);
+  },
+  // Blend quota pill: peek without consuming.
+  "blends:getStatus": async ({ req }) => {
+    const user = await requireAuthUser(req);
+    return await getBlendStatus(user);
+  },
   "releaseCalendar:getHomePreview": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ today: z.string().optional() }).parse(args ?? {});
@@ -7186,6 +7198,35 @@ export const actionHandlers: Record<string, RpcHandler> = {
       })
       .parse(args ?? {});
     return await askPlotlist(user, parsed);
+  },
+  // "Where was I?" catch-up brief: spoiler-safe "previously on" up to
+  // exactly the viewer's last watched episode. Quota and sessions are
+  // enforced inside the pipeline (Pro unlimited, free users get 2 briefs a
+  // month; re-reading the same show's brief is free for 15 minutes).
+  "catchup:getBrief": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        showId: z.string().min(1),
+        seasonNumber: z.number().int().min(1).max(200).optional(),
+        episodeNumber: z.number().int().min(1).max(2000).optional(),
+        sessionId: z.string().max(500).optional(),
+      })
+      .parse(args ?? {});
+    return await getCatchupBrief(user, parsed);
+  },
+  // Blend ("For us"): shared picks for the caller + another user. Privacy
+  // and quota are enforced inside the pipeline (Pro unlimited, free users
+  // get 2 blends a month; re-running the same pair is free for 15 minutes).
+  "blends:getBlend": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({
+        userId: z.string().min(1),
+        sessionId: z.string().max(500).optional(),
+      })
+      .parse(args ?? {});
+    return await getBlend(user, parsed);
   },
   // Memory search: semantic search scoped to the caller's own watch history
   // ("that show with the time loop I watched last winter"). Free for

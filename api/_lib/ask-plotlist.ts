@@ -148,7 +148,7 @@ export async function loadShowsByIds(ids: string[]) {
   return byId;
 }
 
-async function loadWatchStatusByShow(userId: string, showIds: string[]) {
+export async function loadWatchStatusByShow(userId: string, showIds: string[]) {
   const byShow = new Map<string, string>();
   for (const chunk of chunkForSqlParams(showIds, 1)) {
     const rows = await db

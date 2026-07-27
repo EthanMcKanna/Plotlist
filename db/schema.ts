@@ -686,6 +686,39 @@ export const imdbRatingsCache = sqliteTable(
   }),
 );
 
+// "Where was I?" catch-up briefs. A brief is generated from episode data up
+// to exactly (season, episode), so it's user-independent and cached globally
+// — the Pro quota gates requests, not storage. `version` tracks the prompt/
+// schema revision (lib/catchup.ts CATCHUP_BRIEF_VERSION).
+export const catchupBriefs = sqliteTable(
+  "catchup_briefs",
+  {
+    id: text("id").primaryKey(),
+    showId: text("show_id")
+      .notNull()
+      .references(() => shows.id, { onDelete: "cascade" }),
+    seasonNumber: integer("season_number").notNull(),
+    episodeNumber: integer("episode_number").notNull(),
+    version: text("version").notNull(),
+    brief: jsonb("brief")
+      .$type<{
+        storySoFar: Array<{ title: string; body: string }>;
+        lastTime: string;
+        keyPlayers: Array<{ name: string; note: string }>;
+      }>()
+      .notNull(),
+    createdAt: timestampMs("created_at").notNull(),
+  },
+  (table) => ({
+    episodeIdx: uniqueIndex("catchup_briefs_episode_idx").on(
+      table.showId,
+      table.seasonNumber,
+      table.episodeNumber,
+      table.version,
+    ),
+  }),
+);
+
 export const tmdbImportJobs = sqliteTable(
   "tmdb_import_jobs",
   {

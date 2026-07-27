@@ -199,6 +199,19 @@ export default function FriendsScreen() {
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/blend");
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Make a blend"
+            hitSlop={8}
+            {...(Platform.OS === "web" ? { title: "Make a blend" } : null)}
+            className="h-10 w-10 items-center justify-center rounded-full border border-dark-border bg-dark-card web:transition-colors active:bg-dark-hover hover:bg-dark-hover"
+          >
+            <Ionicons name="color-wand-outline" size={17} color="#9BA1B0" />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.push("/search?mode=people");
             }}
             accessibilityRole="button"

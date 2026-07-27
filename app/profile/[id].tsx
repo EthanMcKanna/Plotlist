@@ -828,6 +828,29 @@ export default function ProfileScreen() {
                   guardedPush(`/profile/${userIdValue}/taste`);
                 }}
               />
+              {/* Blend: shared picks neither of you has watched. Only shown
+                  when a taste match exists — that's the proof both sides
+                  have a usable taste profile. */}
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  guardedPush(`/profile/${userIdValue}/blend`);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Make a blend — shared picks for you two"
+                className="mt-2.5 flex-row items-center gap-3 rounded-2xl border border-dark-border bg-dark-card px-4 py-3 active:opacity-80"
+              >
+                <Ionicons name="people" size={18} color={accent.ramp[400]} />
+                <View className="flex-1">
+                  <Text className="text-[14px] font-bold text-text-primary">
+                    Make a blend
+                  </Text>
+                  <Text className="mt-0.5 text-[12px] text-text-tertiary">
+                    Shows neither of you has seen, picked for you both
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#6B7280" />
+              </Pressable>
             </View>
           ) : null}
 
