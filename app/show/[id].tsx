@@ -47,10 +47,12 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
+  Easing,
   useSharedValue,
   useAnimatedStyle,
   useAnimatedRef,
   useAnimatedScrollHandler,
+  withSpring,
   withTiming,
   runOnJS,
   interpolate,
@@ -132,6 +134,18 @@ const BACKDROP_HEIGHT = SHOW_BACKDROP_HEIGHT;
 const WEB_SHOW_DETAIL_MAX_WIDTH = SHOW_DETAIL_MAX_WIDTH;
 const DISMISS_THRESHOLD = 120;
 const DISMISS_VELOCITY = 500;
+// A flick is judged by where it would *land*, not by how far it has travelled
+// when the finger lifts — same feel as iOS sheet dismissal. 0.15s of projected
+// deceleration is the value UIKit's own scroll projection approximates.
+const DISMISS_PROJECTION_SECONDS = 0.15;
+// Snap-back uses a spring (settles with a little weight) while dismissal uses
+// timing (must reach the edge in bounded time so the unmount isn't delayed).
+const SHEET_SNAP_SPRING = {
+  damping: 24,
+  stiffness: 280,
+  mass: 0.85,
+  overshootClamping: true,
+} as const;
 const POSTER_HEIGHT = SHOW_POSTER_HEIGHT;
 const POSTER_WIDTH = SHOW_POSTER_WIDTH;
 type WatchStatus =
@@ -1093,10 +1107,18 @@ export default function ShowScreen() {
   // the pan gesture can decide (without JS-thread lag) whether the list is at
   // the top and therefore free to be dragged down to dismiss.
   const sheetScrollY = useSharedValue(0);
+  // Moving zero-point for the drag. While the list still has offset to give
+  // back, this tracks the finger so the sheet begins moving at the exact
+  // instant the list reaches the top — scroll and drag become one continuous
+  // motion instead of requiring a lift-and-retouch.
+  const sheetDragOrigin = useSharedValue(0);
   const sheetScrollRef = useAnimatedRef<Animated.ScrollView>();
   const sheetScrollHandler = useAnimatedScrollHandler((e) => {
     sheetScrollY.value = e.contentOffset.y;
   });
+  // Invalidates an in-flight dismissal so its completion callback can't tear
+  // down a sheet that was reopened while the exit animation was still running.
+  const sheetDismissTokenRef = useRef(0);
   // Y offset (within the "px-5" content block, i.e. below the hero) of the
   // rating card that holds the review input, so we can scroll it clear of the
   // keyboard on focus.
@@ -1114,25 +1136,70 @@ export default function ShowScreen() {
   }, []);
 
   const openEpisodeSheet = useCallback(() => {
+    // Cancels any dismissal still animating out, so its completion callback
+    // becomes a no-op instead of clearing the episode we just opened.
+    sheetDismissTokenRef.current += 1;
     setEpisodeSheetVisible(true);
     sheetTranslateY.value = SCREEN_HEIGHT;
     sheetOverlayOpacity.value = 0;
+    sheetDragOrigin.value = 0;
+    sheetScrollY.value = 0;
     requestAnimationFrame(() => {
       sheetTranslateY.value = withTiming(0, { duration: 340 });
       sheetOverlayOpacity.value = withTiming(1, { duration: 280 });
     });
   }, []);
 
-  const closeEpisodeSheet = useCallback(() => {
-    sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 280 });
-    sheetOverlayOpacity.value = withTiming(0, { duration: 200 });
-    setTimeout(() => {
-      setEpisodeSheetVisible(false);
-      setSelectedEpisode(null);
-      setEpisodeReviewExpanded(false);
-      setEpisodeReviewText("");
-    }, 290);
+  const finishDismiss = useCallback((token: number) => {
+    if (token !== sheetDismissTokenRef.current) {
+      return;
+    }
+    setEpisodeSheetVisible(false);
+    setSelectedEpisode(null);
+    setEpisodeReviewExpanded(false);
+    setEpisodeReviewText("");
   }, []);
+
+  // Single exit path for every dismissal (button, backdrop, Escape, drag) so a
+  // flick never restarts a second, competing exit animation. `velocity` is the
+  // finger's speed at release; the sheet keeps that speed instead of visibly
+  // slowing down the moment the touch ends.
+  const dismissSheet = useCallback(
+    (velocity: number) => {
+      const token = (sheetDismissTokenRef.current += 1);
+      const remaining = Math.max(SCREEN_HEIGHT - sheetTranslateY.value, 1);
+      const duration = Math.min(
+        300,
+        Math.max(150, (remaining / Math.max(velocity, 1200)) * 1000),
+      );
+      sheetOverlayOpacity.value = withTiming(0, { duration: duration * 0.8 });
+      sheetTranslateY.value = withTiming(
+        SCREEN_HEIGHT,
+        { duration, easing: Easing.out(Easing.cubic) },
+        (finished) => {
+          if (finished) {
+            runOnJS(finishDismiss)(token);
+          }
+        },
+      );
+    },
+    [SCREEN_HEIGHT, finishDismiss],
+  );
+
+  // Arg-free wrapper: callers include `onPress={closeEpisodeSheet}`, which
+  // would otherwise hand a press event to `dismissSheet` as the velocity.
+  const closeEpisodeSheet = useCallback(() => {
+    dismissSheet(0);
+  }, [dismissSheet]);
+
+  // Drag dismissal has no button press behind it, so it confirms itself.
+  const dismissSheetByDrag = useCallback(
+    (velocity: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      dismissSheet(velocity);
+    },
+    [dismissSheet],
+  );
 
   // The episode sheet is a custom overlay (not a react-native Modal), so on
   // web it needs its own Escape-to-close wiring.
@@ -1157,46 +1224,63 @@ export default function ShowScreen() {
     opacity: sheetOverlayOpacity.value,
   }));
 
-  // Runs simultaneously with the inner ScrollView (via
-  // simultaneousWithExternalGesture) so drag-to-dismiss keeps working even when
-  // the episode has enough content to scroll. We only translate the sheet while
-  // the list is pinned to the top and the finger is moving down; otherwise the
-  // ScrollView owns the gesture and scrolls normally.
-  const episodePanGesture = Gesture.Pan()
-    .onUpdate((e) => {
-      if (sheetScrollY.value <= 0 && e.translationY > 0) {
-        sheetTranslateY.value = e.translationY;
-        sheetOverlayOpacity.value = interpolate(
-          e.translationY,
-          [0, SCREEN_HEIGHT * 0.4],
-          [1, 0],
-          Extrapolation.CLAMP,
-        );
-      } else if (sheetTranslateY.value !== 0) {
-        // Finger returned into the scrollable area — snap the sheet home so the
-        // list scrolls instead of half-dragging.
-        sheetTranslateY.value = 0;
-        sheetOverlayOpacity.value = 1;
-      }
-    })
-    .onEnd((e) => {
-      const dragged = sheetTranslateY.value;
-      if (
-        dragged > DISMISS_THRESHOLD ||
-        (e.velocityY > DISMISS_VELOCITY && dragged > 8)
-      ) {
-        sheetTranslateY.value = withTiming(SCREEN_HEIGHT, { duration: 250 });
-        sheetOverlayOpacity.value = withTiming(0, { duration: 200 });
-        runOnJS(closeEpisodeSheet)();
-      } else if (dragged !== 0) {
-        sheetTranslateY.value = withTiming(0, { duration: 250 });
-        sheetOverlayOpacity.value = withTiming(1, { duration: 150 });
-      }
-    })
-    // RNGH/Reanimated ref typings disagree; the runtime ref is correct.
-    .simultaneousWithExternalGesture(sheetScrollRef as never)
-    .activeOffsetY(12)
-    .failOffsetY(-12);
+  // The sheet's ScrollView is wrapped in its own native-gesture detector so the
+  // pan below can declare a *real* simultaneous relation with it. Passing the
+  // ScrollView's animated ref to simultaneousWithExternalGesture (the previous
+  // approach) is silently a no-op — RNGH can only relate to handlers it owns,
+  // and an Animated.ScrollView is a plain RN ScrollView underneath.
+  const sheetScrollGesture = useMemo(() => Gesture.Native(), []);
+
+  // Drag-to-dismiss. Memoized because this screen re-renders constantly as its
+  // queries resolve, and rebuilding the gesture object on every render churns
+  // the handler config underneath an in-flight drag.
+  const episodePanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .onBegin(() => {
+          sheetDragOrigin.value = 0;
+        })
+        .onUpdate((e) => {
+          // The list still has offset to give back, or the finger is heading
+          // back up: let the ScrollView own the motion and keep the drag's
+          // zero-point pinned to the finger. The handoff in either direction
+          // then happens exactly at the top, with no jump.
+          const dy = e.translationY - sheetDragOrigin.value;
+          if (sheetScrollY.value > 0 || dy <= 0) {
+            sheetDragOrigin.value = e.translationY;
+            if (sheetTranslateY.value !== 0) {
+              sheetTranslateY.value = 0;
+              sheetOverlayOpacity.value = 1;
+            }
+            return;
+          }
+          sheetTranslateY.value = dy;
+          sheetOverlayOpacity.value = interpolate(
+            dy,
+            [0, SCREEN_HEIGHT * 0.5],
+            [1, 0],
+            Extrapolation.CLAMP,
+          );
+        })
+        .onEnd((e) => {
+          const dragged = sheetTranslateY.value;
+          if (dragged <= 0) {
+            return;
+          }
+          const projected = dragged + e.velocityY * DISMISS_PROJECTION_SECONDS;
+          if (projected > DISMISS_THRESHOLD || e.velocityY > DISMISS_VELOCITY) {
+            runOnJS(dismissSheetByDrag)(Math.max(e.velocityY, 0));
+          } else {
+            sheetTranslateY.value = withSpring(0, SHEET_SNAP_SPRING);
+            sheetOverlayOpacity.value = withTiming(1, { duration: 180 });
+          }
+        })
+        .simultaneousWithExternalGesture(sheetScrollGesture)
+        // Live in both directions: the pan has to be tracking while the list
+        // scrolls up, otherwise it can't hand off at the top mid-gesture.
+        .activeOffsetY([-12, 12]),
+    [SCREEN_HEIGHT, dismissSheetByDrag, sheetScrollGesture],
+  );
 
   const seasonDetailsByNumberRef = useRef<Record<number, any>>({});
   const seasonLoadStateByNumberRef = useRef<Record<number, SeasonLoadState>>({});
@@ -3735,6 +3819,7 @@ export default function ShowScreen() {
                 {/* Solid content surface — glass stays on the nav layer only
                     (close/share, prev/next), matching the show page. */}
                 <View style={{ flex: 1, backgroundColor: "#0D0F14" }}>
+                <GestureDetector gesture={sheetScrollGesture}>
                 <Animated.ScrollView
                   ref={sheetScrollRef}
                   // flex lives in style, not className — NativeWind classes
@@ -4693,6 +4778,7 @@ export default function ShowScreen() {
                 )}
               </View>
             </Animated.ScrollView>
+                </GestureDetector>
                 </View>
               </Animated.View>
             </GestureDetector>

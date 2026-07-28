@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  findNodeHandle,
   Platform,
   Pressable,
   ScrollView,
@@ -15,11 +14,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "../components/EmptyState";
+import { GlassPressable } from "../components/NativeGlass";
+import { PageTitle } from "../components/PageTitle";
 import { Screen } from "../components/Screen";
+import { ShimmerBlock } from "../components/ShowDetailSkeleton";
 import {
   ASK_MOOD_CHIPS,
   ASK_TIME_CHIPS,
@@ -33,6 +40,7 @@ import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
 import { useAuth, useAction, useMutation, useQuery } from "../lib/plotlist/react";
 import { notify, notifyError } from "../lib/dialogs";
+import { withAlpha } from "../lib/genreExplorer";
 import { guardedPush } from "../lib/navigation";
 import { presentProPaywall } from "../lib/purchases";
 import { STREAMING_PROVIDER_OPTIONS } from "../lib/streamingProviders";
@@ -42,10 +50,13 @@ const PROVIDER_LABEL_BY_KEY = new Map(
   STREAMING_PROVIDER_OPTIONS.map((option) => [option.key, option.label] as const),
 );
 
+// Suggestions are tappable, not a rotating placeholder. A placeholder that
+// rewrites itself every few seconds moves text under the user while they're
+// reading it; these say the same thing and can actually be used.
 const EXAMPLE_PROMPTS = [
-  "a cozy mystery in a small town…",
-  "funny but smart, nothing depressing…",
-  "short sci-fi I can finish this week…",
+  "a cozy mystery in a small town",
+  "funny but smart, nothing depressing",
+  "short sci-fi I can finish this week",
 ];
 
 const MEMORY_EXAMPLE_PROMPTS = [
@@ -61,6 +72,7 @@ const MEMORY_TIME_TOKENS = ["last winter", "last month", "last year", "recently"
 // Memory mode wears a fixed warm amber (independent of the user's accent
 // theme) so the two modes read as two distinct places.
 const MEMORY_AMBER = "#F59E0B";
+const MEMORY_AMBER_TEXT = "#FBBF24";
 const memoryRgba = (alpha: number) => `rgba(245, 158, 11, ${alpha})`;
 
 const MOOD_EMOJI: Record<AskMoodChipId, string> = {
@@ -72,13 +84,15 @@ const MOOD_EMOJI: Record<AskMoodChipId, string> = {
   surprise: "🎲",
 };
 
+// `short` keeps the chip row to one line; the full label + duration still
+// reaches screen readers through accessibilityLabel.
 const TIME_META: Record<
   AskTimeChipId,
-  { icon: React.ComponentProps<typeof Ionicons>["name"]; sub: string }
+  { icon: React.ComponentProps<typeof Ionicons>["name"]; short: string; sub: string }
 > = {
-  quick: { icon: "flash", sub: "~30 min" },
-  full: { icon: "tv", sub: "~1 hour" },
-  binge: { icon: "moon", sub: "All night" },
+  quick: { icon: "flash", short: "Quick", sub: "~30m" },
+  full: { icon: "tv", short: "Full", sub: "~1h" },
+  binge: { icon: "moon", short: "Binge", sub: "all night" },
 };
 
 const REFINEMENT_ICONS: Record<string, React.ComponentProps<typeof Ionicons>["name"]> = {
@@ -141,8 +155,92 @@ const MEMORY_STATUS_META: Record<string, { label: string; color: string }> = {
   dropped: { label: "Dropped", color: "#9BA1B0" },
 };
 
+// One line of text at rest, growing to roughly four before it scrolls. iOS
+// sizes a multiline TextInput to its content between these bounds; web pins
+// it at the minimum (see the numberOfLines note on the field) and scrolls,
+// which is how every other input in the app behaves.
+const COMPOSER_MIN_HEIGHT = 48;
+const COMPOSER_MAX_HEIGHT = 132;
+
 function lightHaptic() {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}
+
+// ── Building blocks ─────────────────────────────────────────────────────────
+
+// Small uppercase group label, matching SectionHeader's `uppercase` variant.
+function GroupLabel({ children }: { children: string }) {
+  return (
+    <Text className="mb-2 text-[11px] font-bold uppercase tracking-wide text-text-tertiary">
+      {children}
+    </Text>
+  );
+}
+
+// One chip shape for every optional control on this screen — moods, lengths,
+// the services toggle, suggestions, refinements. Dynamic (selected) colors go
+// in a static style object and hover/active stay in className: a Pressable
+// with a style *function* plus className silently drops the function styles on
+// web.
+function Chip({
+  label,
+  selected = false,
+  tint,
+  icon,
+  emoji,
+  trailing,
+  onPress,
+  accessibilityLabel,
+  testID,
+}: {
+  label: string;
+  selected?: boolean;
+  tint: string;
+  icon?: React.ComponentProps<typeof Ionicons>["name"];
+  emoji?: string;
+  trailing?: string;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  testID?: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={accessibilityLabel ?? label}
+      testID={testID}
+      style={[
+        styles.chip,
+        selected
+          ? { backgroundColor: withAlpha(tint, 0.14), borderColor: withAlpha(tint, 0.55) }
+          : null,
+      ]}
+      className="web:transition-colors hover:bg-dark-hover active:opacity-80"
+    >
+      {emoji ? <Text style={styles.chipEmoji}>{emoji}</Text> : null}
+      {icon ? (
+        <Ionicons
+          name={icon}
+          size={13}
+          color={selected ? tint : "#9BA1B0"}
+          accessible={false}
+          accessibilityElementsHidden
+          aria-hidden={true}
+          importantForAccessibility="no"
+        />
+      ) : null}
+      <Text
+        className="text-[13px] font-semibold"
+        style={{ color: selected ? tint : "#C7CCD6" }}
+      >
+        {label}
+      </Text>
+      {trailing ? (
+        <Text className="text-[11px] font-semibold text-text-tertiary">{trailing}</Text>
+      ) : null}
+    </Pressable>
+  );
 }
 
 // ── Mode switcher: segmented control with a sliding, mode-colored thumb ─────
@@ -159,11 +257,18 @@ function ModeSwitch({
   const [trackWidth, setTrackWidth] = useState(0);
   const position = useSharedValue(mode === "discover" ? 0 : 1);
 
+  const segmentWidth = trackWidth > 0 ? (trackWidth - 8) / 2 : 0;
+
   useEffect(() => {
-    position.value = withTiming(mode === "discover" ? 0 : 1, { duration: 220 });
+    // Same spring as components/SegmentedControl so both controls settle
+    // identically.
+    position.value = withSpring(mode === "discover" ? 0 : 1, {
+      damping: 20,
+      stiffness: 250,
+      mass: 0.7,
+    });
   }, [mode, position]);
 
-  const segmentWidth = trackWidth > 0 ? (trackWidth - 8) / 2 : 0;
   const thumbStyle = useAnimatedStyle(
     () => ({
       transform: [{ translateX: position.value * segmentWidth }],
@@ -171,8 +276,8 @@ function ModeSwitch({
     [segmentWidth],
   );
 
-  const thumbTint = mode === "discover" ? accent.rgba(400, 0.2) : memoryRgba(0.18);
-  const thumbBorder = mode === "discover" ? accent.rgba(400, 0.55) : memoryRgba(0.5);
+  const thumbTint = mode === "discover" ? accent.rgba(400, 0.18) : memoryRgba(0.16);
+  const thumbBorder = mode === "discover" ? accent.rgba(400, 0.5) : memoryRgba(0.45);
 
   return (
     <View
@@ -184,11 +289,7 @@ function ModeSwitch({
           style={[
             styles.modeThumb,
             thumbStyle,
-            {
-              width: segmentWidth,
-              backgroundColor: thumbTint,
-              borderColor: thumbBorder,
-            },
+            { width: segmentWidth, backgroundColor: thumbTint, borderColor: thumbBorder },
           ]}
           pointerEvents="none"
         />
@@ -242,7 +343,7 @@ function ModeSwitch({
         />
         <Text
           className="text-[14px] font-bold"
-          style={{ color: mode === "memory" ? "#FBBF24" : "#9BA1B0" }}
+          style={{ color: mode === "memory" ? MEMORY_AMBER_TEXT : "#9BA1B0" }}
         >
           My history
         </Text>
@@ -256,10 +357,7 @@ function ModeSwitch({
 function Badge({ label, tone }: { label: string; tone: "watchlist" | "provider" }) {
   return (
     <View
-      style={[
-        styles.badge,
-        tone === "watchlist" ? styles.badgeWatchlist : styles.badgeProvider,
-      ]}
+      style={[styles.badge, tone === "watchlist" ? styles.badgeWatchlist : styles.badgeProvider]}
     >
       <Text
         className="text-[10px] font-bold"
@@ -276,6 +374,68 @@ function providerLabelsFor(pick: AskPick) {
     .map((key) => PROVIDER_LABEL_BY_KEY.get(key))
     .filter((label): label is string => Boolean(label))
     .slice(0, 2);
+}
+
+function PosterThumb({
+  uri,
+  style,
+  iconSize,
+}: {
+  uri: string | null;
+  style: object;
+  iconSize: number;
+}) {
+  if (!uri) {
+    return (
+      <View style={[style, styles.pickPosterFallback]}>
+        <Ionicons name="tv-outline" size={iconSize} color="#5A6070" />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      transition={150}
+    />
+  );
+}
+
+function TitleLine({
+  title,
+  year,
+  size,
+}: {
+  title: string;
+  year: number | null;
+  size: "lg" | "md";
+}) {
+  return (
+    <Text
+      className={
+        size === "lg"
+          ? "text-[17px] font-bold text-text-primary"
+          : "text-[15px] font-bold text-text-primary"
+      }
+      numberOfLines={1}
+    >
+      {title}
+      {year ? (
+        <Text
+          className={
+            size === "lg"
+              ? "text-[14px] font-semibold text-text-tertiary"
+              : "text-[13px] font-semibold text-text-tertiary"
+          }
+        >
+          {"  "}
+          {year}
+        </Text>
+      ) : null}
+    </Text>
+  );
 }
 
 // The #1 pick gets a feature treatment: bigger poster, accent ribbon, roomier
@@ -300,23 +460,9 @@ function TopPickCard({ pick, accent }: { pick: AskPick; accent: AccentTheme }) {
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       />
-      {pick.posterUrl ? (
-        <Image
-          source={{ uri: pick.posterUrl }}
-          style={styles.topPickPoster}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={150}
-        />
-      ) : (
-        <View style={[styles.topPickPoster, styles.pickPosterFallback]}>
-          <Ionicons name="tv-outline" size={22} color="#5A6070" />
-        </View>
-      )}
+      <PosterThumb uri={pick.posterUrl} style={styles.topPickPoster} iconSize={22} />
       <View className="ml-3.5 flex-1">
-        <View
-          style={[styles.topPickRibbon, { backgroundColor: accent.rgba(400, 0.18) }]}
-        >
+        <View style={[styles.topPickRibbon, { backgroundColor: accent.rgba(400, 0.18) }]}>
           <Ionicons
             name="trophy"
             size={10}
@@ -333,19 +479,10 @@ function TopPickCard({ pick, accent }: { pick: AskPick; accent: AccentTheme }) {
             Top pick
           </Text>
         </View>
-        <Text className="mt-1.5 text-[17px] font-bold text-text-primary" numberOfLines={1}>
-          {pick.title}
-          {pick.year ? (
-            <Text className="text-[14px] font-semibold text-text-tertiary">
-              {"  "}
-              {pick.year}
-            </Text>
-          ) : null}
-        </Text>
-        <Text
-          className="mt-1 text-[13px] leading-[19px] text-text-secondary"
-          numberOfLines={3}
-        >
+        <View className="mt-1.5">
+          <TitleLine title={pick.title} year={pick.year} size="lg" />
+        </View>
+        <Text className="mt-1 text-[13px] leading-[19px] text-text-secondary" numberOfLines={3}>
           {pick.reason}
         </Text>
         {pick.onWatchlist || providerLabels.length > 0 ? (
@@ -361,69 +498,57 @@ function TopPickCard({ pick, accent }: { pick: AskPick; accent: AccentTheme }) {
   );
 }
 
-function PickRow({
-  pick,
+// One row shape for both modes: discover passes a rank bubble + reason,
+// history passes the watched/status meta line.
+function ResultRow({
+  showId,
+  title,
+  year,
+  posterUrl,
   rank,
   accent,
+  reason,
+  badges,
+  meta,
 }: {
-  pick: AskPick;
-  rank: number;
-  accent: AccentTheme;
+  showId: string;
+  title: string;
+  year: number | null;
+  posterUrl: string | null;
+  rank?: number;
+  accent?: AccentTheme;
+  reason?: string;
+  badges?: React.ReactNode;
+  meta?: React.ReactNode;
 }) {
-  const providerLabels = providerLabelsFor(pick);
   return (
     <Pressable
       onPress={() => {
         lightHaptic();
-        guardedPush(`/show/${pick.showId}`);
+        guardedPush(`/show/${showId}`);
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${pick.title}`}
+      accessibilityLabel={`Open ${title}`}
       style={styles.pickRow}
       className="web:transition-colors hover:bg-dark-hover active:opacity-80"
     >
-      <View style={[styles.rankBubble, { backgroundColor: accent.rgba(400, 0.14) }]}>
-        <Text className="text-[11px] font-bold" style={{ color: accent.ramp[300] }}>
-          {rank}
-        </Text>
-      </View>
-      {pick.posterUrl ? (
-        <Image
-          source={{ uri: pick.posterUrl }}
-          style={styles.pickPoster}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={150}
-        />
-      ) : (
-        <View style={[styles.pickPoster, styles.pickPosterFallback]}>
-          <Ionicons name="tv-outline" size={18} color="#5A6070" />
+      {rank !== undefined && accent ? (
+        <View style={[styles.rankBubble, { backgroundColor: accent.rgba(400, 0.14) }]}>
+          <Text className="text-[11px] font-bold" style={{ color: accent.ramp[300] }}>
+            {rank}
+          </Text>
         </View>
-      )}
+      ) : null}
+      <PosterThumb uri={posterUrl} style={styles.pickPoster} iconSize={18} />
       <View className="ml-3 flex-1">
-        <Text className="text-[15px] font-bold text-text-primary" numberOfLines={1}>
-          {pick.title}
-          {pick.year ? (
-            <Text className="text-[13px] font-semibold text-text-tertiary">
-              {"  "}
-              {pick.year}
-            </Text>
-          ) : null}
-        </Text>
-        <Text
-          className="mt-1 text-[13px] leading-[18px] text-text-secondary"
-          numberOfLines={2}
-        >
-          {pick.reason}
-        </Text>
-        {pick.onWatchlist || providerLabels.length > 0 ? (
-          <View className="mt-1.5 flex-row flex-wrap" style={styles.badgeRow}>
-            {pick.onWatchlist ? <Badge label="On your watchlist" tone="watchlist" /> : null}
-            {providerLabels.map((label) => (
-              <Badge key={label} label={`On ${label}`} tone="provider" />
-            ))}
-          </View>
+        <TitleLine title={title} year={year} size="md" />
+        {reason ? (
+          <Text className="mt-1 text-[13px] leading-[18px] text-text-secondary" numberOfLines={2}>
+            {reason}
+          </Text>
         ) : null}
+        {meta}
+        {badges}
       </View>
       <Ionicons
         name="chevron-forward"
@@ -438,42 +563,40 @@ function PickRow({
   );
 }
 
+function PickRow({ pick, rank, accent }: { pick: AskPick; rank: number; accent: AccentTheme }) {
+  const providerLabels = providerLabelsFor(pick);
+  return (
+    <ResultRow
+      showId={pick.showId}
+      title={pick.title}
+      year={pick.year}
+      posterUrl={pick.posterUrl}
+      rank={rank}
+      accent={accent}
+      reason={pick.reason}
+      badges={
+        pick.onWatchlist || providerLabels.length > 0 ? (
+          <View className="mt-1.5 flex-row flex-wrap" style={styles.badgeRow}>
+            {pick.onWatchlist ? <Badge label="On your watchlist" tone="watchlist" /> : null}
+            {providerLabels.map((label) => (
+              <Badge key={label} label={`On ${label}`} tone="provider" />
+            ))}
+          </View>
+        ) : null
+      }
+    />
+  );
+}
+
 function MemoryRow({ match }: { match: MemoryMatch }) {
   const statusMeta = match.status ? MEMORY_STATUS_META[match.status] ?? null : null;
   return (
-    <Pressable
-      onPress={() => {
-        lightHaptic();
-        guardedPush(`/show/${match.showId}`);
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${match.title}`}
-      style={styles.pickRow}
-      className="web:transition-colors hover:bg-dark-hover active:opacity-80"
-    >
-      {match.posterUrl ? (
-        <Image
-          source={{ uri: match.posterUrl }}
-          style={styles.pickPoster}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={150}
-        />
-      ) : (
-        <View style={[styles.pickPoster, styles.pickPosterFallback]}>
-          <Ionicons name="tv-outline" size={18} color="#5A6070" />
-        </View>
-      )}
-      <View className="ml-3 flex-1">
-        <Text className="text-[15px] font-bold text-text-primary" numberOfLines={1}>
-          {match.title}
-          {match.year ? (
-            <Text className="text-[13px] font-semibold text-text-tertiary">
-              {"  "}
-              {match.year}
-            </Text>
-          ) : null}
-        </Text>
+    <ResultRow
+      showId={match.showId}
+      title={match.title}
+      year={match.year}
+      posterUrl={match.posterUrl}
+      meta={
         <View className="mt-1.5 flex-row items-center" style={styles.memoryMetaRow}>
           {match.watchedLabel ? (
             <View className="flex-row items-center" style={styles.memoryMetaItem}>
@@ -496,17 +619,34 @@ function MemoryRow({ match }: { match: MemoryMatch }) {
             </View>
           ) : null}
         </View>
+      }
+    />
+  );
+}
+
+// Mirrors the real row geometry so the list doesn't jump when picks land.
+function ResultsSkeleton() {
+  return (
+    <View testID="ask-results-skeleton">
+      <View style={[styles.topPickCard, styles.skeletonCard]}>
+        <ShimmerBlock width={66} height={99} radius={10} />
+        <View className="ml-3.5 flex-1">
+          <ShimmerBlock width={72} height={16} radius={999} />
+          <ShimmerBlock width="70%" height={17} radius={6} style={{ marginTop: 8 }} />
+          <ShimmerBlock width="100%" height={13} radius={6} style={{ marginTop: 8 }} />
+          <ShimmerBlock width="85%" height={13} radius={6} style={{ marginTop: 6 }} />
+        </View>
       </View>
-      <Ionicons
-        name="chevron-forward"
-        size={16}
-        color="#5A6070"
-        accessible={false}
-        accessibilityElementsHidden
-        aria-hidden={true}
-        importantForAccessibility="no"
-      />
-    </Pressable>
+      {[0, 1, 2].map((index) => (
+        <View key={index} style={[styles.pickRow, styles.skeletonCard]}>
+          <ShimmerBlock width={44} height={66} radius={8} />
+          <View className="ml-3 flex-1">
+            <ShimmerBlock width="60%" height={15} radius={6} />
+            <ShimmerBlock width="95%" height={13} radius={6} style={{ marginTop: 8 }} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -519,63 +659,54 @@ export default function AskPlotlistScreen() {
   const askPlotlist = useAction(api.embeddings.askPlotlist);
   const searchMemory = useAction(api.embeddings.searchMemory);
   const createFromVibe = useMutation(api.lists.createFromVibe);
-  const askStatus = useQuery(
-    api.embeddings.getAskStatus,
-    isAuthenticated ? {} : "skip",
-  ) as { isPro: boolean; remaining: number | null } | undefined;
+  const askStatus = useQuery(api.embeddings.getAskStatus, isAuthenticated ? {} : "skip") as
+    | { isPro: boolean; remaining: number | null }
+    | undefined;
 
   const [mode, setMode] = useState<AskMode>("discover");
   const [time, setTime] = useState<AskTimeChipId | null>(null);
   const [mood, setMood] = useState<AskMoodChipId | null>(null);
   const [onMyServices, setOnMyServices] = useState(false);
   const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refiningChip, setRefiningChip] = useState<string | null>(null);
   const [result, setResult] = useState<AskResult | null>(null);
   const [memoryResult, setMemoryResult] = useState<MemoryResult | null>(null);
-  const [savedList, setSavedList] = useState<{ listId: string; title: string } | null>(
-    null,
-  );
+  const [savedList, setSavedList] = useState<{ listId: string; title: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [remainingOverride, setRemainingOverride] = useState<number | null | undefined>(
-    undefined,
-  );
-  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [remainingOverride, setRemainingOverride] = useState<number | null | undefined>(undefined);
   const busyRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
+  // Set when a fresh ask/search succeeds so the results block scrolls itself
+  // into view once it has laid out. Refinements skip it — you're already
+  // looking at the list.
+  const pendingScrollRef = useRef(false);
+  const resultsYRef = useRef(0);
 
-  // The input sits low on the page (below the mood grid), so iOS's automatic
-  // inset adjustment alone leaves it hidden behind the keyboard — scroll it
-  // into view explicitly once the keyboard is presenting.
-  const handleInputFocus = useCallback(() => {
-    if (Platform.OS !== "ios") return;
-    setTimeout(() => {
-      const node = findNodeHandle(inputRef.current);
-      if (node != null) {
-        scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(node, 96, true);
-      }
-    }, 120);
+  const isPro = askStatus?.isPro === true;
+  const remaining = remainingOverride !== undefined ? remainingOverride : askStatus?.remaining ?? null;
+
+  // Reveals the results block once we know where it is. Two triggers, because
+  // neither covers both cases: the first search learns the offset from
+  // onLayout, while a repeat search that returns the same number of rows never
+  // re-lays-out and only the state effect fires. Whichever runs first with a
+  // measured offset wins; the pending flag keeps it to one scroll.
+  const scrollToResults = useCallback(() => {
+    if (!pendingScrollRef.current || resultsYRef.current <= 0) return;
+    pendingScrollRef.current = false;
+    scrollRef.current?.scrollTo({ y: Math.max(0, resultsYRef.current - 16), animated: true });
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(
-      () => setPlaceholderIndex((index) => (index + 1) % EXAMPLE_PROMPTS.length),
-      5000,
-    );
-    return () => clearInterval(interval);
-  }, []);
-
-  const isPro = askStatus?.isPro === true;
-  const remaining =
-    remainingOverride !== undefined ? remainingOverride : askStatus?.remaining ?? null;
+    if (!pendingScrollRef.current) return;
+    const timer = setTimeout(scrollToResults, 120);
+    return () => clearTimeout(timer);
+  }, [result, memoryResult, scrollToResults]);
 
   const runAsk = useCallback(
-    async (args: {
-      refinement?: string;
-      sessionId?: string;
-      excludeShowIds?: string[];
-    } = {}) => {
+    async (args: { refinement?: string; sessionId?: string; excludeShowIds?: string[] } = {}) => {
       if (busyRef.current) return;
       busyRef.current = true;
       const isRefinement = Boolean(args.refinement);
@@ -593,6 +724,7 @@ export default function AskPlotlistScreen() {
         setResult(response);
         setSavedList(null);
         setRemainingOverride(response.remaining);
+        if (!isRefinement) pendingScrollRef.current = true;
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
         const code = (error as { code?: string })?.code ?? "";
@@ -643,6 +775,7 @@ export default function AskPlotlistScreen() {
           utcOffsetMinutes: -new Date().getTimezoneOffset(),
         })) as MemoryResult;
         setMemoryResult(response);
+        pendingScrollRef.current = true;
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {
         notifyError("Couldn't search your history", "Something went wrong. Try again in a moment.");
@@ -670,10 +803,7 @@ export default function AskPlotlistScreen() {
         constraints: result.constraints,
       })) as { listId: string; added: number; title: string };
       setSavedList({ listId: saved.listId, title: saved.title });
-      notify(
-        "Vibe saved",
-        `“${saved.title}” will keep updating as new matches are ingested.`,
-      );
+      notify("Vibe saved", `“${saved.title}” will keep updating as new matches are ingested.`);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       const code = (error as { code?: string })?.code ?? "";
@@ -702,9 +832,20 @@ export default function AskPlotlistScreen() {
     });
   }, []);
 
+  const fillPrompt = useCallback(
+    (prompt: string, andRun: boolean) => {
+      lightHaptic();
+      setText(prompt);
+      if (andRun) void runMemorySearch(prompt);
+      else inputRef.current?.focus();
+    },
+    [runMemorySearch],
+  );
+
   if (!authLoading && !isAuthenticated) {
     return (
       <Screen>
+        <PageTitle title="Ask Plotlist" />
         <View className="flex-1 px-6 pt-6">
           <EmptyState
             title="Sign in to ask"
@@ -719,6 +860,8 @@ export default function AskPlotlistScreen() {
   const isDiscover = mode === "discover";
   const modeColor = isDiscover ? accent.ramp[400] : MEMORY_AMBER;
   const glowColor = isDiscover ? accent.rgba(500, 0.1) : memoryRgba(0.09);
+  // Discover can run on chips alone; history needs something to match against.
+  const canSubmit = isDiscover || text.trim().length >= 2;
 
   return (
     <Screen
@@ -729,245 +872,72 @@ export default function AskPlotlistScreen() {
         <LinearGradient colors={[glowColor, "rgba(0,0,0,0)"]} style={styles.headerGlow} />
       }
     >
+      <PageTitle title="Ask Plotlist" />
       <View style={{ paddingBottom: insets.bottom + 48 }} className="px-6">
-        <View className="pt-1">
+        <View className="flex-row items-center pt-1" style={styles.headerRow}>
           {SHOW_BACK_BUTTON ? (
-            <Pressable
+            <GlassPressable
               onPress={() => {
                 lightHaptic();
                 router.back();
               }}
-              hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="Go back"
-              style={styles.backButton}
-              className="active:opacity-70"
+              radius={20}
+              variant="control"
+              contentStyle={styles.backChip}
             >
-              <Ionicons name="chevron-back" size={26} color="#E8EAED" />
-            </Pressable>
+              <Ionicons name="chevron-back" size={20} color="#F1F3F7" />
+            </GlassPressable>
           ) : null}
-          <View className="mt-2 flex-row items-center justify-between">
-            <Text className="text-[34px] font-bold text-text-primary">Ask Plotlist</Text>
-            {isDiscover && !isPro && typeof remaining === "number" ? (
-              <View
-                style={[
-                  styles.quotaPill,
-                  {
-                    backgroundColor: accent.rgba(400, 0.12),
-                    borderColor: accent.rgba(400, 0.35),
-                  },
-                ]}
-                testID="ask-quota-pill"
-              >
-                <Text className="text-[11px] font-bold" style={{ color: accent.ramp[400] }}>
-                  {remaining} free ask{remaining === 1 ? "" : "s"} left
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <Text className="mt-1 text-[14px] leading-5 text-text-tertiary">
-            {isDiscover
-              ? "Tell me what you're in the mood for — I'll pick tonight's show."
-              : "Describe a show you half-remember — I'll find it in your history."}
+          <Text
+            accessibilityRole="header"
+            className="min-w-0 flex-1 text-[28px] font-black leading-[32px] text-text-primary"
+          >
+            Ask Plotlist
           </Text>
+          {isDiscover && !isPro && typeof remaining === "number" ? (
+            <View
+              style={[
+                styles.quotaPill,
+                {
+                  backgroundColor: accent.rgba(400, 0.12),
+                  borderColor: accent.rgba(400, 0.35),
+                },
+              ]}
+              testID="ask-quota-pill"
+            >
+              <Text className="text-[11px] font-bold" style={{ color: accent.ramp[400] }}>
+                {remaining} free ask{remaining === 1 ? "" : "s"} left
+              </Text>
+            </View>
+          ) : null}
         </View>
+        <Text className="mt-1.5 text-[13px] leading-[18px] text-text-tertiary">
+          {isDiscover
+            ? "Tell me what you're in the mood for — I'll pick tonight's show."
+            : "Describe a show you half-remember — I'll find it in your history."}
+        </Text>
 
-        <View className="mt-5">
+        <View className="mt-4">
           <ModeSwitch mode={mode} accent={accent} onChange={setMode} />
         </View>
 
-        {isDiscover ? (
-          <>
-            <Text className="mt-6 text-[15px] font-bold text-text-primary">
-              What's the mood?
-            </Text>
-            <View className="mt-3 flex-row flex-wrap" style={styles.moodGrid}>
-              {ASK_MOOD_CHIPS.map((chip) => {
-                const selected = mood === chip.id;
-                return (
-                  <Pressable
-                    key={chip.id}
-                    onPress={() => {
-                      lightHaptic();
-                      setMood((current) => (current === chip.id ? null : chip.id));
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={chip.label}
-                    style={[
-                      styles.moodCard,
-                      selected
-                        ? {
-                            backgroundColor: accent.rgba(400, 0.14),
-                            borderColor: accent.rgba(400, 0.55),
-                          }
-                        : null,
-                    ]}
-                    className="web:transition-colors active:opacity-80"
-                  >
-                    <Text style={styles.moodEmoji}>{MOOD_EMOJI[chip.id]}</Text>
-                    <Text
-                      className="mt-1.5 text-[12px] font-bold"
-                      style={{ color: selected ? accent.ramp[300] : "#C7CCD6" }}
-                    >
-                      {chip.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text className="mt-5 text-[15px] font-bold text-text-primary">
-              How much time?
-            </Text>
-            <View className="mt-3 flex-row" style={styles.timeRow}>
-              {ASK_TIME_CHIPS.map((chip, index) => {
-                const selected = time === chip.id;
-                const meta = TIME_META[chip.id];
-                return (
-                  <Pressable
-                    key={chip.id}
-                    onPress={() => {
-                      lightHaptic();
-                      setTime((current) => (current === chip.id ? null : chip.id));
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={`${chip.label}, ${meta.sub}`}
-                    style={[
-                      styles.timeSegment,
-                      index < ASK_TIME_CHIPS.length - 1 ? styles.timeSegmentDivider : null,
-                      selected ? { backgroundColor: accent.rgba(400, 0.14) } : null,
-                    ]}
-                    className="web:transition-colors active:opacity-80"
-                  >
-                    <Ionicons
-                      name={meta.icon}
-                      size={16}
-                      color={selected ? accent.ramp[400] : "#5A6070"}
-                      accessible={false}
-                      accessibilityElementsHidden
-                      aria-hidden={true}
-                      importantForAccessibility="no"
-                    />
-                    <Text
-                      className="mt-1 text-[13px] font-bold"
-                      style={{ color: selected ? accent.ramp[300] : "#C7CCD6" }}
-                    >
-                      {chip.label}
-                    </Text>
-                    <Text className="mt-0.5 text-[11px] text-text-tertiary">{meta.sub}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Pressable
-              onPress={() => {
-                lightHaptic();
-                setOnMyServices((current) => !current);
-              }}
-              accessibilityRole="button"
-              accessibilityState={{ selected: onMyServices }}
-              accessibilityLabel="Only shows on my streaming services"
-              style={styles.serviceRow}
-              className="web:transition-colors active:opacity-80"
-            >
-              <Ionicons
-                name="tv-outline"
-                size={16}
-                color={onMyServices ? accent.ramp[400] : "#5A6070"}
-                accessible={false}
-                accessibilityElementsHidden
-                aria-hidden={true}
-                importantForAccessibility="no"
-              />
-              <Text
-                className="ml-2.5 flex-1 text-[14px] font-semibold"
-                style={{ color: onMyServices ? "#F1F3F7" : "#C7CCD6" }}
-              >
-                Only my services
-              </Text>
-              <View
-                style={[
-                  styles.serviceCheck,
-                  onMyServices
-                    ? {
-                        backgroundColor: accent.rgba(400, 0.9),
-                        borderColor: accent.rgba(400, 0.9),
-                      }
-                    : null,
-                ]}
-              >
-                {onMyServices ? (
-                  <Ionicons
-                    name="checkmark"
-                    size={13}
-                    color="#0D0F14"
-                    accessible={false}
-                    accessibilityElementsHidden
-                    aria-hidden={true}
-                    importantForAccessibility="no"
-                  />
-                ) : null}
-              </View>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Text className="mt-6 text-[15px] font-bold text-text-primary">
-              Jog your memory
-            </Text>
-            <View className="mt-3">
-              {MEMORY_EXAMPLE_PROMPTS.map((example) => (
-                <Pressable
-                  key={example}
-                  onPress={() => {
-                    lightHaptic();
-                    setText(example);
-                    void runMemorySearch(example);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Search for ${example}`}
-                  style={styles.exampleRow}
-                  className="web:transition-colors hover:bg-dark-hover active:opacity-80"
-                >
-                  <Ionicons
-                    name="chatbubble-ellipses-outline"
-                    size={14}
-                    color={MEMORY_AMBER}
-                    accessible={false}
-                    accessibilityElementsHidden
-                    aria-hidden={true}
-                    importantForAccessibility="no"
-                  />
-                  <Text
-                    className="ml-2.5 flex-1 text-[13px] italic text-text-secondary"
-                    numberOfLines={1}
-                  >
-                    “{example}”
-                  </Text>
-                  <Ionicons
-                    name="arrow-forward"
-                    size={13}
-                    color="#5A6070"
-                    accessible={false}
-                    accessibilityElementsHidden
-                    aria-hidden={true}
-                    importantForAccessibility="no"
-                  />
-                </Pressable>
-              ))}
-            </View>
-          </>
-        )}
-
-        <View style={styles.inputWrap} className="mt-5">
+        {/* The composer leads. It sits high enough that the ScrollView's
+            automaticallyAdjustKeyboardInsets is all the keyboard handling this
+            screen needs — no manual scroll-to-keyboard fighting it. */}
+        <View
+          style={[
+            styles.composer,
+            { borderColor: focused ? `${modeColor}C7` : "rgba(255,255,255,0.08)" },
+          ]}
+          className="mt-3 flex-row"
+        >
           <Ionicons
             name={isDiscover ? "sparkles-outline" : "play-back-outline"}
-            size={15}
-            color={modeColor}
-            style={styles.inputIcon}
+            size={16}
+            color={focused ? modeColor : "#6D7484"}
+            style={styles.composerIcon}
             accessible={false}
             accessibilityElementsHidden
             aria-hidden={true}
@@ -977,68 +947,168 @@ export default function AskPlotlistScreen() {
             ref={inputRef}
             value={text}
             onChangeText={setText}
-            onFocus={handleInputFocus}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder={
               isDiscover
-                ? EXAMPLE_PROMPTS[placeholderIndex]
-                : MEMORY_EXAMPLE_PROMPTS[placeholderIndex % MEMORY_EXAMPLE_PROMPTS.length]
+                ? "Describe the vibe you're after…"
+                : "Describe what you remember…"
             }
             placeholderTextColor="#6D7484"
             accessibilityLabel={
               isDiscover ? "Describe what you want to watch" : "Describe a show you watched"
             }
             multiline
-            className="text-[16px] text-text-primary"
+            // Web renders multiline as a <textarea>, which defaults to two
+            // rows and would leave a blank second line under the caret.
+            // numberOfLines maps to `rows`, but only apply it on web — on iOS
+            // it caps growth, and there the field should grow with the text.
+            {...(Platform.OS === "web" ? { numberOfLines: 1 } : null)}
+            // fontSize only — text-base's lineHeight misaligns iOS inputs.
+            className="flex-1 text-[16px] text-text-primary"
             style={[
-              styles.textInput,
+              styles.composerInput,
+              // The frame's border is the focus treatment; without this the
+              // browser draws its own ring inside the rounded field.
               Platform.OS === "web" ? ({ outlineStyle: "none" } as any) : null,
             ]}
             returnKeyType="search"
             blurOnSubmit
-            onSubmitEditing={() =>
-              isDiscover ? void runAsk() : void runMemorySearch()
-            }
+            onSubmitEditing={() => (isDiscover ? void runAsk() : void runMemorySearch())}
           />
+          {text.length > 0 ? (
+            <Pressable
+              onPress={() => {
+                lightHaptic();
+                setText("");
+                inputRef.current?.focus();
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Clear"
+              {...(Platform.OS === "web" ? { title: "Clear" } : null)}
+              style={styles.composerClear}
+              className="web:transition-colors hover:bg-white/20 active:opacity-70"
+            >
+              <Ionicons
+                name="close"
+                size={15}
+                color="#C7CCD6"
+                accessible={false}
+                accessibilityElementsHidden
+                aria-hidden={true}
+                importantForAccessibility="no"
+              />
+            </Pressable>
+          ) : null}
         </View>
 
-        {!isDiscover ? (
-          <View className="mt-2.5 flex-row flex-wrap items-center" style={styles.tokenRow}>
-            <Text className="text-[11px] font-semibold text-text-tertiary">Add a time:</Text>
-            {MEMORY_TIME_TOKENS.map((token) => (
-              <Pressable
-                key={token}
-                onPress={() => appendTimeToken(token)}
-                accessibilityRole="button"
-                accessibilityLabel={`Add "${token}" to your search`}
-                style={styles.timeToken}
-                className="web:transition-colors active:opacity-70"
-              >
-                <Text className="text-[11px] font-semibold" style={{ color: "#FBBF24" }}>
-                  {token}
-                </Text>
-              </Pressable>
-            ))}
+        {/* Suggestions. Discover fills only — running one would silently spend
+            a free ask. History searches are free, so those run on tap. */}
+        <View className="mt-2.5 flex-row flex-wrap" style={styles.chipRow}>
+          {(isDiscover ? EXAMPLE_PROMPTS : MEMORY_EXAMPLE_PROMPTS).map((example) => (
+            <Chip
+              key={example}
+              label={example}
+              tint={modeColor}
+              icon="chatbubble-ellipses-outline"
+              accessibilityLabel={
+                isDiscover ? `Use example: ${example}` : `Search for ${example}`
+              }
+              onPress={() => fillPrompt(example, !isDiscover)}
+            />
+          ))}
+        </View>
+
+        {isDiscover ? (
+          <>
+            <View className="mt-5">
+              <GroupLabel>Mood</GroupLabel>
+              <View className="flex-row flex-wrap" style={styles.chipRow}>
+                {ASK_MOOD_CHIPS.map((chip) => (
+                  <Chip
+                    key={chip.id}
+                    label={chip.label}
+                    emoji={MOOD_EMOJI[chip.id]}
+                    tint={modeColor}
+                    selected={mood === chip.id}
+                    onPress={() => {
+                      lightHaptic();
+                      setMood((current) => (current === chip.id ? null : chip.id));
+                    }}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View className="mt-4">
+              <GroupLabel>Length</GroupLabel>
+              <View className="flex-row flex-wrap" style={styles.chipRow}>
+                {ASK_TIME_CHIPS.map((chip) => {
+                  const meta = TIME_META[chip.id];
+                  return (
+                    <Chip
+                      key={chip.id}
+                      label={meta.short}
+                      trailing={meta.sub}
+                      icon={meta.icon}
+                      tint={modeColor}
+                      selected={time === chip.id}
+                      accessibilityLabel={`${chip.label}, ${meta.sub}`}
+                      onPress={() => {
+                        lightHaptic();
+                        setTime((current) => (current === chip.id ? null : chip.id));
+                      }}
+                    />
+                  );
+                })}
+                <Chip
+                  label="Only my services"
+                  icon={onMyServices ? "checkmark-circle" : "tv-outline"}
+                  tint={modeColor}
+                  selected={onMyServices}
+                  accessibilityLabel="Only shows on my streaming services"
+                  onPress={() => {
+                    lightHaptic();
+                    setOnMyServices((current) => !current);
+                  }}
+                />
+              </View>
+            </View>
+          </>
+        ) : (
+          <View className="mt-5">
+            <GroupLabel>Add a time</GroupLabel>
+            <View className="flex-row flex-wrap" style={styles.chipRow}>
+              {MEMORY_TIME_TOKENS.map((token) => (
+                <Chip
+                  key={token}
+                  label={token}
+                  icon="add"
+                  tint={MEMORY_AMBER}
+                  selected={text.toLowerCase().includes(token)}
+                  accessibilityLabel={`Add "${token}" to your search`}
+                  onPress={() => appendTimeToken(token)}
+                />
+              ))}
+            </View>
           </View>
-        ) : null}
+        )}
 
         <Pressable
           onPress={() => {
             lightHaptic();
-            if (isDiscover) {
-              void runAsk();
-            } else {
-              void runMemorySearch();
-            }
+            if (isDiscover) void runAsk();
+            else void runMemorySearch();
           }}
-          disabled={anyBusy}
+          disabled={anyBusy || !canSubmit}
           accessibilityRole="button"
-          accessibilityLabel={
-            isDiscover ? "Find me something to watch" : "Search my watch history"
-          }
+          accessibilityState={{ disabled: anyBusy || !canSubmit, busy: loading }}
+          accessibilityLabel={isDiscover ? "Find me something to watch" : "Search my watch history"}
           style={[
             styles.askButton,
-            { backgroundColor: isDiscover ? accent.ramp[400] : MEMORY_AMBER },
-            anyBusy ? styles.askButtonBusy : null,
+            { backgroundColor: modeColor },
+            anyBusy || !canSubmit ? styles.askButtonDisabled : null,
           ]}
           className="web:transition-opacity hover:opacity-90 active:opacity-80"
           testID="ask-submit"
@@ -1046,11 +1116,7 @@ export default function AskPlotlistScreen() {
           {loading ? (
             <ActivityIndicator color="#0D0F14" size="small" />
           ) : (
-            <Ionicons
-              name={isDiscover ? "sparkles" : "search"}
-              size={16}
-              color="#0D0F14"
-            />
+            <Ionicons name={isDiscover ? "sparkles" : "search"} size={16} color="#0D0F14" />
           )}
           <Text className="text-[15px] font-bold" style={styles.askButtonLabel}>
             {loading
@@ -1069,13 +1135,27 @@ export default function AskPlotlistScreen() {
           </Text>
         ) : null}
 
-        {!isDiscover && memoryResult ? (
-          <Animated.View entering={FadeInDown.duration(300)}>
+        {loading ? (
+          <View className="mt-8">
+            <ResultsSkeleton />
+          </View>
+        ) : null}
+
+        {/* onLayout belongs on the Animated.View — it is the direct child of
+            the page column, so its layout.y is the scroll offset. Measured on
+            a child inside it, layout.y would be relative to that animated
+            parent, i.e. always 0. */}
+        {!loading && !isDiscover && memoryResult ? (
+          <Animated.View
+            entering={FadeInDown.duration(300)}
+            onLayout={(event) => {
+              resultsYRef.current = event.nativeEvent.layout.y;
+              scrollToResults();
+            }}
+          >
             <View className="mt-8" testID="memory-results">
               <View className="flex-row items-center justify-between">
-                <Text className="text-[15px] font-bold text-text-primary">
-                  From your history
-                </Text>
+                <Text className="text-[15px] font-bold text-text-primary">From your history</Text>
                 {memoryResult.windowLabel ? (
                   <View style={styles.windowCapsule}>
                     <Ionicons
@@ -1087,7 +1167,10 @@ export default function AskPlotlistScreen() {
                       aria-hidden={true}
                       importantForAccessibility="no"
                     />
-                    <Text className="text-[11px] font-bold" style={{ color: "#FBBF24" }}>
+                    <Text
+                      className="text-[11px] font-bold"
+                      style={{ color: MEMORY_AMBER_TEXT }}
+                    >
                       {memoryResult.windowLabel}
                     </Text>
                   </View>
@@ -1109,13 +1192,17 @@ export default function AskPlotlistScreen() {
           </Animated.View>
         ) : null}
 
-        {isDiscover && result ? (
-          <Animated.View entering={FadeInDown.duration(300)}>
+        {!loading && isDiscover && result ? (
+          <Animated.View
+            entering={FadeInDown.duration(300)}
+            onLayout={(event) => {
+              resultsYRef.current = event.nativeEvent.layout.y;
+              scrollToResults();
+            }}
+          >
             <View className="mt-8" testID="ask-results">
               <View className="flex-row items-center justify-between">
-                <Text className="text-[15px] font-bold text-text-primary">
-                  Tonight's picks
-                </Text>
+                <Text className="text-[15px] font-bold text-text-primary">Tonight's picks</Text>
                 {result.picks.length > 0 && result.constraints ? (
                   <Pressable
                     onPress={() => void handleSaveVibe()}
@@ -1130,7 +1217,7 @@ export default function AskPlotlistScreen() {
                         backgroundColor: accent.rgba(400, 0.12),
                         borderColor: accent.rgba(400, 0.35),
                       },
-                      saving ? styles.askButtonBusy : null,
+                      saving ? styles.askButtonDisabled : null,
                     ]}
                     className="web:transition-opacity hover:opacity-90 active:opacity-80"
                     testID="ask-save-vibe"
@@ -1148,10 +1235,7 @@ export default function AskPlotlistScreen() {
                         importantForAccessibility="no"
                       />
                     )}
-                    <Text
-                      className="text-[12px] font-bold"
-                      style={{ color: accent.ramp[400] }}
-                    >
+                    <Text className="text-[12px] font-bold" style={{ color: accent.ramp[400] }}>
                       {savedList ? "View list" : "Save this vibe"}
                     </Text>
                   </Pressable>
@@ -1167,65 +1251,35 @@ export default function AskPlotlistScreen() {
                   <>
                     <TopPickCard pick={result.picks[0]} accent={accent} />
                     {result.picks.slice(1).map((pick, index) => (
-                      <PickRow
-                        key={pick.showId}
-                        pick={pick}
-                        rank={index + 2}
-                        accent={accent}
-                      />
+                      <PickRow key={pick.showId} pick={pick} rank={index + 2} accent={accent} />
                     ))}
                   </>
                 )}
               </View>
 
               {result.picks.length > 0 ? (
-                <>
-                  <Text className="mt-5 text-[13px] font-bold text-text-primary">
-                    Nudge it
-                  </Text>
-                  <View className="mt-2 flex-row flex-wrap" style={styles.tokenRow}>
+                <View className="mt-5">
+                  <GroupLabel>Nudge it</GroupLabel>
+                  <View className="flex-row flex-wrap" style={styles.chipRow}>
                     {REFINEMENT_CHIP_ORDER.map((chipId) => {
                       const active = refiningChip === chipId;
                       return (
-                        <Pressable
+                        <Chip
                           key={chipId}
-                          onPress={() => handleRefine(chipId)}
-                          accessibilityRole="button"
+                          label={active ? "…" : REFINEMENT_CHIPS[chipId].label}
+                          icon={REFINEMENT_ICONS[chipId] ?? "options-outline"}
+                          tint={modeColor}
+                          selected={active}
                           accessibilityLabel={REFINEMENT_CHIPS[chipId].label}
-                          style={[
-                            styles.refineToken,
-                            active
-                              ? {
-                                  backgroundColor: accent.rgba(400, 0.14),
-                                  borderColor: accent.rgba(400, 0.5),
-                                }
-                              : null,
-                          ]}
-                          className="web:transition-colors active:opacity-80"
-                        >
-                          <Ionicons
-                            name={REFINEMENT_ICONS[chipId] ?? "options-outline"}
-                            size={12}
-                            color={active ? accent.ramp[400] : "#9BA1B0"}
-                            accessible={false}
-                            accessibilityElementsHidden
-                            aria-hidden={true}
-                            importantForAccessibility="no"
-                          />
-                          <Text
-                            className="text-[12px] font-semibold"
-                            style={{ color: active ? accent.ramp[300] : "#C7CCD6" }}
-                          >
-                            {active ? "…" : REFINEMENT_CHIPS[chipId].label}
-                          </Text>
-                        </Pressable>
+                          onPress={() => handleRefine(chipId)}
+                        />
                       );
                     })}
                   </View>
                   <Text className="mt-2 text-[11px] text-text-tertiary">
                     Refinements don't use up your asks.
                   </Text>
-                </>
+                </View>
               ) : null}
             </View>
           </Animated.View>
@@ -1242,21 +1296,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     justifyContent: "center",
-    marginTop: 14,
+    marginTop: 20,
     paddingVertical: 15,
   },
-  askButtonBusy: {
-    opacity: 0.75,
+  askButtonDisabled: {
+    opacity: 0.5,
   },
   askButtonLabel: {
     color: "#0D0F14",
   },
-  backButton: {
+  backChip: {
     alignItems: "center",
-    height: 44,
+    height: 40,
     justifyContent: "center",
-    marginLeft: -10,
-    width: 44,
+    width: 40,
   },
   badge: {
     borderRadius: 999,
@@ -1265,26 +1318,69 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   badgeProvider: {
-    borderColor: "rgba(255,255,255,0.14)",
     backgroundColor: "rgba(255,255,255,0.05)",
+    borderColor: "rgba(255,255,255,0.14)",
   },
   badgeRow: {
     gap: 6,
   },
   badgeWatchlist: {
-    borderColor: "rgba(52,211,153,0.4)",
     backgroundColor: "rgba(52,211,153,0.1)",
+    borderColor: "rgba(52,211,153,0.4)",
   },
-  exampleRow: {
+  chip: {
     alignItems: "center",
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 12,
+    backgroundColor: "#161A22",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
-    marginBottom: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chipEmoji: {
+    fontSize: 14,
+  },
+  chipRow: {
+    gap: 8,
+  },
+  composer: {
+    // Top-aligned, not stretched: a stretched textarea fills the row's cross
+    // size, so resetting its height to `auto` to re-measure would report the
+    // row's current height instead of the text's and the field could only
+    // ever grow.
+    alignItems: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.055)",
+    // Between the app's input radius (8) and card radius (16): it shares this
+    // radius with the mode switch it stacks under.
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  composerClear: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    height: 26,
+    justifyContent: "center",
+    marginTop: 11,
+    width: 26,
+  },
+  composerIcon: {
+    // Aligns with the first line of text rather than centering against a
+    // growing box.
+    marginTop: 15,
+  },
+  composerInput: {
+    marginLeft: 9,
+    // One line tall at rest, growing with the text up to a cap — never an
+    // empty multi-line well.
+    maxHeight: COMPOSER_MAX_HEIGHT,
+    minHeight: COMPOSER_MIN_HEIGHT,
+    paddingBottom: 13,
+    paddingTop: 13,
+    textAlignVertical: "top",
   },
   headerGlow: {
     // Rendered via Screen's backgroundOverlay: full-bleed from the physical
@@ -1296,16 +1392,8 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
   },
-  inputIcon: {
-    left: 16,
-    position: "absolute",
-    top: 16,
-  },
-  inputWrap: {
-    backgroundColor: "#141821",
-    borderColor: "#2A2E38",
-    borderRadius: 18,
-    borderWidth: 1,
+  headerRow: {
+    gap: 10,
   },
   memoryMetaItem: {
     gap: 5,
@@ -1316,15 +1404,15 @@ const styles = StyleSheet.create({
   },
   modeSegment: {
     alignItems: "center",
-    borderRadius: 12,
+    borderRadius: 9,
     flex: 1,
     flexDirection: "row",
     gap: 7,
     justifyContent: "center",
-    paddingVertical: 11,
+    paddingVertical: 9,
   },
   modeThumb: {
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     bottom: 4,
     left: 4,
@@ -1332,28 +1420,12 @@ const styles = StyleSheet.create({
     top: 4,
   },
   modeTrack: {
-    backgroundColor: "#161A22",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 16,
+    backgroundColor: "rgba(17,19,24,0.92)",
+    borderColor: "#2A2E38",
+    borderRadius: 12,
     borderWidth: 1,
     flexDirection: "row",
     padding: 4,
-  },
-  moodCard: {
-    alignItems: "center",
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 16,
-    borderWidth: 1,
-    flexBasis: "30%",
-    flexGrow: 1,
-    paddingVertical: 14,
-  },
-  moodEmoji: {
-    fontSize: 24,
-  },
-  moodGrid: {
-    gap: 8,
   },
   pickPoster: {
     borderRadius: 8,
@@ -1367,9 +1439,9 @@ const styles = StyleSheet.create({
   },
   pickRow: {
     alignItems: "center",
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 14,
+    backgroundColor: "#161A22",
+    borderColor: "#2A2E38",
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     marginBottom: 8,
@@ -1390,17 +1462,6 @@ const styles = StyleSheet.create({
     marginRight: 10,
     width: 22,
   },
-  refineToken: {
-    alignItems: "center",
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
   saveVibeButton: {
     alignItems: "center",
     borderRadius: 999,
@@ -1410,72 +1471,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  serviceCheck: {
-    alignItems: "center",
-    borderColor: "#3A3F4A",
-    borderRadius: 7,
-    borderWidth: 1.5,
-    height: 22,
-    justifyContent: "center",
-    width: 22,
-  },
-  serviceRow: {
-    alignItems: "center",
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: "row",
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+  skeletonCard: {
+    alignItems: "flex-start",
+    borderColor: "#2A2E38",
   },
   statusDot: {
     borderRadius: 999,
     height: 7,
     width: 7,
   },
-  textInput: {
-    minHeight: 76,
-    paddingBottom: 14,
-    paddingLeft: 40,
-    paddingRight: 16,
-    paddingTop: 14,
-    textAlignVertical: "top",
-  },
-  timeRow: {
-    backgroundColor: "#141821",
-    borderColor: "rgba(255,255,255,0.06)",
+  topPickCard: {
+    backgroundColor: "#161A22",
     borderRadius: 16,
     borderWidth: 1,
-    overflow: "hidden",
-  },
-  timeSegment: {
-    alignItems: "center",
-    flex: 1,
-    paddingVertical: 12,
-  },
-  timeSegmentDivider: {
-    borderRightColor: "rgba(255,255,255,0.06)",
-    borderRightWidth: 1,
-  },
-  timeToken: {
-    borderColor: "rgba(245,158,11,0.45)",
-    borderRadius: 999,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  tokenRow: {
-    gap: 8,
-  },
-  topPickCard: {
-    backgroundColor: "#141821",
-    borderRadius: 18,
-    borderWidth: 1,
     flexDirection: "row",
-    marginBottom: 10,
+    marginBottom: 8,
     overflow: "hidden",
     padding: 14,
   },
