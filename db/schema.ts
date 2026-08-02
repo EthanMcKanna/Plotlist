@@ -609,6 +609,8 @@ export const feedItems = sqliteTable(
   (table) => ({
     ownerTimestampIdx: index("feed_items_owner_timestamp_idx").on(table.ownerId, table.timestamp),
     targetIdx: index("feed_items_target_idx").on(table.type, table.targetId),
+    // The cleanup cron's age cutoff scans by timestamp alone.
+    timestampIdx: index("feed_items_timestamp_idx").on(table.timestamp),
   }),
 );
 
@@ -999,6 +1001,21 @@ export const userTasteProfiles = sqliteTable(
     updatedIdx: index("user_taste_profiles_updated_idx").on(table.updatedAt),
   }),
 );
+
+// Cached watchStats:getInsights payload, one row per user (upserted).
+// fingerprint is a cheap signal digest — row counts + max timestamps over
+// episode_progress / watch_states / reviews, plus the engine version, the
+// caller's UTC offset, and their local day (insights are day-sensitive:
+// streaks, pace windows). The heavy rebuild in api/_lib/watch-insights.ts
+// only runs when the digest changes.
+export const watchInsightsCache = sqliteTable("watch_insights_cache", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  fingerprint: text("fingerprint").notNull(),
+  payload: jsonb("payload").notNull(),
+  computedAt: timestampMs("computed_at").notNull(),
+});
 
 export const reports = sqliteTable(
   "reports",

@@ -327,6 +327,39 @@ describe("buildWatchInsights", () => {
     expect(insights.window.episodesLast30Days).toBe(2);
     expect(insights.window.minutesLast30Days).toBe(100);
   });
+
+  // The server persists the payload as JSON in watch_insights_cache and
+  // serves it back parsed, so the shape must survive a JSON round-trip
+  // exactly (no Map/Set/Date/NaN anywhere in the tree).
+  it("produces a payload that round-trips through JSON unchanged", () => {
+    const insights = buildWatchInsights({
+      now: NOW,
+      shows: [SHOW, { ...SHOW, id: "show_2", title: "Other", externalId: "222" }],
+      episodes: [
+        episode({ episodeNumber: 1, watchedAt: NOW - 2 * DAY }),
+        episode({ episodeNumber: 2, watchedAt: NOW - DAY }),
+        episode({ showId: "show_2", episodeNumber: 1, watchedAt: NOW - 3 * DAY }),
+      ],
+      watchStates: [
+        { showId: SHOW.id, status: "watching", updatedAt: NOW - DAY },
+        { showId: "show_2", status: "watchlist", updatedAt: NOW - 2 * DAY },
+      ],
+      reviews: [{ id: "r1", showId: SHOW.id, rating: 5, createdAt: NOW - DAY }],
+      seasonRuntimes: [
+        {
+          externalId: SHOW.externalId,
+          seasonNumber: 1,
+          episodes: [
+            { episodeNumber: 1, runtime: 61 },
+            { episodeNumber: 2, runtime: 50 },
+          ],
+        },
+      ],
+      showRuntimes: [{ externalId: "222", runtimeMinutes: 30 }],
+      utcOffsetMinutes: -480,
+    });
+    expect(JSON.parse(JSON.stringify(insights))).toEqual(insights);
+  });
 });
 
 describe("extractShowRuntimeMinutes", () => {

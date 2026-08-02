@@ -1,16 +1,18 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import {
   episodeProgress,
   reviews,
   shows,
   tmdbDetailsCache,
+  watchInsightsCache,
   watchStates,
 } from "../../db/schema";
 import {
   buildMonthlyRecap,
   buildWatchInsights,
   extractShowRuntimeMinutes,
+  WATCH_INSIGHTS_VERSION,
   type BuildWatchInsightsInput,
   type WatchInsights,
   type WatchInsightsMonthlyRecap,
@@ -27,18 +29,18 @@ import { chunkForSqlParams } from "./sql-dialect";
 const MAX_SEASON_RUNTIME_LOOKUPS = 400;
 
 async function getShowRowsChunked(showIds: string[]) {
-  const rows: Array<typeof shows.$inferSelect> = [];
-  for (const chunk of chunkForSqlParams(Array.from(new Set(showIds)), 1, 80)) {
-    rows.push(...(await db.select().from(shows).where(inArray(shows.id, chunk))));
-  }
-  return rows;
+  const chunks = chunkForSqlParams(Array.from(new Set(showIds)), 1, 80);
+  const results = await Promise.all(
+    chunks.map((chunk) => db.select().from(shows).where(inArray(shows.id, chunk))),
+  );
+  return results.flat();
 }
 
 async function getDetailPayloadsChunked(externalIds: string[]) {
-  const rows: Array<{ externalId: string; payload: unknown }> = [];
-  for (const chunk of chunkForSqlParams(Array.from(new Set(externalIds)), 1, 80)) {
-    rows.push(
-      ...(await db
+  const chunks = chunkForSqlParams(Array.from(new Set(externalIds)), 1, 80);
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      db
         .select({
           externalId: tmdbDetailsCache.externalId,
           payload: tmdbDetailsCache.payload,
@@ -49,10 +51,10 @@ async function getDetailPayloadsChunked(externalIds: string[]) {
             eq(tmdbDetailsCache.externalSource, "tmdb"),
             inArray(tmdbDetailsCache.externalId, chunk),
           ),
-        )),
-    );
-  }
-  return rows;
+        ),
+    ),
+  );
+  return results.flat();
 }
 
 // Shared loader for every insights consumer (full stats RPC + monthly recap
@@ -165,12 +167,97 @@ async function loadWatchInsightsInputs(
   };
 }
 
+// The user's local calendar day (YYYY-MM-DD) for a given wall-clock instant,
+// matching the shifted-date convention the insights engine uses.
+function localDayKey(now: number, utcOffsetMinutes: number): string {
+  return new Date(now + utcOffsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
+// Cheap change digest that stands in for the full-history read: three tiny
+// (count, max timestamp) aggregates over the tables the insights derive from.
+// Any insert/delete/edit moves a counter or a max. The offset + local-day
+// terms expire the cache at the user's midnight (streaks and pace windows are
+// day-sensitive) or when their timezone changes; the engine version term
+// expires it when the payload shape changes.
+async function computeInsightsFingerprint(
+  userId: string,
+  utcOffsetMinutes: number,
+): Promise<string> {
+  const [episodeAgg, stateAgg, reviewAgg] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        latest: sql<number | null>`max(${episodeProgress.watchedAt})`,
+      })
+      .from(episodeProgress)
+      .where(eq(episodeProgress.userId, userId)),
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        latest: sql<number | null>`max(${watchStates.updatedAt})`,
+      })
+      .from(watchStates)
+      .where(eq(watchStates.userId, userId)),
+    db
+      .select({
+        count: sql<number>`count(*)`,
+        latest: sql<number | null>`max(coalesce(${reviews.updatedAt}, ${reviews.createdAt}))`,
+      })
+      .from(reviews)
+      .where(eq(reviews.authorId, userId)),
+  ]);
+  const part = (row: { count: number; latest: number | null } | undefined) =>
+    `${row?.count ?? 0}:${row?.latest ?? 0}`;
+  return [
+    `v${WATCH_INSIGHTS_VERSION}`,
+    `e${part(episodeAgg[0])}`,
+    `s${part(stateAgg[0])}`,
+    `r${part(reviewAgg[0])}`,
+    `off${utcOffsetMinutes}`,
+    localDayKey(Date.now(), utcOffsetMinutes),
+  ].join("|");
+}
+
 export async function getWatchInsightsForUser(
   userId: string,
   utcOffsetMinutes: number,
 ): Promise<WatchInsights> {
+  const [fingerprint, cachedRows] = await Promise.all([
+    computeInsightsFingerprint(userId, utcOffsetMinutes),
+    // Best-effort read: a missing table (deploy before migration) or a bad
+    // row must degrade to a full recompute, never fail the RPC.
+    db
+      .select()
+      .from(watchInsightsCache)
+      .where(eq(watchInsightsCache.userId, userId))
+      .limit(1)
+      .catch(() => []),
+  ]);
+  const cached = cachedRows[0];
+  if (
+    cached &&
+    cached.fingerprint === fingerprint &&
+    typeof cached.payload === "object" &&
+    cached.payload !== null
+  ) {
+    return cached.payload as WatchInsights;
+  }
+
   const inputs = await loadWatchInsightsInputs(userId);
-  return buildWatchInsights({ ...inputs, utcOffsetMinutes });
+  const insights = buildWatchInsights({ ...inputs, utcOffsetMinutes });
+
+  // Best-effort write-through; a failed cache write must never fail the read.
+  const computedAt = Date.now();
+  await db
+    .insert(watchInsightsCache)
+    .values({ userId, fingerprint, payload: insights, computedAt })
+    .onConflictDoUpdate({
+      target: watchInsightsCache.userId,
+      set: { fingerprint, payload: insights, computedAt },
+    })
+    .catch(() => {});
+
+  return insights;
 }
 
 // Last completed local month's rollup for the monthly recap push. Null when

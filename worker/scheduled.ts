@@ -1,4 +1,8 @@
-import { cleanupExpiredTmdbCache, cleanupExpiredAuthArtifacts } from "../api/_lib/jobs";
+import {
+  cleanupExpiredTmdbCache,
+  cleanupExpiredAuthArtifacts,
+  cleanupOldFeedItems,
+} from "../api/_lib/jobs";
 import {
   checkExpoPushReceipts,
   cleanupOldNotifications,
@@ -128,14 +132,15 @@ export async function runScheduledTasks(cron: string) {
     }
 
     if (cron === CLEANUP_CRON) {
-      const [tmdb, releases, auth, notifications, trakt] = await Promise.all([
+      const [tmdb, releases, auth, notifications, trakt, feed] = await Promise.all([
         cleanupExpiredTmdbCache(),
         deleteExpiredReleaseEvents(),
         cleanupExpiredAuthArtifacts(),
         cleanupOldNotifications(),
         cleanupTraktImportArtifacts(),
+        cleanupOldFeedItems(),
       ]);
-      console.info("[cron] cleanup", { tmdb, releases, auth, notifications, trakt });
+      console.info("[cron] cleanup", { tmdb, releases, auth, notifications, trakt, feed });
       return;
     }
 

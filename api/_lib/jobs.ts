@@ -1,7 +1,8 @@
-import { desc, eq, lte, or } from "drizzle-orm";
+import { desc, eq, inArray, lte, or } from "drizzle-orm";
 
 import {
   authSessions,
+  feedItems,
   imdbRatingsCache,
   phoneVerificationRequests,
   rateLimits,
@@ -14,6 +15,7 @@ import {
 } from "../../db/schema";
 import { db } from "./db";
 import { createId } from "./ids";
+import { chunkForSqlParams } from "./sql-dialect";
 import { getHomeCatalogCacheCleanupCutoff } from "../../lib/homeCatalogCache";
 
 const HOT_SHOW_TARGET_COUNT = 3_000;
@@ -85,6 +87,38 @@ export async function cleanupExpiredTmdbCache() {
     removed:
       details.length + search.length + list.length + seasons.length + imdbRatings.length,
   };
+}
+
+// Feed fan-out rows are unreachable once they scroll past any realistic
+// pagination depth, but the table itself was never pruned — a user following
+// active accounts accumulates rows forever. Deletes run in bounded batches
+// (id-subquery keeps each statement cheap) so the first pass over a large
+// backlog can't blow the cron invocation.
+const FEED_ITEM_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+const FEED_TRIM_BATCH = 5000;
+const FEED_TRIM_MAX_BATCHES = 4;
+
+export async function cleanupOldFeedItems(now = Date.now()) {
+  const cutoff = now - FEED_ITEM_TTL_MS;
+  let removed = 0;
+  for (let pass = 0; pass < FEED_TRIM_MAX_BATCHES; pass += 1) {
+    const batch = await db
+      .select({ id: feedItems.id })
+      .from(feedItems)
+      .where(lte(feedItems.timestamp, cutoff))
+      .limit(FEED_TRIM_BATCH);
+    if (batch.length === 0) {
+      break;
+    }
+    for (const chunk of chunkForSqlParams(batch.map((row) => row.id), 1)) {
+      await db.delete(feedItems).where(inArray(feedItems.id, chunk));
+    }
+    removed += batch.length;
+    if (batch.length < FEED_TRIM_BATCH) {
+      break;
+    }
+  }
+  return { removed };
 }
 
 // Housekeeping for auth/rate-limit tables that used to grow unbounded on the

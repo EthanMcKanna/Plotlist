@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 
-import { and, asc, count, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { chunkForSqlParams, ilike, ilikeContains } from "./sql-dialect";
@@ -118,6 +118,8 @@ import {
   seasonCacheKey,
   slimSeasonPayload,
   upsertSeasonCacheEntry,
+  SEASON_CACHE_PAYLOAD_VERSION,
+  type CachedSeasonPayload,
 } from "./season-cache";
 import { getImdbRatings } from "./imdb-ratings";
 import {
@@ -1671,6 +1673,108 @@ function normalizeTmdbSeasonDetails(payload: any) {
   };
 }
 
+// Shape a v2 season-cache payload like normalizeTmdbSeasonDetails output so
+// the episode guide/sheet can't tell a cache hit from a live TMDB fetch.
+function seasonDetailsFromCachedPayload(payload: CachedSeasonPayload) {
+  return {
+    seasonNumber: payload.seasonNumber,
+    airDate: payload.airDate ?? null,
+    posterPath: payload.posterPath ?? null,
+    episodes: payload.episodes.map((episode) => ({
+      airDate: episode.airDate ?? null,
+      air_date: episode.airDate ?? null,
+      episodeNumber: episode.episodeNumber,
+      episode_number: episode.episodeNumber,
+      seasonNumber: episode.seasonNumber,
+      season_number: episode.seasonNumber,
+      name: episode.name ?? null,
+      overview: episode.overview ?? null,
+      runtime: episode.runtime ?? null,
+      stillPath: episode.stillUrl ?? null,
+      voteAverage: episode.voteAverage ?? 0,
+      voteCount: episode.voteCount ?? 0,
+      guestStars: episode.guestStars ?? [],
+      crew: episode.crew ?? [],
+    })),
+  };
+}
+
+// The show page reads a fixed set of fields from extendedDetails; the rest of
+// the raw TMDB payload (duplicated credits arrays, recommendations, the
+// all-countries providers object) was ~85% of the bytes. Project on the way
+// out; the full blob stays in tmdb_details_cache for server-side consumers.
+// This also fixes two silently-dead sections: the client expects camelCase
+// `watchProviders` and an array `videos`, neither of which the raw payload
+// shape ever satisfied.
+function projectExtendedDetailsForClient(details: any) {
+  if (!details) {
+    return null;
+  }
+  const rawVideos = Array.isArray(details.videos)
+    ? details.videos
+    : Array.isArray(details.videos?.results)
+      ? details.videos.results
+      : [];
+  const rawSimilar = Array.isArray(details.similar)
+    ? details.similar
+    : Array.isArray(details.similar?.results)
+      ? details.similar.results
+      : [];
+  return {
+    backdropPath: details.backdropPath ?? null,
+    posterPath: details.posterPath ?? tmdbImageUrl(details.poster_path, "w500") ?? null,
+    cast: Array.isArray(details.cast) ? details.cast : [],
+    crew: Array.isArray(details.crew) ? details.crew : [],
+    contentRating: details.contentRating ?? details.content_rating ?? null,
+    createdBy: details.createdBy ?? details.created_by ?? [],
+    episodeRunTime:
+      details.episodeRunTime ??
+      (Array.isArray(details.episode_run_time) ? details.episode_run_time[0] : null) ??
+      null,
+    firstAirDate: details.firstAirDate ?? details.first_air_date ?? null,
+    genres: Array.isArray(details.genres) ? details.genres : [],
+    lastAirDate: details.lastAirDate ?? details.last_air_date ?? null,
+    networks: Array.isArray(details.networks)
+      ? details.networks.map((network: any) => ({ id: network?.id, name: network?.name }))
+      : [],
+    numberOfEpisodes: details.numberOfEpisodes ?? null,
+    numberOfSeasons: details.numberOfSeasons ?? null,
+    seasons: Array.isArray(details.seasons) ? details.seasons : [],
+    similar: {
+      results: rawSimilar.slice(0, 12).map((entry: any) => ({
+        id: entry?.id,
+        name: entry?.name ?? entry?.title ?? null,
+        poster_path: entry?.poster_path ?? null,
+        first_air_date: entry?.first_air_date ?? null,
+        vote_average: entry?.vote_average ?? null,
+      })),
+    },
+    status: details.status ?? null,
+    tagline: details.tagline ?? null,
+    videos: rawVideos
+      .filter(
+        (video: any) =>
+          video?.key &&
+          video?.site === "YouTube" &&
+          (video?.type === "Trailer" || video?.type === "Teaser"),
+      )
+      .slice(0, 8)
+      .map((video: any) => ({
+        key: video.key,
+        name: video.name ?? null,
+        type: video.type ?? null,
+      })),
+    voteAverage: details.vote_average ?? details.voteAverage ?? null,
+    voteCount: details.vote_count ?? details.voteCount ?? null,
+    watchProviders: extractTmdbReleaseProviders(details, "US").map((provider) => ({
+      id: provider.name,
+      name: provider.name,
+      logoUrl: provider.logoUrl ?? null,
+      deepLinkUrl: null,
+    })),
+  };
+}
+
 // List surfaces only need the artwork fallback from the details cache, not
 // the whole cached payload (~80KB/show once serialized as `extendedDetails`).
 // One json_extract query covers every show; only /show/[id] reads the full
@@ -1764,7 +1868,7 @@ async function showDocWithCachedArtwork(show: typeof shows.$inferSelect | null |
     ...doc,
     backdropUrl: hasUsableStoredBackdrop ? doc.backdropUrl : storedBackdropUrl ?? cachedBackdropUrl,
     posterUrl: doc.posterUrl ?? details?.posterPath ?? null,
-    extendedDetails: details ?? null,
+    extendedDetails: projectExtendedDetailsForClient(details),
   };
 }
 
@@ -3430,34 +3534,53 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
 }
 
 async function buildFeed(userId: string, args: any) {
-  const allFeedRows = await db
-    .select()
-    .from(feedItems)
-    .where(eq(feedItems.ownerId, userId))
-    .orderBy(desc(feedItems.timestamp));
+  const feedPagination = paginationArgs.parse(args ?? {});
+  const feedStart = Number(feedPagination.paginationOpts?.cursor ?? 0) || 0;
+  const feedNumItems = feedPagination.paginationOpts?.numItems ?? 20;
+
   // Rows fanned out before a block was created stay in the table but never
   // render for either side. Follow items name a second user (the person who
   // got followed), so those also hide when that user is blocked either way.
-  // One block lookup covers both dimensions.
-  const blockedIds = await getBlockedEitherWayIdSet(
-    userId,
-    allFeedRows.flatMap((row) =>
-      row.type === "follow" ? [row.actorId, row.targetId] : [row.actorId],
-    ),
-  );
-  const feedRows =
-    blockedIds.size === 0
-      ? allFeedRows
-      : allFeedRows.filter(
+  // Cursors are offsets into the block-filtered list, so the read over-
+  // fetches a buffer past the requested window instead of loading the whole
+  // history (feed_items grows forever with follow count); if blocking eats
+  // the entire buffer — rare — fall back to the full read for exactness.
+  const filterByBlocks = async (rows: (typeof feedItems.$inferSelect)[]) => {
+    const blockedIds = await getBlockedEitherWayIdSet(
+      userId,
+      rows.flatMap((row) =>
+        row.type === "follow" ? [row.actorId, row.targetId] : [row.actorId],
+      ),
+    );
+    return blockedIds.size === 0
+      ? rows
+      : rows.filter(
           (row) =>
             !blockedIds.has(row.actorId) &&
             !(row.type === "follow" && blockedIds.has(row.targetId)),
         );
+  };
+
+  const fetchLimit = feedStart + feedNumItems * 3 + 20;
+  let windowRows = await db
+    .select()
+    .from(feedItems)
+    .where(eq(feedItems.ownerId, userId))
+    .orderBy(desc(feedItems.timestamp))
+    .limit(fetchLimit);
+  let tableExhausted = windowRows.length < fetchLimit;
+  let feedRows = await filterByBlocks(windowRows);
+  if (!tableExhausted && feedRows.length < feedStart + feedNumItems + 1) {
+    windowRows = await db
+      .select()
+      .from(feedItems)
+      .where(eq(feedItems.ownerId, userId))
+      .orderBy(desc(feedItems.timestamp));
+    tableExhausted = true;
+    feedRows = await filterByBlocks(windowRows);
+  }
   // Resolve entities only for the requested page — offsets still come from
-  // the full filtered list so cursors stay stable across pages.
-  const feedPagination = paginationArgs.parse(args ?? {});
-  const feedStart = Number(feedPagination.paginationOpts?.cursor ?? 0) || 0;
-  const feedNumItems = feedPagination.paginationOpts?.numItems ?? 20;
+  // the filtered list so cursors stay stable across pages.
   const pageFeedRows = feedRows.slice(feedStart, feedStart + feedNumItems);
   const actorIds = Array.from(new Set(pageFeedRows.map((row) => row.actorId)));
   const showIds = Array.from(
@@ -3498,7 +3621,9 @@ async function buildFeed(userId: string, args: any) {
   return {
     page,
     continueCursor: String(feedNext),
-    isDone: feedNext >= feedRows.length,
+    // With a bounded window, unread rows past the buffer mean there is
+    // always more to load; only an exhausted read can prove the end.
+    isDone: tableExhausted ? feedNext >= feedRows.length : false,
   };
 }
 
@@ -4202,17 +4327,52 @@ export const queryHandlers: Record<string, RpcHandler> = {
     // Over-fetch so ranking has real candidates to reorder — with exactly
     // `limit` rows in arbitrary DB order, prefix matches buried past the
     // limit would never surface.
-    const rows = await db
-      .select()
-      .from(users)
-      .where(
-        or(
-          ilikeContains(users.username, text),
-          ilikeContains(users.displayName, text),
-          ilikeContains(users.name, text),
-        ),
-      )
-      .limit(Math.min(limit * 3, 90));
+    const candidateCap = Math.min(limit * 3, 90);
+    // Primary pass: index-range prefix scans on the normalized search_text
+    // and the lowercase username — both index-backed, so the common
+    // first-name/handle query never touches the old triple substring scan.
+    // The contains scan still runs when prefixes come up short (last-name
+    // searches, mid-word fragments), concentrating the full-scan cost on the
+    // queries that actually need it.
+    const normalizedQuery = normalizeSearchText(text);
+    const prefixRows =
+      normalizedQuery.length >= 2
+        ? await db
+            .select()
+            .from(users)
+            .where(
+              or(
+                and(
+                  gte(users.searchText, normalizedQuery),
+                  lt(users.searchText, `${normalizedQuery}\uffff`),
+                ),
+                and(
+                  gte(users.username, normalizedQuery),
+                  lt(users.username, `${normalizedQuery}\uffff`),
+                ),
+              ),
+            )
+            .limit(candidateCap)
+        : [];
+    let rows = prefixRows;
+    if (rows.length < limit) {
+      const containsRows = await db
+        .select()
+        .from(users)
+        .where(
+          or(
+            ilikeContains(users.username, text),
+            ilikeContains(users.displayName, text),
+            ilikeContains(users.name, text),
+          ),
+        )
+        .limit(candidateCap);
+      const seenIds = new Set(rows.map((row) => row.id));
+      rows = [...rows, ...containsRows.filter((row) => !seenIds.has(row.id))].slice(
+        0,
+        candidateCap,
+      );
+    }
     const previews = await buildPersonPreviews(user.id, rows);
     return rankPeopleSearchResults(previews, text).slice(0, limit);
   },
@@ -7009,12 +7169,12 @@ export const actionHandlers: Record<string, RpcHandler> = {
     if (!show) return null;
     const cached = await db.select().from(tmdbDetailsCache).where(and(eq(tmdbDetailsCache.externalSource, show.externalSource), eq(tmdbDetailsCache.externalId, show.externalId))).limit(1);
     if (cached[0] && cached[0].expiresAt > Date.now()) {
-      return normalizeTmdbShowDetails(cached[0].payload);
+      return projectExtendedDetailsForClient(normalizeTmdbShowDetails(cached[0].payload));
     }
     if (show.externalSource !== "tmdb") {
       return null;
     }
-    return await fetchAndCacheShowDetails(show, cached[0]);
+    return projectExtendedDetailsForClient(await fetchAndCacheShowDetails(show, cached[0]));
   },
   "people:getDetails": async ({ args }) => {
     const parsed = z.object({ personId: z.number().int().positive() }).parse(args ?? {});
@@ -7042,6 +7202,23 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
     const show = showRows[0];
     if (!show || show.externalSource !== "tmdb") return null;
+    // Read-through: v2 cache rows carry everything the guide and episode
+    // sheet render, so a fresh hit skips TMDB entirely (this handler used to
+    // fetch live on every call — 3 TMDB round trips per show open). v1 rows
+    // (up-next-only shape) fall through and get upgraded by the write below.
+    const cachedSeasons = await readSeasonCacheEntries([
+      { externalId: show.externalId, seasonNumber: parsed.seasonNumber },
+    ]).catch(() => new Map<string, never>());
+    const cachedEntry = cachedSeasons.get(
+      seasonCacheKey(show.externalId, parsed.seasonNumber),
+    );
+    if (
+      cachedEntry &&
+      cachedEntry.expiresAt > Date.now() &&
+      (cachedEntry.payload.version ?? 1) >= SEASON_CACHE_PAYLOAD_VERSION
+    ) {
+      return seasonDetailsFromCachedPayload(cachedEntry.payload);
+    }
     const payload = normalizeTmdbSeasonDetails(
       await tmdb(`/tv/${show.externalId}/season/${parsed.seasonNumber}`),
     );

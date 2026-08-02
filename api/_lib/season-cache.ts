@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { tmdbSeasonCache } from "../../db/schema";
 import { db } from "./db";
@@ -12,6 +12,14 @@ const SEASON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const SETTLED_SEASON_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SETTLED_SEASON_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
+export type CachedSeasonPerson = {
+  id: number | null;
+  name: string;
+  character?: string | null;
+  job?: string | null;
+  profilePath?: string | null;
+};
+
 export type CachedSeasonEpisode = {
   seasonNumber: number;
   episodeNumber: number;
@@ -22,13 +30,29 @@ export type CachedSeasonEpisode = {
   runtime: number | null;
   voteAverage: number | null;
   voteCount: number | null;
+  // v2 fields: enough people data for the episode sheet, tightly capped so
+  // rows stay small. Absent on v1 rows.
+  guestStars?: CachedSeasonPerson[];
+  crew?: CachedSeasonPerson[];
 };
 
 export type CachedSeasonPayload = {
   seasonNumber: number;
   airDate: string | null;
   episodes: CachedSeasonEpisode[];
+  // v2 rows carry everything shows:getSeasonDetails needs to serve the
+  // episode guide + sheet without a TMDB fetch; v1 rows only ever fed
+  // up-next enrichment and fall through to a live fetch (which upgrades
+  // them in place).
+  version?: number;
+  posterPath?: string | null;
 };
+
+export const SEASON_CACHE_PAYLOAD_VERSION = 2;
+const SEASON_PEOPLE_EPISODE_LIMIT = 30;
+const GUEST_STARS_PER_EPISODE = 6;
+const CREW_PER_EPISODE = 4;
+const CACHED_CREW_JOBS = new Set(["Director", "Writer"]);
 
 function tmdbImageUrl(path: unknown, size: string) {
   if (typeof path !== "string" || path.length === 0) {
@@ -48,6 +72,35 @@ function readText(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function slimSeasonPeople(
+  raw: unknown,
+  limit: number,
+  jobFilter?: Set<string>,
+): CachedSeasonPerson[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const people = raw
+    .filter(
+      (person: any) =>
+        person &&
+        typeof person.name === "string" &&
+        person.name.length > 0 &&
+        (!jobFilter || jobFilter.has(person.job)),
+    )
+    .slice(0, limit)
+    .map((person: any): CachedSeasonPerson => ({
+      id: readNumber(person.id),
+      name: person.name,
+      ...(person.character !== undefined ? { character: readText(person.character) } : {}),
+      ...(person.job !== undefined ? { job: readText(person.job) } : {}),
+      profilePath:
+        readText(person.profilePath) ??
+        tmdbImageUrl(person.profile_path, "w185"),
+    }));
+  return people;
+}
+
 // Reduce a TMDB /tv/{id}/season/{n} response (raw or already-normalized) to
 // only what up-next and the episode guide need, keeping D1 rows small.
 export function slimSeasonPayload(payload: unknown): CachedSeasonPayload | null {
@@ -56,12 +109,18 @@ export function slimSeasonPayload(payload: unknown): CachedSeasonPayload | null 
     seasonNumber?: unknown;
     air_date?: unknown;
     airDate?: unknown;
+    poster_path?: unknown;
+    posterPath?: unknown;
     episodes?: unknown;
   } | null;
   const seasonNumber = readNumber(raw?.seasonNumber ?? raw?.season_number);
   if (seasonNumber === null || !Array.isArray(raw?.episodes)) {
     return null;
   }
+
+  // People data is only worth caching for normal-length seasons; a 100+
+  // episode soap season would balloon the row for detail nobody scrolls.
+  const includePeople = raw.episodes.length <= SEASON_PEOPLE_EPISODE_LIMIT;
 
   const episodes = raw.episodes.flatMap((episode: any): CachedSeasonEpisode[] => {
     const episodeNumber = readNumber(episode?.episodeNumber ?? episode?.episode_number);
@@ -81,6 +140,17 @@ export function slimSeasonPayload(payload: unknown): CachedSeasonPayload | null 
         runtime: readNumber(episode?.runtime),
         voteAverage: readNumber(episode?.voteAverage ?? episode?.vote_average),
         voteCount: readNumber(episode?.voteCount ?? episode?.vote_count),
+        ...(includePeople
+          ? {
+              guestStars:
+                slimSeasonPeople(
+                  episode?.guestStars ?? episode?.guest_stars,
+                  GUEST_STARS_PER_EPISODE,
+                ) ?? [],
+              crew:
+                slimSeasonPeople(episode?.crew, CREW_PER_EPISODE, CACHED_CREW_JOBS) ?? [],
+            }
+          : {}),
       },
     ];
   });
@@ -89,6 +159,9 @@ export function slimSeasonPayload(payload: unknown): CachedSeasonPayload | null 
     seasonNumber,
     airDate: readText(raw?.airDate ?? raw?.air_date),
     episodes: episodes.sort((left, right) => left.episodeNumber - right.episodeNumber),
+    version: SEASON_CACHE_PAYLOAD_VERSION,
+    posterPath:
+      readText(raw?.posterPath) ?? tmdbImageUrl(raw?.poster_path, "w342"),
   };
 }
 
@@ -127,36 +200,37 @@ export async function readSeasonCacheEntries(
     return results;
   }
 
-  // Batches stay under D1's 100-bound-parameter cap even when a caller asks
-  // for hundreds of (show, season) pairs at once.
-  const rows: Array<typeof tmdbSeasonCache.$inferSelect> = [];
-  for (const requestChunk of chunkForSqlParams(requests, 2, 80)) {
-    const externalIds = Array.from(new Set(requestChunk.map((request) => request.externalId)));
-    const seasonNumbers = Array.from(
-      new Set(requestChunk.map((request) => request.seasonNumber)),
-    );
-    rows.push(
-      ...(await db
-        .select()
-        .from(tmdbSeasonCache)
-        .where(
-          and(
-            eq(tmdbSeasonCache.externalSource, "tmdb"),
-            inArray(tmdbSeasonCache.externalId, externalIds),
-            inArray(tmdbSeasonCache.seasonNumber, seasonNumbers),
-          ),
-        )),
-    );
-  }
-
-  const wanted = new Set(
-    requests.map((request) => seasonCacheKey(request.externalId, request.seasonNumber)),
+  // Row-value IN matches exact (show, season) pairs — the old ids×numbers
+  // cross-product could fetch up to chunk² rows to use chunk. Batches stay
+  // under D1's 100-bound-parameter cap, run in parallel.
+  const uniqueRequests = Array.from(
+    new Map(
+      requests.map((request) => [seasonCacheKey(request.externalId, request.seasonNumber), request]),
+    ).values(),
   );
+  const rows = (
+    await Promise.all(
+      chunkForSqlParams(uniqueRequests, 2, 80).map((requestChunk) =>
+        db
+          .select()
+          .from(tmdbSeasonCache)
+          .where(
+            and(
+              eq(tmdbSeasonCache.externalSource, "tmdb"),
+              sql`(${tmdbSeasonCache.externalId}, ${tmdbSeasonCache.seasonNumber}) IN (VALUES ${sql.join(
+                requestChunk.map(
+                  (request) => sql`(${request.externalId}, ${request.seasonNumber})`,
+                ),
+                sql`, `,
+              )})`,
+            ),
+          ),
+      ),
+    )
+  ).flat();
+
   for (const row of rows) {
     const key = seasonCacheKey(row.externalId, row.seasonNumber);
-    if (!wanted.has(key)) {
-      continue;
-    }
     const payload = row.payload as CachedSeasonPayload | null;
     if (!payload || !Array.isArray(payload.episodes)) {
       continue;

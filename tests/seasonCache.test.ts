@@ -41,6 +41,8 @@ describe("season cache payload slimming", () => {
     expect(payload).toEqual({
       seasonNumber: 2,
       airDate: "2026-04-22",
+      version: 2,
+      posterPath: null,
       episodes: [
         {
           seasonNumber: 2,
@@ -52,6 +54,8 @@ describe("season cache payload slimming", () => {
           runtime: null,
           voteAverage: null,
           voteCount: null,
+          guestStars: [],
+          crew: [],
         },
         {
           seasonNumber: 2,
@@ -63,6 +67,10 @@ describe("season cache payload slimming", () => {
           runtime: 52,
           voteAverage: 8.1,
           voteCount: 40,
+          // People without a name (the crew fixture) are dropped; the sheet
+          // only renders named credits.
+          guestStars: [{ id: null, name: "Guest", profilePath: null }],
+          crew: [],
         },
       ],
     });
