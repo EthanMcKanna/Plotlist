@@ -8,15 +8,21 @@ import type { QueryClient } from "@tanstack/react-query";
  * synchronously on launch, so the home page renders settled content on its
  * very first frame while fresh data loads behind it.
  *
- * Storage is the new expo-file-system File API (synchronous reads/writes) on
- * native, localStorage on web, and a no-op in-memory store anywhere else.
- * Everything here is best-effort: any failure degrades to a normal cold load.
+ * Storage is the new expo-file-system File API on native (synchronous reads
+ * for frame-one hydration, async debounced writes so persisting never blocks
+ * the JS thread), localStorage on web, and a no-op in-memory store anywhere
+ * else. Everything here is best-effort: any failure degrades to a normal
+ * cold load.
  */
 
 const WARM_CACHE_VERSION = 1;
 const WARM_CACHE_FILE_NAME = "plotlist-home-warm-cache-v1.json";
 const WARM_CACHE_WEB_KEY = "plotlistHomeWarmCacheV1";
 const WARM_CACHE_WRITE_DELAY_MS = 400;
+// Provider room lists persist their leading slice only; the full lists (and
+// item overviews) roughly quintuple the snapshot for content the first frame
+// never shows.
+const WARM_CATALOG_PROVIDER_ITEM_LIMIT = 8;
 
 export const HOME_WARM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -159,17 +165,30 @@ function createNativeFileStore(): WarmStore | null {
     const { File, Paths } = require("expo-file-system") as {
       File: new (...parts: unknown[]) => {
         exists: boolean;
+        uri: string;
         textSync: () => string;
         write: (content: string) => void;
         delete: () => void;
       };
       Paths: { cache: unknown };
     };
+    const { writeAsStringAsync } = require("expo-file-system/legacy") as {
+      writeAsStringAsync: (fileUri: string, contents: string) => Promise<void>;
+    };
     const file = new File(Paths.cache, WARM_CACHE_FILE_NAME);
     return {
+      // Reads stay synchronous: frame-one hydration depends on them.
       read: () => (file.exists ? file.textSync() : null),
       write: (value) => {
-        file.write(value);
+        // Persisting is debounced and best-effort, so it runs off the JS
+        // thread; the sync File write only covers async-API failures.
+        void writeAsStringAsync(file.uri, value).catch(() => {
+          try {
+            file.write(value);
+          } catch {
+            // Best-effort.
+          }
+        });
       },
       remove: () => {
         if (file.exists) file.delete();
@@ -289,9 +308,49 @@ export function recordHomeWarmQuery(
   scheduleWarmCacheWrite();
 }
 
+function trimHomeWarmCatalogItem(item: unknown) {
+  if (!item || typeof item !== "object" || !("overview" in item)) return item;
+  const { overview: _overview, ...rest } = item as Record<string, unknown>;
+  return rest;
+}
+
+/**
+ * Slim the catalog payload before persisting: overviews are dropped and
+ * provider rooms keep only their leading items. `normalizeHomeCatalogPayload`
+ * treats both as optional, so the trimmed shape hydrates unchanged.
+ */
+export function trimHomeWarmCatalogPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const source = payload as Record<string, unknown>;
+  const trimmed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (key === "providers" && value && typeof value === "object") {
+      trimmed[key] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(
+          ([providerKey, items]) => [
+            providerKey,
+            Array.isArray(items)
+              ? items
+                  .slice(0, WARM_CATALOG_PROVIDER_ITEM_LIMIT)
+                  .map(trimHomeWarmCatalogItem)
+              : items,
+          ],
+        ),
+      );
+    } else if (Array.isArray(value)) {
+      trimmed[key] = value.map(trimHomeWarmCatalogItem);
+    } else {
+      trimmed[key] = value;
+    }
+  }
+  return trimmed;
+}
+
 export function recordHomeWarmCatalog(payload: unknown, now = Date.now()) {
   const target = getWritableCache(now);
-  target.catalog = payload;
+  target.catalog = trimHomeWarmCatalogPayload(payload);
   target.catalogSavedAt = now;
   scheduleWarmCacheWrite();
 }

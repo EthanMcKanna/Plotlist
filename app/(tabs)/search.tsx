@@ -56,6 +56,7 @@ import type { AccentTheme } from "../../lib/appearance";
 import { useAccent } from "../../lib/appearanceStore";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import { queryClient } from "../../lib/queryClient";
+import { TabMountPlaceholder, useDeferredTabMount } from "../../lib/useDeferredTabMount";
 import { useIsDesktopWeb } from "../../lib/webLayout";
 import { FACET_DEFS } from "../../lib/plotlist/facets";
 
@@ -223,6 +224,14 @@ function SearchErrorCard({
 /* ─── Main Screen ──────────────────────────────────────────────────── */
 
 export default function SearchScreen() {
+  const tabMounted = useDeferredTabMount();
+  if (!tabMounted) {
+    return <TabMountPlaceholder />;
+  }
+  return <SearchScreenContent />;
+}
+
+function SearchScreenContent() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");

@@ -19,6 +19,7 @@ import { api } from "../lib/plotlist/api";
 import { getUserFacingApiErrorMessage } from "../lib/api/client";
 import { uploadAvatarImage } from "../lib/avatarUpload";
 import { notifyError } from "../lib/dialogs";
+import { resolveStorageUrl } from "../lib/storageUrl";
 import { sanitizeUsername, validateUsername } from "../lib/username";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 
@@ -32,10 +33,7 @@ export function OnboardingProfileStep({
   const me = useQuery(api.users.me);
   const updateProfile = useMutation(api.users.updateProfile);
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
-  const avatarUrl = useQuery(
-    api.storage.getUrl,
-    me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
-  );
+  const avatarUrl = resolveStorageUrl(me?.avatarStorageId);
 
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");

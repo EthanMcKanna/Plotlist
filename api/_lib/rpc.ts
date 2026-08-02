@@ -283,7 +283,6 @@ function pageRows<T>(rows: T[], args: any) {
   const next = start + page.length;
   return {
     page,
-    results: page,
     continueCursor: String(next),
     isDone: next >= rows.length,
   };
@@ -623,44 +622,55 @@ async function backfillReleasedEpisodes(
       episode.episodeNumber,
     )?.name ?? null;
 
-  for (const chunk of chunkForSqlParams(missing, 6, 80)) {
-    await db
-      .insert(episodeProgress)
-      .values(
-        chunk.map((episode) => ({
-          id: createId("episode"),
-          userId,
-          showId,
-          seasonNumber: episode.seasonNumber,
-          episodeNumber: episode.episodeNumber,
-          watchedAt: now,
-        })),
-      )
-      .onConflictDoNothing({
-        target: [
-          episodeProgress.userId,
-          episodeProgress.showId,
-          episodeProgress.seasonNumber,
-          episodeProgress.episodeNumber,
-        ],
-      });
-  }
   // Diary contract: the backfill logs each newly watched episode (so the log
   // page and stats register the completion) but never fans out to follower
-  // feeds — one tap must not post hundreds of feed items.
-  for (const chunk of chunkForSqlParams(missing, 8, 80)) {
-    await db.insert(watchLogs).values(
-      chunk.map((episode) => ({
-        id: createId("log"),
-        userId,
-        showId,
-        watchedAt: now,
-        note: null,
-        seasonNumber: episode.seasonNumber,
-        episodeNumber: episode.episodeNumber,
-        episodeTitle: titleFor(episode),
-        createdAt: now,
-      })),
+  // feeds — one tap must not post hundreds of feed items. All chunks ride a
+  // single db.batch so a 100-episode show is one D1 round trip, not ~30.
+  const backfillStatements = [
+    ...chunkForSqlParams(missing, 6, 80).map((chunk) =>
+      db
+        .insert(episodeProgress)
+        .values(
+          chunk.map((episode) => ({
+            id: createId("episode"),
+            userId,
+            showId,
+            seasonNumber: episode.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+            watchedAt: now,
+          })),
+        )
+        .onConflictDoNothing({
+          target: [
+            episodeProgress.userId,
+            episodeProgress.showId,
+            episodeProgress.seasonNumber,
+            episodeProgress.episodeNumber,
+          ],
+        }),
+    ),
+    ...chunkForSqlParams(missing, 8, 80).map((chunk) =>
+      db.insert(watchLogs).values(
+        chunk.map((episode) => ({
+          id: createId("log"),
+          userId,
+          showId,
+          watchedAt: now,
+          note: null,
+          seasonNumber: episode.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeTitle: titleFor(episode),
+          createdAt: now,
+        })),
+      ),
+    ),
+  ];
+  if (backfillStatements.length > 0) {
+    await db.batch(
+      backfillStatements as [
+        (typeof backfillStatements)[number],
+        ...(typeof backfillStatements)[number][],
+      ],
     );
   }
   return { marked: missing.length };
@@ -1150,46 +1160,57 @@ async function buildUserProfile(
     };
   }
 
-  const ratingAggRows = await db
-    .select({
-      average: sql<number | null>`avg(${reviews.rating})`,
-      total: sql<number>`count(*)`,
-    })
-    .from(reviews)
-    .where(eq(reviews.authorId, profileUser.id));
+  // Every section below is independent — one parallel wave instead of the
+  // old six serial round trips (profile is a top-3 screen).
+  const favoriteShowIds = permissions.favorites ? profileUser.favoriteShowIds ?? [] : [];
+  const [
+    ratingAggRows,
+    favoriteShowRows,
+    { topRatedRows, topRatedShowRows },
+    currentlyWatching,
+    watchlistPreview,
+    libraryCounts,
+  ] = await Promise.all([
+    db
+      .select({
+        average: sql<number | null>`avg(${reviews.rating})`,
+        total: sql<number>`count(*)`,
+      })
+      .from(reviews)
+      .where(eq(reviews.authorId, profileUser.id)),
+    favoriteShowIds.length > 0
+      ? db.select().from(shows).where(inArray(shows.id, favoriteShowIds))
+      : Promise.resolve([] as (typeof shows.$inferSelect)[]),
+    (async () => {
+      const topRatedRows = await db
+        .select()
+        .from(reviews)
+        .where(eq(reviews.authorId, profileUser.id))
+        .orderBy(desc(reviews.rating), desc(reviews.createdAt))
+        .limit(12);
+      const topRatedShowRows =
+        topRatedRows.length > 0
+          ? await db
+              .select()
+              .from(shows)
+              .where(inArray(shows.id, topRatedRows.map((row) => row.showId)))
+          : [];
+      return { topRatedRows, topRatedShowRows };
+    })(),
+    permissions.currentlyWatching ? getWatchStateShowPreviews(profileUser.id, "watching") : [],
+    permissions.watchlist ? getWatchStateShowPreviews(profileUser.id, "watchlist") : [],
+    getUserLibraryCounts(profileUser.id),
+  ]);
   const averageRating =
     Number(ratingAggRows[0]?.total ?? 0) > 0 && ratingAggRows[0]?.average != null
       ? Number(Number(ratingAggRows[0].average).toFixed(1))
       : null;
-
-  const favoriteShowIds = permissions.favorites ? profileUser.favoriteShowIds ?? [] : [];
-  const favoriteShowRows =
-    favoriteShowIds.length > 0
-      ? await db.select().from(shows).where(inArray(shows.id, favoriteShowIds))
-      : [];
   const favoriteShowById = new Map(favoriteShowRows.map((show) => [show.id, show] as const));
   const favoriteShows = favoriteShowIds
     .map((showId) => favoriteShowById.get(showId))
     .filter((show): show is typeof shows.$inferSelect => Boolean(show))
     .map(toShowPreview);
-
-  const topRatedRows = await db
-    .select()
-    .from(reviews)
-    .where(eq(reviews.authorId, profileUser.id))
-    .orderBy(desc(reviews.rating), desc(reviews.createdAt))
-    .limit(12);
-  const topRatedShowRows =
-    topRatedRows.length > 0
-      ? await db.select().from(shows).where(inArray(shows.id, topRatedRows.map((row) => row.showId)))
-      : [];
   const topRatedShowById = new Map(topRatedShowRows.map((show) => [show.id, show] as const));
-
-  const [currentlyWatching, watchlistPreview, libraryCounts] = await Promise.all([
-    permissions.currentlyWatching ? getWatchStateShowPreviews(profileUser.id, "watching") : [],
-    permissions.watchlist ? getWatchStateShowPreviews(profileUser.id, "watchlist") : [],
-    getUserLibraryCounts(profileUser.id),
-  ]);
 
   return {
     user: toClientUser(profileUser),
@@ -1238,7 +1259,7 @@ function buildReleaseCalendarFromRows(
   rows: Array<typeof releaseEvents.$inferSelect>,
   showRows: Array<typeof shows.$inferSelect>,
   args: {
-    detailRows?: Array<typeof tmdbDetailsCache.$inferSelect>;
+    detailRows?: SlimTmdbDetailRow[];
     limit?: number;
     cursor?: string | null;
     today: string;
@@ -1313,21 +1334,66 @@ function mergeUniqueShowIds(...groups: Array<string[] | null | undefined>) {
   );
 }
 
-async function getTmdbDetailRowsForShows(showRows: Array<typeof shows.$inferSelect>) {
-  const tmdbExternalIds = showRows
-    .filter((show) => show.externalSource === "tmdb")
-    .map((show) => show.externalId);
-  return tmdbExternalIds.length > 0
-    ? await db
-        .select()
-        .from(tmdbDetailsCache)
-        .where(
-          and(
-            eq(tmdbDetailsCache.externalSource, "tmdb"),
-            inArray(tmdbDetailsCache.externalId, tmdbExternalIds),
+type SlimTmdbDetailRow = { externalId: string; payload: unknown };
+
+// Continue/up-next and the release calendar look at up to 250 shows per
+// request but only read seasons/status/last-aired/US-providers from each
+// cached payload. Extracting those fields in SQL keeps the transfer to a few
+// KB instead of ~100KB per show, and chunking stays under D1's 100-parameter
+// statement cap (the old unchunked IN list was a live failure risk).
+async function getSlimTmdbDetailRowsByExternalIds(
+  tmdbExternalIds: string[],
+): Promise<SlimTmdbDetailRow[]> {
+  const uniqueIds = Array.from(new Set(tmdbExternalIds));
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+  const rows = (
+    await Promise.all(
+      chunkForSqlParams(uniqueIds, 1).map((chunk) =>
+        db
+          .select({
+            externalId: tmdbDetailsCache.externalId,
+            status: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.status')`,
+            seasonsJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.seasons')`,
+            lastEpisodeJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$.last_episode_to_air'), json_extract(${tmdbDetailsCache.payload}, '$.lastEpisodeToAir'))`,
+            usProvidersJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$."watch/providers".results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watchProviders.results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watch_providers.results.US'))`,
+          })
+          .from(tmdbDetailsCache)
+          .where(
+            and(
+              eq(tmdbDetailsCache.externalSource, "tmdb"),
+              inArray(tmdbDetailsCache.externalId, chunk),
+            ),
           ),
-        )
-    : [];
+      ),
+    )
+  ).flat();
+  const parseJson = (raw: string | null) => {
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  };
+  return rows.map((row) => ({
+    externalId: row.externalId,
+    payload: {
+      status: row.status ?? undefined,
+      seasons: parseJson(row.seasonsJson),
+      last_episode_to_air: parseJson(row.lastEpisodeJson),
+      watchProviders: { results: { US: parseJson(row.usProvidersJson) } },
+    },
+  }));
+}
+
+async function getTmdbDetailRowsForShows(showRows: Array<typeof shows.$inferSelect>) {
+  return await getSlimTmdbDetailRowsByExternalIds(
+    showRows
+      .filter((show) => show.externalSource === "tmdb")
+      .map((show) => show.externalId),
+  );
 }
 
 function listToDoc(list: typeof lists.$inferSelect | null | undefined) {
@@ -1603,6 +1669,71 @@ function normalizeTmdbSeasonDetails(payload: any) {
       ? payload.episodes.map(normalizeTmdbEpisode)
       : [],
   };
+}
+
+// List surfaces only need the artwork fallback from the details cache, not
+// the whole cached payload (~80KB/show once serialized as `extendedDetails`).
+// One json_extract query covers every show; only /show/[id] reads the full
+// payload via showDocWithCachedArtwork below.
+async function attachCachedArtworkToShowRows(rows: (typeof shows.$inferSelect | null | undefined)[]) {
+  const docs = rows.map((row) => ({ row, doc: showToDoc(row) }));
+  const tmdbIds = Array.from(
+    new Set(
+      docs
+        .filter(({ row, doc }) => doc && row?.externalSource === "tmdb")
+        .map(({ row }) => row!.externalId),
+    ),
+  );
+  const artworkByExternalId = new Map<string, { backdropUrl: string | null; posterUrl: string | null }>();
+  if (tmdbIds.length) {
+    const cachedRows = (
+      await Promise.all(
+        chunkForSqlParams(tmdbIds, 1).map((chunk) =>
+          db
+            .select({
+              externalId: tmdbDetailsCache.externalId,
+              backdropPath: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.backdropPath')`,
+              rawBackdropPath: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.backdrop_path')`,
+              posterPath: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.posterPath')`,
+              rawPosterPath: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.poster_path')`,
+            })
+            .from(tmdbDetailsCache)
+            .where(
+              and(
+                eq(tmdbDetailsCache.externalSource, "tmdb"),
+                inArray(tmdbDetailsCache.externalId, chunk),
+              ),
+            ),
+        ),
+      )
+    ).flat();
+    for (const cached of cachedRows) {
+      artworkByExternalId.set(cached.externalId, {
+        backdropUrl: cached.backdropPath ?? tmdbImageUrl(cached.rawBackdropPath, "w1280") ?? null,
+        posterUrl: cached.posterPath ?? tmdbImageUrl(cached.rawPosterPath, "w500") ?? null,
+      });
+    }
+  }
+
+  return docs.map(({ row, doc }) => {
+    if (!doc || row?.externalSource !== "tmdb") {
+      return doc;
+    }
+    const artwork = artworkByExternalId.get(row.externalId);
+    const hasUsableStoredBackdrop =
+      typeof doc.backdropUrl === "string" && !doc.backdropUrl.includes("/original/");
+    const storedBackdropUrl =
+      typeof doc.backdropUrl === "string" && doc.backdropUrl.includes("/original/")
+        ? null
+        : doc.backdropUrl;
+    return {
+      ...doc,
+      backdropUrl: hasUsableStoredBackdrop
+        ? doc.backdropUrl
+        : storedBackdropUrl ?? artwork?.backdropUrl ?? null,
+      posterUrl: doc.posterUrl ?? artwork?.posterUrl ?? null,
+    };
+  });
 }
 
 async function showDocWithCachedArtwork(show: typeof shows.$inferSelect | null | undefined) {
@@ -2372,10 +2503,8 @@ async function getShowsWithCachedArtworkById(showIds: string[]) {
     return new Map<string, any>();
   }
   const rows = await db.select().from(shows).where(inArray(shows.id, showIds));
-  const docs = await Promise.all(
-    rows.map(async (show) => [show.id, await showDocWithCachedArtwork(show)] as const),
-  );
-  return new Map(docs);
+  const docs = await attachCachedArtworkToShowRows(rows);
+  return new Map(rows.map((show, index) => [show.id, docs[index]] as const));
 }
 
 function isCurrentHomeCandidate(show: { year?: number | null; updatedAt?: number | null } | null | undefined) {
@@ -3309,20 +3438,35 @@ async function buildFeed(userId: string, args: any) {
   // Rows fanned out before a block was created stay in the table but never
   // render for either side. Follow items name a second user (the person who
   // got followed), so those also hide when that user is blocked either way.
-  const actorVisibleRows = await filterRowsByBlockedAuthors(userId, allFeedRows, (row) => row.actorId);
-  const feedRows = await filterRowsByBlockedAuthors(
+  // One block lookup covers both dimensions.
+  const blockedIds = await getBlockedEitherWayIdSet(
     userId,
-    actorVisibleRows,
-    (row) => (row.type === "follow" ? row.targetId : row.actorId),
+    allFeedRows.flatMap((row) =>
+      row.type === "follow" ? [row.actorId, row.targetId] : [row.actorId],
+    ),
   );
-  const actorIds = Array.from(new Set(feedRows.map((row) => row.actorId)));
+  const feedRows =
+    blockedIds.size === 0
+      ? allFeedRows
+      : allFeedRows.filter(
+          (row) =>
+            !blockedIds.has(row.actorId) &&
+            !(row.type === "follow" && blockedIds.has(row.targetId)),
+        );
+  // Resolve entities only for the requested page — offsets still come from
+  // the full filtered list so cursors stay stable across pages.
+  const feedPagination = paginationArgs.parse(args ?? {});
+  const feedStart = Number(feedPagination.paginationOpts?.cursor ?? 0) || 0;
+  const feedNumItems = feedPagination.paginationOpts?.numItems ?? 20;
+  const pageFeedRows = feedRows.slice(feedStart, feedStart + feedNumItems);
+  const actorIds = Array.from(new Set(pageFeedRows.map((row) => row.actorId)));
   const showIds = Array.from(
-    new Set(feedRows.map((row) => row.showId).filter((id): id is string => Boolean(id))),
+    new Set(pageFeedRows.map((row) => row.showId).filter((id): id is string => Boolean(id))),
   );
-  const reviewIds = feedRows.filter((row) => row.type === "review").map((row) => row.targetId);
-  const logIds = feedRows.filter((row) => row.type === "log").map((row) => row.targetId);
-  const followedUserIds = feedRows.filter((row) => row.type === "follow").map((row) => row.targetId);
-  const listIds = feedRows.filter((row) => row.type === "list").map((row) => row.targetId);
+  const reviewIds = pageFeedRows.filter((row) => row.type === "review").map((row) => row.targetId);
+  const logIds = pageFeedRows.filter((row) => row.type === "log").map((row) => row.targetId);
+  const followedUserIds = pageFeedRows.filter((row) => row.type === "follow").map((row) => row.targetId);
+  const listIds = pageFeedRows.filter((row) => row.type === "list").map((row) => row.targetId);
   const [actorRows, showRows, reviewRows, logRows, followedUserRows, listRows] = await Promise.all([
     actorIds.length ? db.select().from(users).where(inArray(users.id, actorIds)) : [],
     showIds.length ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
@@ -3341,18 +3485,21 @@ async function buildFeed(userId: string, args: any) {
   const listMap = new Map(
     listRows.filter((list) => list.isPublic).map((list) => [list.id, toDoc(list)] as const),
   );
-  return pageRows(
-    feedRows.map((item) => ({
-      ...toDoc(item),
-      actor: actors.get(item.actorId) ?? null,
-      show: item.showId ? showMap.get(item.showId) ?? null : null,
-      review: item.type === "review" ? reviewMap.get(item.targetId) ?? null : null,
-      log: item.type === "log" ? logMap.get(item.targetId) ?? null : null,
-      followedUser: item.type === "follow" ? followedUserMap.get(item.targetId) ?? null : null,
-      list: item.type === "list" ? listMap.get(item.targetId) ?? null : null,
-    })),
-    args,
-  );
+  const page = pageFeedRows.map((item) => ({
+    ...toDoc(item),
+    actor: actors.get(item.actorId) ?? null,
+    show: item.showId ? showMap.get(item.showId) ?? null : null,
+    review: item.type === "review" ? reviewMap.get(item.targetId) ?? null : null,
+    log: item.type === "log" ? logMap.get(item.targetId) ?? null : null,
+    followedUser: item.type === "follow" ? followedUserMap.get(item.targetId) ?? null : null,
+    list: item.type === "list" ? listMap.get(item.targetId) ?? null : null,
+  }));
+  const feedNext = feedStart + pageFeedRows.length;
+  return {
+    page,
+    continueCursor: String(feedNext),
+    isDone: feedNext >= feedRows.length,
+  };
 }
 
 async function buildWatchLogActivity(userId: string, args: any) {
@@ -3775,21 +3922,7 @@ async function loadContinueCandidates(
     releaseRowsByShowId.set(event.showId, existing);
   }
 
-  const tmdbExternalIds = showRows
-    .filter((show) => show.externalSource === "tmdb")
-    .map((show) => show.externalId);
-  const detailRows =
-    tmdbExternalIds.length > 0
-      ? await db
-          .select()
-          .from(tmdbDetailsCache)
-          .where(
-            and(
-              eq(tmdbDetailsCache.externalSource, "tmdb"),
-              inArray(tmdbDetailsCache.externalId, tmdbExternalIds),
-            ),
-          )
-      : [];
+  const detailRows = await getTmdbDetailRowsForShows(showRows);
   const detailsByExternalId = new Map(
     detailRows.map((row) => [row.externalId, row.payload] as const),
   );
@@ -3979,15 +4112,24 @@ async function loadContinueCandidates(
   if (statusWriteBacks.length > 0) {
     // Bounded and best-effort: the read already computed the truth, the
     // write-back just persists it for the next surface that trusts the row.
-    await Promise.all(
-      statusWriteBacks.slice(0, 25).map((write) =>
+    // One batch instead of 25 concurrent UPDATEs fighting for the write lock
+    // on a read path.
+    const writeBackStatements = statusWriteBacks
+      .slice(0, 25)
+      .map((write) =>
         db
           .update(watchStates)
           .set({ status: write.status, updatedAt: write.updatedAt })
-          .where(eq(watchStates.id, write.id))
-          .catch(() => {}),
-      ),
-    );
+          .where(eq(watchStates.id, write.id)),
+      );
+    await db
+      .batch(
+        writeBackStatements as [
+          (typeof writeBackStatements)[number],
+          ...(typeof writeBackStatements)[number][],
+        ],
+      )
+      .catch(() => {});
   }
 
   return { candidates, now, today };
@@ -4043,8 +4185,10 @@ export const queryHandlers: Record<string, RpcHandler> = {
   },
   "users:profile": async ({ args, req }) => {
     const userId = z.object({ userId: z.string() }).parse(args ?? {}).userId;
-    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    const viewer = await getOptionalAuthUser(req);
+    const [rows, viewer] = await Promise.all([
+      db.select().from(users).where(eq(users.id, userId)).limit(1),
+      getOptionalAuthUser(req),
+    ]);
     return rows[0] ? await buildUserProfile(rows[0], viewer) : null;
   },
   "users:search": async ({ args, req }) => {
@@ -4156,7 +4300,6 @@ export const queryHandlers: Record<string, RpcHandler> = {
     });
     return {
       page,
-      results: page,
       continueCursor: String(offset + pageEdges.length),
       isDone: rows.length <= numItems,
     };
@@ -4201,7 +4344,6 @@ export const queryHandlers: Record<string, RpcHandler> = {
     });
     return {
       page,
-      results: page,
       continueCursor: String(offset + pageEdges.length),
       isDone: rows.length <= numItems,
     };
@@ -4319,31 +4461,39 @@ export const queryHandlers: Record<string, RpcHandler> = {
 
     const likeCounts = new Map<string, number>();
     const viewerLikedIds = new Set<string>();
-    for (const chunk of chunkForSqlParams(rows.map((row) => row.id), 1)) {
-      const countRows = await db
-        .select({ targetId: likes.targetId, value: count() })
-        .from(likes)
-        .where(and(eq(likes.targetType, "comment"), inArray(likes.targetId, chunk)))
-        .groupBy(likes.targetId);
-      for (const row of countRows) {
-        likeCounts.set(row.targetId, row.value);
-      }
-      if (viewer) {
-        const likedRows = await db
-          .select({ targetId: likes.targetId })
+    await Promise.all(
+      chunkForSqlParams(rows.map((row) => row.id), 1).flatMap((chunk) => [
+        db
+          .select({ targetId: likes.targetId, value: count() })
           .from(likes)
-          .where(
-            and(
-              eq(likes.userId, viewer.id),
-              eq(likes.targetType, "comment"),
-              inArray(likes.targetId, chunk),
-            ),
-          );
-        for (const row of likedRows) {
-          viewerLikedIds.add(row.targetId);
-        }
-      }
-    }
+          .where(and(eq(likes.targetType, "comment"), inArray(likes.targetId, chunk)))
+          .groupBy(likes.targetId)
+          .then((countRows) => {
+            for (const row of countRows) {
+              likeCounts.set(row.targetId, row.value);
+            }
+          }),
+        ...(viewer
+          ? [
+              db
+                .select({ targetId: likes.targetId })
+                .from(likes)
+                .where(
+                  and(
+                    eq(likes.userId, viewer.id),
+                    eq(likes.targetType, "comment"),
+                    inArray(likes.targetId, chunk),
+                  ),
+                )
+                .then((likedRows) => {
+                  for (const row of likedRows) {
+                    viewerLikedIds.add(row.targetId);
+                  }
+                }),
+            ]
+          : []),
+      ]),
+    );
 
     type ThreadEntry = { comment: any; author: unknown; replies: ThreadEntry[] };
     const entryById = new Map<string, ThreadEntry>(
@@ -4725,28 +4875,30 @@ export const queryHandlers: Record<string, RpcHandler> = {
     // Follows are already a privacy-safe audience: private accounts approve
     // followers, and blocks sever the edge in both directions.
     const followRows = await db
-      .select()
+      .select({ followeeId: follows.followeeId })
       .from(follows)
       .where(eq(follows.followerId, viewer.id));
     const followeeIds = followRows.map((row) => row.followeeId);
     if (followeeIds.length === 0) {
       return { watchers: [], totalCount: 0 };
     }
-    const progressRows: Array<typeof episodeProgress.$inferSelect> = [];
-    for (const chunk of chunkForSqlParams(followeeIds, 1, 80)) {
-      const rows = await db
-        .select()
-        .from(episodeProgress)
-        .where(
-          and(
-            eq(episodeProgress.showId, parsed.showId),
-            eq(episodeProgress.seasonNumber, parsed.seasonNumber),
-            eq(episodeProgress.episodeNumber, parsed.episodeNumber),
-            inArray(episodeProgress.userId, chunk),
-          ),
-        );
-      progressRows.push(...rows);
-    }
+    const progressRows = (
+      await Promise.all(
+        chunkForSqlParams(followeeIds, 1, 80).map((chunk) =>
+          db
+            .select()
+            .from(episodeProgress)
+            .where(
+              and(
+                eq(episodeProgress.showId, parsed.showId),
+                eq(episodeProgress.seasonNumber, parsed.seasonNumber),
+                eq(episodeProgress.episodeNumber, parsed.episodeNumber),
+                inArray(episodeProgress.userId, chunk),
+              ),
+            ),
+        ),
+      )
+    ).flat();
     if (progressRows.length === 0) {
       return { watchers: [], totalCount: 0 };
     }
@@ -4954,18 +5106,19 @@ export const queryHandlers: Record<string, RpcHandler> = {
         { diversityStrength: 0.18 },
       ).slice(0, limit - ranked.length);
       const fallbackRowsById = new Map(fallbackRows.map((show) => [show.id, show]));
-      const fallbackDocs = await Promise.all(
-        fallbackRanked.map(async (show) => ({
-          showId: show._id,
-          signal: {
-            score: show.homeScore,
-            reviewCount: 0,
-            logCount: 0,
-            statusCount: 0,
-          },
-          show: await showDocWithCachedArtwork(fallbackRowsById.get(show._id)),
-        })),
+      const fallbackArtworkDocs = await attachCachedArtworkToShowRows(
+        fallbackRanked.map((show) => fallbackRowsById.get(show._id)),
       );
+      const fallbackDocs = fallbackRanked.map((show, index) => ({
+        showId: show._id,
+        signal: {
+          score: show.homeScore,
+          reviewCount: 0,
+          logCount: 0,
+          statusCount: 0,
+        },
+        show: fallbackArtworkDocs[index],
+      }));
       return [
         ...ranked.map(({ showId, signal }, index) => ({
           rank: index + 1,
@@ -5233,7 +5386,6 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const next = start + rows.length;
     return {
       page,
-      results: page,
       continueCursor: String(next),
       isDone: rows.length < numItems,
     };
@@ -6500,28 +6652,74 @@ export const mutationHandlers: Record<string, RpcHandler> = {
           ),
         )
       : parsed.episodes;
-    for (const episode of markableEpisodes) {
-      const created = await insertEpisodeProgressOnce({
-        userId: user.id,
-        showId: parsed.showId,
-        seasonNumber: parsed.seasonNumber,
-        episodeNumber: episode.episodeNumber,
-        watchedAt: now,
-      });
-      // Bulk marks default to createLog=false so status-change backfills and
-      // older clients stay out of the diary; the explicit season button opts
-      // in. Never fan out to feeds here — one tap must not post an item per
-      // episode to every follower.
-      if (parsed.createLog === true && created) {
-        await createEpisodeWatchLog({
-          userId: user.id,
-          showId: parsed.showId,
-          seasonNumber: parsed.seasonNumber,
-          episodeNumber: episode.episodeNumber,
-          episodeTitle: episode.title,
-          watchedAt: now,
-          fanOutToFeeds: false,
-        });
+    // One batched round trip instead of 1-2 serial inserts per episode (a
+    // 22-episode season used to cost up to 44 D1 round trips behind one tap).
+    // RETURNING tells us which rows were actually created so the diary only
+    // logs new marks. Bulk marks default to createLog=false so status-change
+    // backfills and older clients stay out of the diary; the explicit season
+    // button opts in. Never fan out to feeds here — one tap must not post an
+    // item per episode to every follower.
+    const progressInsertStatements = chunkForSqlParams(markableEpisodes, 6, 80).map((chunk) =>
+      db
+        .insert(episodeProgress)
+        .values(
+          chunk.map((episode) => ({
+            id: createId("episode"),
+            userId: user.id,
+            showId: parsed.showId,
+            seasonNumber: parsed.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+            watchedAt: now,
+          })),
+        )
+        .onConflictDoNothing({
+          target: [
+            episodeProgress.userId,
+            episodeProgress.showId,
+            episodeProgress.seasonNumber,
+            episodeProgress.episodeNumber,
+          ],
+        })
+        .returning({ episodeNumber: episodeProgress.episodeNumber }),
+    );
+    const insertResults =
+      progressInsertStatements.length > 0
+        ? await db.batch(
+            progressInsertStatements as [
+              (typeof progressInsertStatements)[number],
+              ...(typeof progressInsertStatements)[number][],
+            ],
+          )
+        : [];
+    if (parsed.createLog === true) {
+      const createdEpisodeNumbers = new Set(
+        insertResults.flat().map((row) => row.episodeNumber),
+      );
+      const loggableEpisodes = markableEpisodes.filter((episode) =>
+        createdEpisodeNumbers.has(episode.episodeNumber),
+      );
+      const logStatements = chunkForSqlParams(loggableEpisodes, 8, 80).map((chunk) =>
+        db.insert(watchLogs).values(
+          chunk.map((episode) => ({
+            id: createId("log"),
+            userId: user.id,
+            showId: parsed.showId,
+            watchedAt: now,
+            note: null,
+            seasonNumber: parsed.seasonNumber,
+            episodeNumber: episode.episodeNumber,
+            episodeTitle: episode.title ?? null,
+            createdAt: now,
+          })),
+        ),
+      );
+      if (logStatements.length > 0) {
+        await db.batch(
+          logStatements as [
+            (typeof logStatements)[number],
+            ...(typeof logStatements)[number][],
+          ],
+        );
       }
     }
     await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");

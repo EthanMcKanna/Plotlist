@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react";
+import { memo, useMemo, useState, type ComponentProps } from "react";
 import {
   Platform,
   Pressable,
@@ -87,7 +87,7 @@ export function getSignatureRailItemAccessibilityLabel(
     .join(". ");
 }
 
-export function SignatureRail({
+export const SignatureRail = memo(function SignatureRail({
   index,
   kicker,
   title,
@@ -154,9 +154,9 @@ export function SignatureRail({
       </HorizontalRail>
     </View>
   );
-}
+});
 
-function FeatureCard({
+const FeatureCard = memo(function FeatureCard({
   item,
   accent,
   width,
@@ -172,7 +172,16 @@ function FeatureCard({
   onPress: (item: SignatureRailItem) => void;
 }) {
   const imageUrl = item.backdropUrl?.trim() || item.posterUrl?.trim() || null;
-  const meta = getFeatureCardVisibleMetaLabels(item, fallbackMetaLabel);
+  // The meta line and accessibility label run several regexes each, so they
+  // only recompute when the item itself changes.
+  const meta = useMemo(
+    () => getFeatureCardVisibleMetaLabels(item, fallbackMetaLabel),
+    [fallbackMetaLabel, item],
+  );
+  const accessibilityLabel = useMemo(
+    () => getSignatureRailItemAccessibilityLabel(item, fallbackMetaLabel),
+    [fallbackMetaLabel, item],
+  );
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const shouldShowImage = Boolean(imageUrl && !imageFailed);
@@ -180,10 +189,7 @@ function FeatureCard({
 
   const cardProps = {
     accessibilityRole: "button" as const,
-    accessibilityLabel: getSignatureRailItemAccessibilityLabel(
-      item,
-      fallbackMetaLabel,
-    ),
+    accessibilityLabel,
     testID: `feature-card-${item.key}`,
     style: styles.featureCard,
     className: "active:opacity-90 hover:opacity-90 web:transition-opacity",
@@ -269,7 +275,7 @@ function FeatureCard({
       )}
     </Animated.View>
   );
-}
+});
 
 const POSTER_WIDTH = 118;
 const POSTER_HEIGHT = 177;
@@ -372,7 +378,7 @@ export function getPosterCardVisibleMetaLine(item: SignatureRailItem) {
   ).join(" · ");
 }
 
-function PosterCard({
+const PosterCard = memo(function PosterCard({
   item,
   accent,
   index,
@@ -383,7 +389,18 @@ function PosterCard({
   index: number;
   onPress: (item: SignatureRailItem) => void;
 }) {
-  const metaLine = getPosterCardVisibleMetaLine(item);
+  // The meta line and accessibility label run several regexes each, so they
+  // only recompute when the item itself changes.
+  const metaLine = useMemo(() => getPosterCardVisibleMetaLine(item), [item]);
+  const accessibilityLabel = useMemo(
+    () =>
+      getSignatureRailItemAccessibilityLabel(item, undefined, {
+        compactSignal: true,
+      }),
+    [item],
+  );
+  // Load-state stays: the fallback must unmount once artwork lands so its
+  // title/meta text leaves the tree (poster cards otherwise read double).
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const posterUrl = item.posterUrl?.trim() || null;
@@ -392,9 +409,7 @@ function PosterCard({
 
   const cardProps = {
     accessibilityRole: "button" as const,
-    accessibilityLabel: getSignatureRailItemAccessibilityLabel(item, undefined, {
-      compactSignal: true,
-    }),
+    accessibilityLabel,
     className: "active:opacity-85 hover:opacity-90 web:transition-opacity",
   };
 
@@ -407,6 +422,7 @@ function PosterCard({
           style={styles.posterImage}
           contentFit="cover"
           cachePolicy="memory-disk"
+          recyclingKey={item.key}
           onLoad={() => setImageLoaded(true)}
           onError={() => setImageFailed(true)}
         />
@@ -420,7 +436,7 @@ function PosterCard({
   return (
     <Animated.View
       entering={
-        ENABLE_ENTRY_ANIMATIONS
+        ENABLE_ENTRY_ANIMATIONS && index < 5
           ? FadeInRight.delay(index * 25).duration(280)
           : undefined
       }
@@ -449,7 +465,7 @@ function PosterCard({
       )}
     </Animated.View>
   );
-}
+});
 
 function PosterFallback({
   item,

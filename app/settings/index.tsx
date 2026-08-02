@@ -36,6 +36,7 @@ import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import { resolveStorageUrl } from "../../lib/storageUrl";
 import {
   PURCHASES_SUPPORTED,
   presentProPaywall,
@@ -361,10 +362,7 @@ export default function SettingsScreen() {
       setNotificationOverrides((current) => ({ ...current, [key]: !value }));
     });
   };
-  const avatarUrl = useQuery(
-    api.storage.getUrl,
-    me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
-  );
+  const avatarUrl = resolveStorageUrl(me?.avatarStorageId);
 
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");

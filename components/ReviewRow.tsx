@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,7 +24,7 @@ export function getReviewRowEpisodeLabel({
 // Compact review row in the comments design language: avatar + name/time
 // header, small star strip, plain text — no card chrome. Used where reviews
 // sit inline on a detail page (show page community reviews).
-export function ReviewRowCompact({
+export const ReviewRowCompact = memo(function ReviewRowCompact({
   id,
   rating,
   reviewText,
@@ -91,9 +92,9 @@ export function ReviewRowCompact({
       </View>
     </LinkPressable>
   );
-}
+});
 
-export function ReviewRow({
+export const ReviewRow = memo(function ReviewRow({
   id,
   showTitle,
   posterUrl,
@@ -222,4 +223,4 @@ export function ReviewRow({
       </View>
     </LinkPressable>
   );
-}
+});

@@ -16,16 +16,27 @@ type PurchasesUIModule = typeof import("react-native-purchases-ui");
 // SDK was added, so lazy-require inside try/catch and degrade to a
 // free-tier stub instead of crashing older dev clients. Web resolves
 // purchases.web.ts and never touches this file.
-let purchasesModule: PurchasesModule | null = null;
-if (Platform.OS === "ios" || Platform.OS === "android") {
-  try {
-    purchasesModule = require("react-native-purchases");
-  } catch {
-    purchasesModule = null;
+// The require is deferred to first use so the SDK's module graph stays off
+// the cold-start path (this file is reachable from the root layout via
+// PurchasesBridge).
+let purchasesModuleLoaded = false;
+let loadedPurchasesModule: PurchasesModule | null = null;
+
+function getPurchasesModule(): PurchasesModule | null {
+  if (!purchasesModuleLoaded) {
+    purchasesModuleLoaded = true;
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+      try {
+        loadedPurchasesModule = require("react-native-purchases");
+      } catch {
+        loadedPurchasesModule = null;
+      }
+    }
   }
+  return loadedPurchasesModule;
 }
 
-export const PURCHASES_SUPPORTED = purchasesModule !== null;
+export const PURCHASES_SUPPORTED = Platform.OS === "ios" || Platform.OS === "android";
 
 // RevenueCat public SDK keys — safe to ship in the client. iOS uses the
 // production App Store app key (real StoreKit products
@@ -93,7 +104,13 @@ export function subscribeProStatus(listener: () => void): () => void {
 // Idempotent; call once at startup (PurchasesBridge). Everything else in
 // this module silently no-ops until this has run.
 export function configurePurchases(): void {
-  if (!purchasesModule || configured) return;
+  if (configured) return;
+  const purchasesModule = getPurchasesModule();
+  if (!purchasesModule) {
+    // Binary without the SDK (older dev clients): nothing to wait for.
+    setStatus({ ...status, isReady: true });
+    return;
+  }
   configured = true;
   const { default: Purchases, LOG_LEVEL } = purchasesModule;
   try {
@@ -123,6 +140,7 @@ export function configurePurchases(): void {
 // survive reinstalls, follow the account across devices, and can be synced
 // to the backend via RevenueCat webhooks later. Pass null on sign-out.
 export async function syncPurchasesUser(userId: string | null): Promise<void> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) return;
   const { default: Purchases } = purchasesModule;
   try {
@@ -141,6 +159,7 @@ export async function syncPurchasesUser(userId: string | null): Promise<void> {
 }
 
 export async function refreshProStatus(): Promise<ProStatus> {
+  const purchasesModule = getPurchasesModule();
   if (purchasesModule && configured) {
     try {
       applyCustomerInfo(await purchasesModule.default.getCustomerInfo());
@@ -158,6 +177,7 @@ export async function refreshProStatus(): Promise<ProStatus> {
 export async function presentProPaywall(options?: {
   onlyIfNeeded?: boolean;
 }): Promise<PaywallOutcome> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) return "unavailable";
   let ui: PurchasesUIModule;
   try {
@@ -196,6 +216,7 @@ export async function presentProPaywall(options?: {
 export async function purchaseProPackage(
   pkg: PurchasesPackage,
 ): Promise<"purchased" | "cancelled"> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) {
     throw new Error("Purchases are not available in this build.");
   }
@@ -214,6 +235,7 @@ export async function purchaseProPackage(
 
 // Packages of the current offering (monthly/yearly), for custom paywalls.
 export async function getProPackages(): Promise<PurchasesPackage[]> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) return [];
   try {
     const offerings = await purchasesModule.default.getOfferings();
@@ -227,12 +249,14 @@ export async function getProPackages(): Promise<PurchasesPackage[]> {
 // Throws so the caller can distinguish "restore ran but found nothing"
 // (resolved status.isPro === false) from "restore failed".
 export async function restoreProPurchases(): Promise<ProStatus> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) return status;
   applyCustomerInfo(await purchasesModule.default.restorePurchases());
   return status;
 }
 
 export async function showManageSubscriptions(): Promise<void> {
+  const purchasesModule = getPurchasesModule();
   if (!purchasesModule || !configured) return;
   try {
     await purchasesModule.default.showManageSubscriptions();

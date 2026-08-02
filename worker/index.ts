@@ -180,6 +180,10 @@ const workerHandler = {
       assetResponse.status === 200 &&
       (assetResponse.headers.get("content-type") ?? "").includes("text/html")
     ) {
+      // Cloned up front: the success path consumes the body via .text(), so
+      // the failure fallback needs its own copy instead of re-fetching the
+      // asset a second time.
+      const fallbackResponse = assetResponse.clone();
       try {
         const preview = await getLinkPreview(url.pathname);
         if (preview) {
@@ -199,7 +203,7 @@ const workerHandler = {
         // default site-wide card) is always an acceptable fallback.
         console.error("[worker] link preview failed", url.pathname, error);
         Sentry.captureException(error);
-        return await env.ASSETS.fetch(request);
+        return fallbackResponse;
       }
     }
 

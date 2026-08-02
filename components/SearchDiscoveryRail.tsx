@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 
 import { SignatureRail, type SignatureRailItem } from "./SignatureRail";
 import type {
@@ -28,7 +28,7 @@ function getSearchDiscoveryItemKey(item: SearchDiscoverItem, index: number) {
 // Thin adapter over the home SignatureRail so search discovery sections share
 // the exact rail treatment as home: clean title header (no icon chip) and
 // pure poster cards (no title/dot/year caption under the artwork).
-export function SearchDiscoveryRail<Item extends SearchDiscoverItem>({
+function SearchDiscoveryRailInner<Item extends SearchDiscoverItem>({
   index,
   section,
   accent,
@@ -51,6 +51,16 @@ export function SearchDiscoveryRail<Item extends SearchDiscoverItem>({
     return { railItems: items, itemByKey: byKey };
   }, [section.items]);
 
+  const handlePressRailItem = useCallback(
+    (railItem: SignatureRailItem) => {
+      const original = itemByKey.get(railItem.key);
+      if (original) {
+        onPressItem(original);
+      }
+    },
+    [itemByKey, onPressItem],
+  );
+
   if (railItems.length === 0) return null;
 
   return (
@@ -65,12 +75,12 @@ export function SearchDiscoveryRail<Item extends SearchDiscoverItem>({
       limit={railItems.length}
       actionLabel={actionLabel}
       onAction={onAction}
-      onPressItem={(railItem) => {
-        const original = itemByKey.get(railItem.key);
-        if (original) {
-          onPressItem(original);
-        }
-      }}
+      onPressItem={handlePressRailItem}
     />
   );
 }
+
+// memo() erases the generic signature, so cast back to the inner type.
+export const SearchDiscoveryRail = memo(
+  SearchDiscoveryRailInner,
+) as typeof SearchDiscoveryRailInner;

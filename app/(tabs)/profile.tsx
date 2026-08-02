@@ -12,6 +12,8 @@ import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { LinkPressable } from "../../components/LinkPressable";
 import { formatWatchTimeLabel } from "../../lib/format";
 import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
+import { resolveStorageUrl } from "../../lib/storageUrl";
+import { TabMountPlaceholder, useDeferredTabMount } from "../../lib/useDeferredTabMount";
 import { useIsDesktopWeb } from "../../lib/webLayout";
 import type { WatchInsights } from "../../lib/watchInsights";
 
@@ -112,14 +114,19 @@ function MenuRow({ item, isLast }: { item: MenuItemDef; isLast: boolean }) {
 }
 
 export default function ProfileTab() {
+  const tabMounted = useDeferredTabMount();
+  if (!tabMounted) {
+    return <TabMountPlaceholder />;
+  }
+  return <ProfileTabContent />;
+}
+
+function ProfileTabContent() {
   const accent = useAccent();
   const router = useRouter();
   const isDesktopWeb = useIsDesktopWeb();
   const me = useQuery(api.users.me);
-  const avatarUrl = useQuery(
-    api.storage.getUrl,
-    me?.avatarStorageId ? { storageId: me.avatarStorageId } : "skip",
-  );
+  const avatarUrl = resolveStorageUrl(me?.avatarStorageId);
   const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
   const insights = useQuery(
     api.watchStats.getInsights,

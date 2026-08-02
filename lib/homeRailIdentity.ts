@@ -114,17 +114,15 @@ export function topUpHomeRailItemsPreservingSources<T extends HomeRailIdentityIt
   limit: number,
 ) {
   const selected: T[] = [];
-  const selectedKeys = new Set<string>();
+  // One mutable blocked set (preview keys plus everything selected so far)
+  // instead of rebuilding the preview/selected union per candidate.
+  const blockedKeys = new Set(previewKeys);
 
-  const currentBlockedKeys = () => new Set([...previewKeys, ...selectedKeys]);
   const tryAdd = (item: T) => {
     if (selected.length >= limit) return false;
     const identityKeys = getHomeRailIdentityKeys(item);
-    const alreadyUsed = identityKeys.some(
-      (key) => previewKeys.has(key) || selectedKeys.has(key),
-    );
-    if (alreadyUsed) return false;
-    identityKeys.forEach((key) => selectedKeys.add(key));
+    if (identityKeys.some((key) => blockedKeys.has(key))) return false;
+    identityKeys.forEach((key) => blockedKeys.add(key));
     selected.push(item);
     return true;
   };
@@ -132,14 +130,21 @@ export function topUpHomeRailItemsPreservingSources<T extends HomeRailIdentityIt
   items.forEach(tryAdd);
   sources.forEach((source) => {
     const candidates = source.candidates ?? source.items;
+    // A source's available count only changes when a selection lands, so it
+    // is recomputed after successful adds instead of rescanning source.items
+    // for every candidate.
+    let available = countAvailableHomeRailItems(source.items, blockedKeys);
+    let availableStale = false;
     candidates.forEach((item) => {
       if (selected.length >= limit) return;
-      const availableBefore = countAvailableHomeRailItems(
-        source.items,
-        currentBlockedKeys(),
-      );
-      if (availableBefore <= source.minimumRemaining) return;
-      tryAdd(item);
+      if (availableStale) {
+        available = countAvailableHomeRailItems(source.items, blockedKeys);
+        availableStale = false;
+      }
+      if (available <= source.minimumRemaining) return;
+      if (tryAdd(item)) {
+        availableStale = true;
+      }
     });
   });
 

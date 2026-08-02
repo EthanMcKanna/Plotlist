@@ -4,6 +4,9 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Nearly every request fans out into multiple sequential D1 round trips, so
+  // run the worker near the database instead of at the caller's PoP.
+  "placement": { "mode": "smart" },
   "routes": [
     { "pattern": "plotlist.app", "custom_domain": true },
     { "pattern": "www.plotlist.app", "custom_domain": true }

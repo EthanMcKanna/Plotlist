@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -60,6 +60,20 @@ export function useCommentThread(
   const entries = useMemo(() => normalizeCommentEntries(results), [results]);
   const totalCount = useMemo(() => countCommentEntries(entries), [entries]);
 
+  // Relative-time labels computed once per data change instead of per comment
+  // per render (date-fns formatting is the row render's hottest path).
+  const timeLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    const walk = (list: CommentEntry[]) => {
+      for (const entry of list) {
+        labels.set(entry.comment._id, formatRelativeTime(entry.comment.createdAt));
+        walk(entry.replies);
+      }
+    };
+    walk(entries);
+    return labels;
+  }, [entries]);
+
   // Reply state lives on the thread so the row that started the reply and
   // the composer that finishes it stay in sync.
   const [replyTo, setReplyTo] = useState<CommentEntry | null>(null);
@@ -111,27 +125,34 @@ export function useCommentThread(
     },
   );
 
+  // withOptimisticUpdate builds a fresh function each render; routing the
+  // mutations through refs keeps submit/remove/like — and the thread object
+  // below, which memoized CommentRows shallow-compare — referentially stable.
+  const addRef = useRef(add);
+  addRef.current = add;
+  const removeRef = useRef(remove);
+  removeRef.current = remove;
+  const toggleLikeRef = useRef(toggleLike);
+  toggleLikeRef.current = toggleLike;
+
   const submit = useCallback(
     async (text: string) => {
       const parentId =
         replyTo && !isOptimisticCommentId(replyTo.comment._id)
           ? replyTo.comment._id
           : undefined;
-      await add({ targetType, targetId, text, ...(parentId ? { parentId } : {}) });
+      await addRef.current({ targetType, targetId, text, ...(parentId ? { parentId } : {}) });
       setReplyTo(null);
     },
-    [add, replyTo, targetId, targetType],
+    [replyTo, targetId, targetType],
   );
 
-  const removeComment = useCallback(
-    (commentId: string) => {
-      setReplyTo((current) => (current?.comment._id === commentId ? null : current));
-      remove({ commentId }).catch(() => {
-        notifyError("Couldn't delete comment", "Check your connection and try again.");
-      });
-    },
-    [remove],
-  );
+  const removeComment = useCallback((commentId: string) => {
+    setReplyTo((current) => (current?.comment._id === commentId ? null : current));
+    removeRef.current({ commentId }).catch(() => {
+      notifyError("Couldn't delete comment", "Check your connection and try again.");
+    });
+  }, []);
 
   const likeComment = useCallback(
     (commentId: string) => {
@@ -144,26 +165,42 @@ export function useCommentThread(
         return;
       }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      toggleLike({ targetType: "comment", targetId: commentId }).catch(() => {
+      toggleLikeRef.current({ targetType: "comment", targetId: commentId }).catch(() => {
         // The optimistic flip already rolled back; a like isn't worth an alert.
       });
     },
-    [isAuthenticated, toggleLike],
+    [isAuthenticated],
   );
 
-  return {
-    isAuthenticated,
-    me,
-    entries,
-    totalCount,
-    status,
-    loadMore,
-    submit,
-    removeComment,
-    likeComment,
-    replyTo,
-    setReplyTo,
-  };
+  return useMemo(
+    () => ({
+      isAuthenticated,
+      me,
+      entries,
+      totalCount,
+      status,
+      loadMore,
+      submit,
+      removeComment,
+      likeComment,
+      replyTo,
+      setReplyTo,
+      timeLabels,
+    }),
+    [
+      entries,
+      isAuthenticated,
+      likeComment,
+      loadMore,
+      me,
+      removeComment,
+      replyTo,
+      status,
+      submit,
+      timeLabels,
+      totalCount,
+    ],
+  );
 }
 
 type CommentThreadState = ReturnType<typeof useCommentThread>;
@@ -173,7 +210,7 @@ type CommentThreadState = ReturnType<typeof useCommentThread>;
 // one-word-wide column.
 const MAX_INDENT_DEPTH = 1;
 
-function CommentRow({
+const CommentRow = memo(function CommentRowInner({
   entry,
   depth,
   thread,
@@ -280,7 +317,10 @@ function CommentRow({
                 </Text>
               )}
               <Text className="text-[11px] text-text-tertiary">
-                {pending ? "Posting…" : formatRelativeTime(comment.createdAt)}
+                {pending
+                  ? "Posting…"
+                  : thread.timeLabels.get(comment._id) ??
+                    formatRelativeTime(comment.createdAt)}
               </Text>
             </View>
             <Text className="mt-0.5 text-[15px] leading-5 text-text-primary">{comment.text}</Text>
@@ -342,7 +382,7 @@ function CommentRow({
       ) : null}
     </View>
   );
-}
+});
 
 // The scrolling half of the /comments screen: threaded rows + pagination, no
 // composer.
@@ -622,8 +662,20 @@ export function CommentsSection({
   const loading = status === "LoadingFirstPage";
   const countLabel = formatCommentCount(thread);
   // Server order is best-first, so the collapsed preview is the top of the
-  // thread; replies stay tucked away until the thread is expanded.
-  const visibleEntries = showAll ? entries : entries.slice(0, COLLAPSED_COUNT);
+  // thread; replies stay tucked away until the thread is expanded. Stripped
+  // entries are built here (not inline in the map) so memoized rows keep a
+  // stable entry identity across unrelated re-renders.
+  const visibleEntries = useMemo(
+    () =>
+      showAll
+        ? entries
+        : entries
+            .slice(0, COLLAPSED_COUNT)
+            .map((entry) =>
+              entry.replies.length > 0 ? { ...entry, replies: [] } : entry,
+            ),
+    [entries, showAll],
+  );
   const hasHidden =
     !showAll &&
     (entries.length > COLLAPSED_COUNT ||
@@ -669,7 +721,7 @@ export function CommentsSection({
             visibleEntries.map((entry) => (
               <CommentRow
                 key={entry.comment._id}
-                entry={showAll ? entry : { ...entry, replies: [] }}
+                entry={entry}
                 depth={0}
                 thread={thread}
                 onReport={setReportCommentId}

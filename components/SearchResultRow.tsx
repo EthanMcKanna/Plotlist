@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { Href } from "expo-router";
 import { LinkPressable } from "./LinkPressable";
@@ -21,7 +22,7 @@ export function getSearchResultRowAccessibilityLabel({
     .join(". ");
 }
 
-export function SearchResultRow({
+export const SearchResultRow = memo(function SearchResultRow({
   title,
   year,
   overview,
@@ -92,7 +93,7 @@ export function SearchResultRow({
       {body}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

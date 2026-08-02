@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import {
   comments,
@@ -697,24 +697,28 @@ export async function runEpisodeAirNotifications(now = new Date()) {
     string,
     { digestHour: number; isPro: boolean; premieresEnabled: boolean }
   >();
-  for (const chunk of chunkForSqlParams(tokenUserIds, 1)) {
-    const rows = await db
-      .select({
-        id: users.id,
-        notificationPreferences: users.notificationPreferences,
-        proUntil: users.proUntil,
-      })
-      .from(users)
-      .where(inArray(users.id, chunk));
-    for (const row of rows) {
-      const isPro = userHasPro(row);
-      userMetaById.set(row.id, {
-        digestHour: resolveDigestHour(row.notificationPreferences, isPro),
-        isPro,
-        premieresEnabled:
-          resolveNotificationPreferences(row.notificationPreferences).premieres,
-      });
-    }
+  const userMetaRows = (
+    await Promise.all(
+      chunkForSqlParams(tokenUserIds, 1).map((chunk) =>
+        db
+          .select({
+            id: users.id,
+            notificationPreferences: users.notificationPreferences,
+            proUntil: users.proUntil,
+          })
+          .from(users)
+          .where(inArray(users.id, chunk)),
+      ),
+    )
+  ).flat();
+  for (const row of userMetaRows) {
+    const isPro = userHasPro(row);
+    userMetaById.set(row.id, {
+      digestHour: resolveDigestHour(row.notificationPreferences, isPro),
+      isPro,
+      premieresEnabled:
+        resolveNotificationPreferences(row.notificationPreferences).premieres,
+    });
   }
 
   const localDateByUser = new Map<string, string>();
@@ -739,10 +743,23 @@ export async function runEpisodeAirNotifications(now = new Date()) {
   }
 
   const airDates = Array.from(new Set(localDateByUser.values()));
+  // air_date is TEXT with no index; bound the scan with a generous range on
+  // the indexed air_date_ts first, then match the exact dates.
+  const airDateTimes = airDates
+    .map((date) => Date.parse(`${date}T00:00:00Z`))
+    .filter((time) => Number.isFinite(time));
+  const rangeStart = Math.min(...airDateTimes) - 48 * 60 * 60 * 1000;
+  const rangeEnd = Math.max(...airDateTimes) + 72 * 60 * 60 * 1000;
   const eventRows = await db
     .select()
     .from(releaseEvents)
-    .where(inArray(releaseEvents.airDate, airDates));
+    .where(
+      and(
+        gte(releaseEvents.airDateTs, rangeStart),
+        lte(releaseEvents.airDateTs, rangeEnd),
+        inArray(releaseEvents.airDate, airDates),
+      ),
+    );
   if (eventRows.length === 0) {
     return { users: localDateByUser.size, created: 0, sent: 0 };
   }
@@ -756,25 +773,27 @@ export async function runEpisodeAirNotifications(now = new Date()) {
   const eventShowIds = Array.from(eventsByShow.keys());
   const userIds = Array.from(localDateByUser.keys());
 
-  // Pro per-show mutes silence every show-scoped alert below.
+  // Pro per-show mutes silence every show-scoped alert below. Chunk on the
+  // digest-hour users only (the small dimension) and match shows in memory —
+  // the old shows×users chunk product ran thousands of serial queries.
+  const eventShowIdSet = new Set(eventShowIds);
   const mutedPairs = new Set<string>();
-  for (const showChunk of chunkForSqlParams(eventShowIds, 1, 40)) {
-    for (const userChunk of chunkForSqlParams(userIds, 1, 40)) {
-      const rows = await db
-        .select({
-          userId: showNotificationMutes.userId,
-          showId: showNotificationMutes.showId,
-        })
-        .from(showNotificationMutes)
-        .where(
-          and(
-            inArray(showNotificationMutes.showId, showChunk),
-            inArray(showNotificationMutes.userId, userChunk),
-          ),
-        );
-      for (const row of rows) {
-        mutedPairs.add(`${row.userId}:${row.showId}`);
-      }
+  const muteRows = (
+    await Promise.all(
+      chunkForSqlParams(userIds, 1).map((chunk) =>
+        db
+          .select({
+            userId: showNotificationMutes.userId,
+            showId: showNotificationMutes.showId,
+          })
+          .from(showNotificationMutes)
+          .where(inArray(showNotificationMutes.userId, chunk)),
+      ),
+    )
+  ).flat();
+  for (const row of muteRows) {
+    if (eventShowIdSet.has(row.showId)) {
+      mutedPairs.add(`${row.userId}:${row.showId}`);
     }
   }
 
@@ -787,38 +806,43 @@ export async function runEpisodeAirNotifications(now = new Date()) {
       (event) => event.isPremiere || event.isReturningSeason,
     ),
   );
-  for (const showChunk of chunkForSqlParams(eventShowIds, 1, 40)) {
-    for (const userChunk of chunkForSqlParams(userIds, 1, 40)) {
-      const rows = await db
-        .select({
-          userId: watchStates.userId,
-          showId: watchStates.showId,
-          status: watchStates.status,
-        })
-        .from(watchStates)
-        .where(
-          and(
-            // Caught-up users are exactly who "new episode tonight" is for;
-            // watching users may still be mid-backlog but were the historical
-            // audience, so they stay. Watchlist/paused feed the Pro premiere
-            // pass instead.
-            inArray(
-              watchStates.status,
-              ["watching", "caught_up", "watchlist", "paused"] as any,
+  const premiereShowIdSet = new Set(premiereShowIds);
+  const stateRows = (
+    await Promise.all(
+      chunkForSqlParams(userIds, 1, 90).map((chunk) =>
+        db
+          .select({
+            userId: watchStates.userId,
+            showId: watchStates.showId,
+            status: watchStates.status,
+          })
+          .from(watchStates)
+          .where(
+            and(
+              // Caught-up users are exactly who "new episode tonight" is for;
+              // watching users may still be mid-backlog but were the historical
+              // audience, so they stay. Watchlist/paused feed the Pro premiere
+              // pass instead.
+              inArray(
+                watchStates.status,
+                ["watching", "caught_up", "watchlist", "paused"] as any,
+              ),
+              inArray(watchStates.userId, chunk),
             ),
-            inArray(watchStates.showId, showChunk),
-            inArray(watchStates.userId, userChunk),
           ),
-        );
-      for (const row of rows) {
-        if (row.status === "watching" || row.status === "caught_up") {
-          watchingRows.push(row);
-        } else if (premiereShowIds.includes(row.showId)) {
-          const meta = userMetaById.get(row.userId);
-          if (meta?.isPro && meta.premieresEnabled) {
-            waitingRows.push(row);
-          }
-        }
+      ),
+    )
+  ).flat();
+  for (const row of stateRows) {
+    if (!eventShowIdSet.has(row.showId)) {
+      continue;
+    }
+    if (row.status === "watching" || row.status === "caught_up") {
+      watchingRows.push(row);
+    } else if (premiereShowIdSet.has(row.showId)) {
+      const meta = userMetaById.get(row.userId);
+      if (meta?.isPro && meta.premieresEnabled) {
+        waitingRows.push(row);
       }
     }
   }

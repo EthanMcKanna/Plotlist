@@ -64,17 +64,24 @@ export function sortProviderRoomItemsForFreshness<T extends ProviderRoomFreshnes
   items: T[],
   now?: Date | string | number,
 ) {
-  return [...items].sort((left, right) => {
-    const signalDelta =
-      getProviderRoomSignalScore(right, now) -
-      getProviderRoomSignalScore(left, now);
-    if (signalDelta !== 0) return signalDelta;
-    const demandDelta =
-      getHomeEditorialDemandConfidenceScore(right.title ?? "") -
-      getHomeEditorialDemandConfidenceScore(left.title ?? "");
-    if (demandDelta !== 0) return demandDelta;
-    return (right.homeScore ?? 0) - (left.homeScore ?? 0);
-  });
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      signalScore: getProviderRoomSignalScore(item, now),
+      demandScore: getHomeEditorialDemandConfidenceScore(item.title ?? ""),
+    }))
+    .sort((left, right) => {
+      const signalDelta = right.signalScore - left.signalScore;
+      if (signalDelta !== 0) return signalDelta;
+      const demandDelta = right.demandScore - left.demandScore;
+      if (demandDelta !== 0) return demandDelta;
+      const homeScoreDelta =
+        (right.item.homeScore ?? 0) - (left.item.homeScore ?? 0);
+      if (homeScoreDelta !== 0) return homeScoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 }
 
 function getProviderRoomFreshnessScore(
@@ -118,11 +125,13 @@ export function sortProviderRoomsForFreshness<
   now?: Date | string | number,
 ) {
   return rooms
-    .map((room, index) => ({ room, index }))
+    .map((room, index) => ({
+      room,
+      index,
+      score: getProviderRoomFreshnessScore(room, now),
+    }))
     .sort((left, right) => {
-      const scoreDelta =
-        getProviderRoomFreshnessScore(right.room, now) -
-        getProviderRoomFreshnessScore(left.room, now);
+      const scoreDelta = right.score - left.score;
       if (scoreDelta !== 0) return scoreDelta;
       return left.index - right.index;
     })

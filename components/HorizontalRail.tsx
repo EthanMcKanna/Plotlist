@@ -44,6 +44,10 @@ export function HorizontalRail({
   const [focusWithin, setFocusWithin] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  // Mirrors of the arrow state so the ~15/s scroll handler can skip setState
+  // entirely when nothing changed instead of re-rendering the rail.
+  const canScrollLeftRef = useRef(canScrollLeft);
+  const canScrollRightRef = useRef(canScrollRight);
 
   const getScrollNode = useCallback((): HTMLElement | null => {
     const ref = scrollRef.current as unknown as {
@@ -55,10 +59,16 @@ export function HorizontalRail({
   const recomputeArrows = useCallback(() => {
     const node = getScrollNode();
     if (!node) return;
-    setCanScrollLeft(node.scrollLeft > 4);
-    setCanScrollRight(
-      node.scrollLeft + node.clientWidth < node.scrollWidth - 4,
-    );
+    const nextLeft = node.scrollLeft > 4;
+    const nextRight = node.scrollLeft + node.clientWidth < node.scrollWidth - 4;
+    if (nextLeft !== canScrollLeftRef.current) {
+      canScrollLeftRef.current = nextLeft;
+      setCanScrollLeft(nextLeft);
+    }
+    if (nextRight !== canScrollRightRef.current) {
+      canScrollRightRef.current = nextRight;
+      setCanScrollRight(nextRight);
+    }
   }, [getScrollNode]);
 
   const scrollByPage = useCallback(
@@ -142,6 +152,10 @@ export function RailArrowsBox({ children }: { children: ReactNode }) {
   const [focusWithin, setFocusWithin] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  // Same skip-when-unchanged guard as HorizontalRail: the wheel/trackpad
+  // scroll listener fires ~15/s and must not re-render the rail every tick.
+  const canScrollLeftRef = useRef(canScrollLeft);
+  const canScrollRightRef = useRef(canScrollRight);
 
   const getScrollNode = useCallback((): HTMLElement | null => {
     const host = wrapRef.current as unknown as HTMLElement | null;
@@ -155,15 +169,18 @@ export function RailArrowsBox({ children }: { children: ReactNode }) {
 
   const recomputeArrows = useCallback(() => {
     const node = getScrollNode();
-    if (!node) {
-      setCanScrollLeft(false);
-      setCanScrollRight(false);
-      return;
+    const nextLeft = node ? node.scrollLeft > 4 : false;
+    const nextRight = node
+      ? node.scrollLeft + node.clientWidth < node.scrollWidth - 4
+      : false;
+    if (nextLeft !== canScrollLeftRef.current) {
+      canScrollLeftRef.current = nextLeft;
+      setCanScrollLeft(nextLeft);
     }
-    setCanScrollLeft(node.scrollLeft > 4);
-    setCanScrollRight(
-      node.scrollLeft + node.clientWidth < node.scrollWidth - 4,
-    );
+    if (nextRight !== canScrollRightRef.current) {
+      canScrollRightRef.current = nextRight;
+      setCanScrollRight(nextRight);
+    }
   }, [getScrollNode]);
 
   const scrollByPage = useCallback(

@@ -177,13 +177,18 @@ export function getRankedHomeDiscoverySections({
   now,
   rotationSeed,
 }: Pick<HomeSectionPlanOptions, "sectionSignals" | "now" | "rotationSeed"> = {}) {
-  return [...DEFAULT_DISCOVERY_ORDER].sort((left, right) => {
-    const scoreDelta =
-      getDiscoverySectionScore(right, sectionSignals, now, rotationSeed) -
-      getDiscoverySectionScore(left, sectionSignals, now, rotationSeed);
-    if (scoreDelta !== 0) return scoreDelta;
-    return DEFAULT_DISCOVERY_ORDER.indexOf(left) - DEFAULT_DISCOVERY_ORDER.indexOf(right);
-  });
+  return DEFAULT_DISCOVERY_ORDER
+    .map((kind, index) => ({
+      kind,
+      index,
+      score: getDiscoverySectionScore(kind, sectionSignals, now, rotationSeed),
+    }))
+    .sort((left, right) => {
+      const scoreDelta = right.score - left.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ kind }) => kind);
 }
 
 export function isNumberedHomeSectionKind(

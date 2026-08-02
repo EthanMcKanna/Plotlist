@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppState } from "react-native";
 
 import { api } from "./plotlist/api";
 import { getApiBaseUrl } from "./api/env";
@@ -83,11 +84,18 @@ const SUPPRESSED_HOME_TITLE_KEYS = new Set([
 const MIN_POSTER_RAIL_ITEMS = 4;
 const MIN_PROVIDER_ROOM_ITEMS = 4;
 const MIN_EDITORIAL_PROVIDER_ROOM_ITEMS = 3;
-const PROVIDER_ROOM_CATALOG_LIMIT = 18;
 const FRESH_FEED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const EDITORIAL_SEED_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const LIVE_HEAT_SIGNAL_PATTERN =
   /\b(airing|breakouts?|drops?|finale|launch|new|premiere|returns?|season|s\d+|today|tonight)\b/i;
+
+// Stable fallbacks and query args: a fresh `?? []` array or inline args
+// object per render would churn query keys and poison every downstream memo.
+const EMPTY_ITEMS: any[] = [];
+const EMPTY_QUERY_ARGS = {};
+const TRENDING_SHOWS_QUERY_ARGS = { windowHours: 96, limit: 10 };
+const PEOPLE_PREVIEW_QUERY_ARGS = { limit: 4 };
+const FEED_PAGINATION_OPTIONS = { initialNumItems: 6 };
 
 export function getHomeDataGeneratedAt(
   now: Date | string | number = Date.now(),
@@ -305,12 +313,9 @@ async function loadHomeCatalogFallback(
       return [];
     }
   };
-  const providerEntriesPromise = Promise.all(
-    PROVIDERS.map(async (provider) => [
-      provider.category,
-      await load(provider.category, PROVIDER_ROOM_CATALOG_LIMIT),
-    ] as const),
-  );
+  // The batched catalog already failed, so keep the fallback to the
+  // above-fold core categories instead of fanning out nine more per-provider
+  // requests; provider rooms stay empty until the batched load recovers.
   const [
     risingNow,
     breakoutPremieres,
@@ -319,7 +324,6 @@ async function loadHomeCatalogFallback(
     airingToday,
     trendingDay,
     trendingWeek,
-    providerEntries,
   ] = await Promise.all([
     load("rising_now", 16),
     load("breakout_premieres", 16),
@@ -328,7 +332,6 @@ async function loadHomeCatalogFallback(
     load("airing_today", 10),
     load("trending_day", 20),
     load("trending_week", 10),
-    providerEntriesPromise,
   ]);
 
   return {
@@ -339,9 +342,7 @@ async function loadHomeCatalogFallback(
     airingToday,
     trendingDay,
     trendingWeek,
-    providers: Object.fromEntries(providerEntries) as Partial<
-      Record<ProviderConfig["category"], CatalogItem[]>
-    >,
+    providers: {},
     diagnostics: getEmptyHomeCatalogDiagnostics(),
   };
 }
@@ -868,14 +869,22 @@ function sortHeatCurrentSignals<T extends CatalogItem>(
   items: T[],
   now?: Date | string | number,
 ) {
-  return [...items].sort((left, right) => {
-    const scoreDelta = getHeatSignalScore(right, now) - getHeatSignalScore(left, now);
-    if (scoreDelta !== 0) return scoreDelta;
-    return (
-      ((right as CatalogItem & { homeScore?: number }).homeScore ?? 0) -
-      ((left as CatalogItem & { homeScore?: number }).homeScore ?? 0)
-    );
-  });
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      score: getHeatSignalScore(item, now),
+    }))
+    .sort((left, right) => {
+      const scoreDelta = right.score - left.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      const homeScoreDelta =
+        ((right.item as CatalogItem & { homeScore?: number }).homeScore ?? 0) -
+        ((left.item as CatalogItem & { homeScore?: number }).homeScore ?? 0);
+      if (homeScoreDelta !== 0) return homeScoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 }
 
 export function preferDistinctWhenSubstantial<T extends CatalogItem>(
@@ -1418,13 +1427,20 @@ function pickFreshHeroLead(
         hasReleaseWindowHomeSignal(item) &&
         isHeroCarouselCandidate(item, now),
     )
+    .map((item, index) => ({
+      item,
+      index,
+      score: getHeroCurrentDemandLeadScore(item, now),
+    }))
     .sort((left, right) => {
-      const recencyDelta =
-        getHeroCurrentDemandLeadScore(right, now) -
-        getHeroCurrentDemandLeadScore(left, now);
+      const recencyDelta = right.score - left.score;
       if (recencyDelta !== 0) return recencyDelta;
-      return (right.homeScore ?? 0) - (left.homeScore ?? 0);
-    });
+      const homeScoreDelta =
+        (right.item.homeScore ?? 0) - (left.item.homeScore ?? 0);
+      if (homeScoreDelta !== 0) return homeScoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 
   return (
     releaseWindowCandidates[0] ??
@@ -1665,30 +1681,34 @@ export type HomeData = {
 
 export function useHomeData(): HomeData {
   const { isAuthenticated } = useAuth();
-  const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
+  const me = useQuery(api.users.me, isAuthenticated ? EMPTY_QUERY_ARGS : "skip");
   const hasProfile = Boolean(me?._id);
 
   const trendingRaw =
-    useQuery(api.trending.shows, { windowHours: 96, limit: 10 }) ?? [];
+    useQuery(api.trending.shows, TRENDING_SHOWS_QUERY_ARGS) ?? EMPTY_ITEMS;
 
   const {
     results: feed,
     status: feedStatus,
   } = usePaginatedQuery(
     api.feed.listForUser,
-    hasProfile ? {} : "skip",
-    { initialNumItems: 6 },
+    hasProfile ? EMPTY_QUERY_ARGS : "skip",
+    FEED_PAGINATION_OPTIONS,
   );
 
   const contactStatus =
-    useQuery(api.contacts.getStatus, hasProfile ? {} : "skip") ?? null;
+    useQuery(api.contacts.getStatus, hasProfile ? EMPTY_QUERY_ARGS : "skip") ??
+    null;
   const contactMatches =
     useQuery(
       api.contacts.getMatches,
-      hasProfile && contactStatus?.hasSynced ? { limit: 4 } : "skip",
-    ) ?? [];
+      hasProfile && contactStatus?.hasSynced ? PEOPLE_PREVIEW_QUERY_ARGS : "skip",
+    ) ?? EMPTY_ITEMS;
   const suggested =
-    useQuery(api.users.suggested, hasProfile ? { limit: 4 } : "skip") ?? [];
+    useQuery(
+      api.users.suggested,
+      hasProfile ? PEOPLE_PREVIEW_QUERY_ARGS : "skip",
+    ) ?? EMPTY_ITEMS;
 
   const getHomeCatalog = useAction(api.shows.getHomeCatalog);
   const getTmdbList = useAction(api.shows.getTmdbList);
@@ -1756,10 +1776,26 @@ export function useHomeData(): HomeData {
   const [roomsLoading, setRoomsLoading] = useState(true);
 
   useEffect(() => {
+    let lastRefreshAt = Date.now();
+    const refreshNow = () => {
+      lastRefreshAt = Date.now();
+      setEditorialSeedNow(lastRefreshAt);
+    };
     const interval = setInterval(() => {
-      setEditorialSeedNow(Date.now());
+      // Ticks are skipped while backgrounded; the foreground listener below
+      // catches up once the app is active again.
+      if (AppState.currentState !== "active") return;
+      refreshNow();
     }, EDITORIAL_SEED_REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      if (Date.now() - lastRefreshAt < EDITORIAL_SEED_REFRESH_INTERVAL_MS) return;
+      refreshNow();
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
   }, []);
 
   // Discovery + provider loaders (tied to authentication, so cold start fires once).
@@ -2243,44 +2279,94 @@ export function useHomeData(): HomeData {
   const feedEmpty = friendActivity.length === 0 && feedStatus !== "LoadingFirstPage";
 
   const heroLoading = heroSlides.length === 0 && (forYouLoading || tmdbTrendingLoading);
+  const heatLoading =
+    trendingRaw.length === 0 &&
+    tmdbDailyTrendingRaw.length === 0 &&
+    (tmdbDailyTrendingLoading || risingLoading || tmdbTrendingLoading);
+  const hasSyncedContacts = Boolean(contactStatus?.hasSynced);
+  const contactStatusKnown = Boolean(contactStatus);
 
-  return {
-    hasProfile,
-    isAuthenticated,
-    generatedAt: editorialSeedNow,
-    me: me ?? null,
-    heroSlides,
-    forYou,
-    heat,
-    fresh,
-    critics,
-    quick,
-    tasteRails,
-    streamingRooms: providerSections,
-    streamingProviderKeys,
-    catalogDiagnostics,
-    loading: {
+  const loading = useMemo(
+    () => ({
       hero: heroLoading,
       forYou: forYouLoading,
       tasteRails: tasteRailsLoading,
-      heat:
-        trendingRaw.length === 0 &&
-        tmdbDailyTrendingRaw.length === 0 &&
-        (tmdbDailyTrendingLoading || risingLoading || tmdbTrendingLoading),
+      heat: heatLoading,
       fresh: premieresLoading,
       critics: criticsLoading,
       quick: quickLoading,
       rooms: roomsLoading,
-    },
-    refresh,
-    contactMatches,
-    similarTaste,
-    suggested,
-    friendActivity,
-    feedEmpty,
-    showContactSyncNudge,
-    hasSyncedContacts: Boolean(contactStatus?.hasSynced),
-    contactStatusKnown: Boolean(contactStatus),
-    getCatalogForKey,
-  };
+    }),
+    [
+      heroLoading,
+      forYouLoading,
+      tasteRailsLoading,
+      heatLoading,
+      premieresLoading,
+      criticsLoading,
+      quickLoading,
+      roomsLoading,
+    ],
+  );
+
+  // The hook's consumers memoize on individual fields, but the returned
+  // object itself must also stay referentially stable across renders that
+  // change none of its fields — otherwise every `[data]`-style dependency
+  // downstream reruns on each render.
+  return useMemo<HomeData>(
+    () => ({
+      hasProfile,
+      isAuthenticated,
+      generatedAt: editorialSeedNow,
+      me: me ?? null,
+      heroSlides,
+      forYou,
+      heat,
+      fresh,
+      critics,
+      quick,
+      tasteRails,
+      streamingRooms: providerSections,
+      streamingProviderKeys,
+      catalogDiagnostics,
+      loading,
+      refresh,
+      contactMatches,
+      similarTaste,
+      suggested,
+      friendActivity,
+      feedEmpty,
+      showContactSyncNudge,
+      hasSyncedContacts,
+      contactStatusKnown,
+      getCatalogForKey,
+    }),
+    [
+      hasProfile,
+      isAuthenticated,
+      editorialSeedNow,
+      me,
+      heroSlides,
+      forYou,
+      heat,
+      fresh,
+      critics,
+      quick,
+      tasteRails,
+      providerSections,
+      streamingProviderKeys,
+      catalogDiagnostics,
+      loading,
+      refresh,
+      contactMatches,
+      similarTaste,
+      suggested,
+      friendActivity,
+      feedEmpty,
+      showContactSyncNudge,
+      hasSyncedContacts,
+      contactStatusKnown,
+      getCatalogForKey,
+    ],
+  );
 }

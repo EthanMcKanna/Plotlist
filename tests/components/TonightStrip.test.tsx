@@ -304,12 +304,16 @@ describe("TonightStrip", () => {
     ).toBeTruthy();
   });
 
-  it("invalidates active schedule preview data after refreshing releases", async () => {
+  it("invalidates only the release-calendar queries after refreshing releases", async () => {
     await refreshHomeSchedulePreviewData(mockRefreshForMe, mockInvalidateQueries);
 
     expect(mockRefreshForMe).toHaveBeenCalledWith({ today: "2026-05-30" });
     expect(mockInvalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["plotlist-rpc"],
+      queryKey: ["plotlist-rpc", "query", "releaseCalendar:getHomePreview"],
+      refetchType: "active",
+    });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["plotlist-rpc", "query", "releaseCalendar:listForMe"],
       refetchType: "active",
     });
   });

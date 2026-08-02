@@ -50,6 +50,7 @@ import {
   useWebSheetStyle,
 } from "../../lib/webLayout";
 import { sharePlotlistLink } from "../../lib/share";
+import { resolveStorageUrl } from "../../lib/storageUrl";
 import { useAccent } from "../../lib/appearanceStore";
 import { getUserFacingApiErrorMessage } from "../../lib/api/client";
 import type { Id } from "../../lib/plotlist/types";
@@ -187,43 +188,66 @@ function SortablePosterCard({
     [isActive, target.x, target.y, grid.itemWidth],
   );
 
-  const dragGesture = Gesture.Pan()
-    .enabled(canDrag)
-    // Mouse pointers drag straight away (0 falls back to the pan's own
-    // distance threshold); touch — native and mobile web — keeps the hold so
-    // scrolling over the grid still wins.
-    .activateAfterLongPress(isDesktopWeb ? 0 : 220)
-    .onStart(() => {
-      runOnJS(onDragStart)(itemId, index);
-    })
-    .onUpdate((event) => {
-      activeX.value = dragOriginX.value + event.translationX;
-      activeY.value = dragOriginY.value + event.translationY;
+  // Built once per (card, grid) configuration — an inline Gesture.Pan() is a
+  // fresh gesture object every render, forcing GestureDetector to re-attach
+  // native recognizers for every poster on every parent render.
+  const dragGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(canDrag)
+        // Mouse pointers drag straight away (0 falls back to the pan's own
+        // distance threshold); touch — native and mobile web — keeps the hold
+        // so scrolling over the grid still wins.
+        .activateAfterLongPress(isDesktopWeb ? 0 : 220)
+        .onStart(() => {
+          runOnJS(onDragStart)(itemId, index);
+        })
+        .onUpdate((event) => {
+          activeX.value = dragOriginX.value + event.translationX;
+          activeY.value = dragOriginY.value + event.translationY;
 
-      const nextIndex = getIndexFromPosition(
-        activeX.value,
-        activeY.value,
-        totalItems,
-        grid,
-      );
+          const nextIndex = getIndexFromPosition(
+            activeX.value,
+            activeY.value,
+            totalItems,
+            grid,
+          );
 
-      if (nextIndex !== activeIndex.value) {
-        runOnJS(onDragMove)(nextIndex);
-      }
-    })
-    .onEnd(() => {
-      if (activeIndex.value < 0) {
-        return;
-      }
-      const targetPosition = getGridPosition(activeIndex.value, grid);
-      activeX.value = withSpring(targetPosition.x, CARD_SPRING);
-      activeScale.value = withSpring(1, CARD_SPRING);
-      activeY.value = withSpring(targetPosition.y, CARD_SPRING, (finished) => {
-        if (finished) {
-          runOnJS(onDragEnd)();
-        }
-      });
-    });
+          if (nextIndex !== activeIndex.value) {
+            runOnJS(onDragMove)(nextIndex);
+          }
+        })
+        .onEnd(() => {
+          if (activeIndex.value < 0) {
+            return;
+          }
+          const targetPosition = getGridPosition(activeIndex.value, grid);
+          activeX.value = withSpring(targetPosition.x, CARD_SPRING);
+          activeScale.value = withSpring(1, CARD_SPRING);
+          activeY.value = withSpring(targetPosition.y, CARD_SPRING, (finished) => {
+            if (finished) {
+              runOnJS(onDragEnd)();
+            }
+          });
+        }),
+    [
+      activeIndex,
+      activeScale,
+      activeX,
+      activeY,
+      canDrag,
+      dragOriginX,
+      dragOriginY,
+      grid,
+      index,
+      isDesktopWeb,
+      itemId,
+      onDragEnd,
+      onDragMove,
+      onDragStart,
+      totalItems,
+    ],
+  );
 
   const cardContent = (
     <>
@@ -375,11 +399,7 @@ export default function ListScreen() {
     typeof list?.coverStorageId === "string" && list.coverStorageId.length > 0
       ? list.coverStorageId
       : null;
-  const resolvedLegacyCoverUrl = useQuery(
-    api.storage.getUrl,
-    !listCoverUrl && legacyCoverStorageId ? { storageId: legacyCoverStorageId } : "skip",
-  );
-  const coverUrl = listCoverUrl ?? resolvedLegacyCoverUrl;
+  const coverUrl = listCoverUrl ?? resolveStorageUrl(legacyCoverStorageId);
   // Older cached list docs predate the toggle; missing means on.
   const commentsEnabled = list ? list.commentsEnabled !== false : true;
   const commentThread = useCommentThread("list", listId, {

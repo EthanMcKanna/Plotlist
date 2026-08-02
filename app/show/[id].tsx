@@ -80,6 +80,7 @@ import { LinkPressable } from "../../components/LinkPressable";
 import { SpoilerShield } from "../../components/SpoilerShield";
 import { RatingHistogram } from "../../components/RatingHistogram";
 import { formatDate, formatRelativeTime } from "../../lib/format";
+import { resizeTmdbImageUrl } from "../../lib/tmdbImages";
 import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
@@ -522,6 +523,108 @@ const PREVIEW_IMDB_RATINGS: ImdbRatingsData = {
     },
   },
 };
+
+// FlashList renderItems capture no component state, so they live at module
+// scope — stable references keep recycled rows from re-rendering on every
+// screen render.
+type FacetCardItem = { def: FacetDef; accent: string };
+
+function renderFacetCardItem({ item }: { item: FacetCardItem }) {
+  return (
+    <FanPreviewCard
+      title={item.def.title}
+      accent={item.accent}
+      posters={getCachedFacetPosters(item.def.key)}
+      action="Browse"
+      accessibilityLabel={`Browse ${item.def.title} shows`}
+      style={{ marginRight: 12 }}
+      href={`/facet/${item.def.key}`}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }}
+    />
+  );
+}
+
+function renderCastItem({ item }: { item: any }) {
+  return (
+    <CastMember
+      name={item.name}
+      role={item.character}
+      profilePath={item.profilePath}
+      personId={String(item.id)}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }}
+    />
+  );
+}
+
+function renderCrewItem({ item }: { item: any }) {
+  return (
+    <CastMember
+      name={item.name}
+      role={item.job}
+      profilePath={item.profilePath}
+      personId={String(item.id)}
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }}
+    />
+  );
+}
+
+function renderVideoItem({ item }: { item: any }) {
+  return (
+    <View style={{ width: 256, marginRight: 16 }}>
+      <VideoPlayer videoKey={item.key} title={item.name} type={item.type} />
+    </View>
+  );
+}
+
+function renderSimilarShowItem({ item }: { item: any }) {
+  const itemShow = item.show ?? item;
+  const candidateShowId = item.showId ?? itemShow._id ?? itemShow.id ?? item._id;
+  const itemShowId =
+    typeof candidateShowId === "string" && candidateShowId.startsWith("show_")
+      ? candidateShowId
+      : undefined;
+  const itemExternalId =
+    item.externalId ?? itemShow.externalId ?? itemShow.id ?? candidateShowId;
+  const itemTitle =
+    itemShow.title ?? itemShow.name ?? itemShow.original_name ?? "Untitled";
+  const itemPosterUrl =
+    itemShow.posterUrl ??
+    item.posterUrl ??
+    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+  const itemPosterPath =
+    itemShow.posterPath ??
+    item.posterPath ??
+    tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
+  const itemRating =
+    typeof item.score === "number"
+      ? undefined
+      : itemShow.tmdbVoteAverage ??
+        itemShow.voteAverage ??
+        itemShow.vote_average ??
+        item.voteAverage;
+
+  return (
+    <SimilarShowCard
+      showId={itemShowId}
+      externalId={itemShowId ? undefined : String(itemExternalId)}
+      title={itemTitle}
+      posterUrl={itemPosterUrl}
+      posterPath={itemPosterPath}
+      rating={itemRating}
+      subtitle={
+        item.sharedGenres?.length
+          ? item.sharedGenres.join(" • ")
+          : itemShow.overview ?? item.overview
+      }
+    />
+  );
+}
 
 export default function ShowScreen() {
   const params = useLocalSearchParams();
@@ -977,20 +1080,33 @@ export default function ShowScreen() {
     }
     return counts;
   }, [episodeLogsByKey]);
-  const toggleEpisode = useMutation(
-    api.episodeProgress.toggleEpisode,
-  ).withOptimisticUpdate(optimisticToggleEpisode);
+  // withOptimisticUpdate builds a fresh function per call, so the wrapped
+  // mutations are memoized — the episode-guide handlers depend on them and
+  // must stay referentially stable for EpisodeGuide's memo to short-circuit.
+  const toggleEpisodeMutation = useMutation(api.episodeProgress.toggleEpisode);
+  const toggleEpisode = useMemo(
+    () => toggleEpisodeMutation.withOptimisticUpdate(optimisticToggleEpisode),
+    [toggleEpisodeMutation],
+  );
   // Optimistically checks just the tapped episode; the server backfills the
   // rest and the post-mutation invalidation fills them in.
-  const markWatchedUpTo = useMutation(
-    api.episodeProgress.markWatchedUpTo,
-  ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
-  const markSeasonWatched = useMutation(
-    api.episodeProgress.markSeasonWatched,
-  ).withOptimisticUpdate(optimisticMarkSeasonWatched);
-  const unmarkSeasonWatched = useMutation(
+  const markWatchedUpToMutation = useMutation(api.episodeProgress.markWatchedUpTo);
+  const markWatchedUpTo = useMemo(
+    () => markWatchedUpToMutation.withOptimisticUpdate(optimisticMarkEpisodeWatched),
+    [markWatchedUpToMutation],
+  );
+  const markSeasonWatchedMutation = useMutation(api.episodeProgress.markSeasonWatched);
+  const markSeasonWatched = useMemo(
+    () => markSeasonWatchedMutation.withOptimisticUpdate(optimisticMarkSeasonWatched),
+    [markSeasonWatchedMutation],
+  );
+  const unmarkSeasonWatchedMutation = useMutation(
     api.episodeProgress.unmarkSeasonWatched,
-  ).withOptimisticUpdate(optimisticUnmarkSeasonWatched);
+  );
+  const unmarkSeasonWatched = useMemo(
+    () => unmarkSeasonWatchedMutation.withOptimisticUpdate(optimisticUnmarkSeasonWatched),
+    [unmarkSeasonWatchedMutation],
+  );
   const getExtendedDetails = useAction(api.shows.getExtendedDetails);
   const getSeasonDetails = useAction(api.shows.getSeasonDetails);
   const getImdbRatings = useAction(api.shows.getImdbRatings);
@@ -1353,11 +1469,6 @@ export default function ShowScreen() {
       if (hasCachedExtendedDetails) {
         setFetchedExtendedDetails(null);
         setExtendedDetailsLoadState("ready");
-        void getExtendedDetails({ showId }).catch((error) => {
-          if (!cancelled) {
-            console.error("Failed to refresh extended details:", error);
-          }
-        });
         return;
       }
 
@@ -2066,6 +2177,104 @@ export default function ShowScreen() {
       );
     },
     [markWatchedUpTo, showId],
+  );
+
+  // EpisodeGuide is memo'd; its callback props are memoized here so a screen
+  // re-render doesn't force the whole guide to re-render.
+  const handleLoadMoreSeasons = useCallback(() => {
+    setVisibleSeasonCount((current) =>
+      current >= seasonsWithEpisodes.length
+        ? getInitialVisibleSeasonCount(seasonsWithEpisodes.length)
+        : getNextVisibleSeasonCount(current, seasonsWithEpisodes.length),
+    );
+  }, [seasonsWithEpisodes.length]);
+
+  const handleRetrySeason = useCallback(
+    (seasonNumber: number) => {
+      if (isShowPreview) return;
+      void ensureSeasonDetailsLoaded([seasonNumber], { forceRetry: true });
+    },
+    [ensureSeasonDetailsLoaded, isShowPreview],
+  );
+
+  const handleMarkSeasonWatched = useCallback(
+    (
+      seasonNumber: number,
+      episodes: { episodeNumber: number; title: string }[],
+    ) => {
+      if (isShowPreview) return;
+      // Explicit season button is a deliberate watch action, so it
+      // opts into diary logs (the completed-status backfill happens
+      // server-side and writes its own diary rows).
+      void markSeasonWatched({
+        showId,
+        seasonNumber,
+        episodes,
+        createLog: true,
+      });
+    },
+    [isShowPreview, markSeasonWatched, showId],
+  );
+
+  const handleUnmarkSeasonWatched = useCallback(
+    (seasonNumber: number) => {
+      if (isShowPreview) return;
+      void unmarkSeasonWatched({
+        showId,
+        seasonNumber,
+      });
+    },
+    [isShowPreview, showId, unmarkSeasonWatched],
+  );
+
+  const handleToggleEpisode = useCallback(
+    (seasonNumber: number, episode: any) => {
+      if (isShowPreview) return;
+      const runToggle = () =>
+        void toggleEpisode({
+          showId,
+          seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeTitle: episode.name,
+        });
+      const isMarking = !watchedEpisodeSet.has(
+        `S${seasonNumber}E${episode.episodeNumber}`,
+      );
+      const earlierCount = isMarking
+        ? countEarlierUnwatched(seasonNumber, episode.episodeNumber)
+        : 0;
+      if (earlierCount > 0) {
+        confirmMarkWatchedUpTo({
+          seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeTitle: episode.name,
+          earlierCount,
+          onJustThis: runToggle,
+        });
+        return;
+      }
+      runToggle();
+    },
+    [
+      confirmMarkWatchedUpTo,
+      countEarlierUnwatched,
+      isShowPreview,
+      showId,
+      toggleEpisode,
+      watchedEpisodeSet,
+    ],
+  );
+
+  const handleSelectEpisode = useCallback(
+    (seasonName: string, seasonNumber: number, episode: any) => {
+      setSelectedEpisode({
+        episode,
+        seasonName,
+        seasonNumber,
+      });
+      openEpisodeSheet();
+    },
+    [openEpisodeSheet],
   );
 
   const handleStatus = useCallback(
@@ -3007,21 +3216,8 @@ export default function ShowScreen() {
                 <FlashList
                   data={facetCards}
                   extraData={facetPreviewEpoch}
-                  renderItem={({ item }: { item: (typeof facetCards)[number] }) => (
-                    <FanPreviewCard
-                      title={item.def.title}
-                      accent={item.accent}
-                      posters={getCachedFacetPosters(item.def.key)}
-                      action="Browse"
-                      accessibilityLabel={`Browse ${item.def.title} shows`}
-                      style={{ marginRight: 12 }}
-                      href={`/facet/${item.def.key}`}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      }}
-                    />
-                  )}
-                  keyExtractor={(item: (typeof facetCards)[number]) => item.def.key}
+                  renderItem={renderFacetCardItem}
+                  keyExtractor={(item: FacetCardItem) => item.def.key}
                   estimatedItemSize={160}
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -3044,17 +3240,7 @@ export default function ShowScreen() {
               <RailArrowsBox>
                 <FlashList
                   data={activeDetails.cast}
-                  renderItem={({ item }: { item: any }) => (
-                    <CastMember
-                      name={item.name}
-                      role={item.character}
-                      profilePath={item.profilePath}
-                      personId={String(item.id)}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      }}
-                    />
-                  )}
+                  renderItem={renderCastItem}
                   keyExtractor={(item: any) => String(item.id)}
                   estimatedItemSize={120}
                   horizontal
@@ -3078,17 +3264,7 @@ export default function ShowScreen() {
               <RailArrowsBox>
                 <FlashList
                   data={activeDetails.crew}
-                  renderItem={({ item }: { item: any }) => (
-                    <CastMember
-                      name={item.name}
-                      role={item.job}
-                      profilePath={item.profilePath}
-                      personId={String(item.id)}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      }}
-                    />
-                  )}
+                  renderItem={renderCrewItem}
                   keyExtractor={(item: any) => String(item.id)}
                   estimatedItemSize={120}
                   horizontal
@@ -3112,71 +3288,12 @@ export default function ShowScreen() {
             episodeLogCounts={episodeLogCounts}
             myEpisodeRatingMap={myEpisodeRatingMap}
             isEpisodeAvailable={isEpisodeAvailable}
-            onLoadMoreSeasons={() => {
-              setVisibleSeasonCount((current) =>
-                current >= seasonsWithEpisodes.length
-                  ? getInitialVisibleSeasonCount(seasonsWithEpisodes.length)
-                  : getNextVisibleSeasonCount(current, seasonsWithEpisodes.length),
-              );
-            }}
-            onRetrySeason={(seasonNumber) => {
-              if (isShowPreview) return;
-              void ensureSeasonDetailsLoaded([seasonNumber], { forceRetry: true });
-            }}
-            onMarkSeasonWatched={(seasonNumber, episodes) => {
-              if (isShowPreview) return;
-              // Explicit season button is a deliberate watch action, so it
-              // opts into diary logs (the completed-status backfill happens
-              // server-side and writes its own diary rows).
-              void markSeasonWatched({
-                showId,
-                seasonNumber,
-                episodes,
-                createLog: true,
-              });
-            }}
-            onUnmarkSeasonWatched={(seasonNumber) => {
-              if (isShowPreview) return;
-              void unmarkSeasonWatched({
-                showId,
-                seasonNumber,
-              });
-            }}
-            onToggleEpisode={(seasonNumber, episode) => {
-              if (isShowPreview) return;
-              const runToggle = () =>
-                void toggleEpisode({
-                  showId,
-                  seasonNumber,
-                  episodeNumber: episode.episodeNumber,
-                  episodeTitle: episode.name,
-                });
-              const isMarking = !watchedEpisodeSet.has(
-                `S${seasonNumber}E${episode.episodeNumber}`,
-              );
-              const earlierCount = isMarking
-                ? countEarlierUnwatched(seasonNumber, episode.episodeNumber)
-                : 0;
-              if (earlierCount > 0) {
-                confirmMarkWatchedUpTo({
-                  seasonNumber,
-                  episodeNumber: episode.episodeNumber,
-                  episodeTitle: episode.name,
-                  earlierCount,
-                  onJustThis: runToggle,
-                });
-                return;
-              }
-              runToggle();
-            }}
-            onSelectEpisode={(seasonName, seasonNumber, episode) => {
-              setSelectedEpisode({
-                episode,
-                seasonName,
-                seasonNumber,
-              });
-              openEpisodeSheet();
-            }}
+            onLoadMoreSeasons={handleLoadMoreSeasons}
+            onRetrySeason={handleRetrySeason}
+            onMarkSeasonWatched={handleMarkSeasonWatched}
+            onUnmarkSeasonWatched={handleUnmarkSeasonWatched}
+            onToggleEpisode={handleToggleEpisode}
+            onSelectEpisode={handleSelectEpisode}
           />
         )}
 
@@ -3193,15 +3310,7 @@ export default function ShowScreen() {
               <RailArrowsBox>
                 <FlashList
                   data={activeDetails.videos}
-                  renderItem={({ item }: { item: any }) => (
-                    <View style={{ width: 256, marginRight: 16 }}>
-                      <VideoPlayer
-                        videoKey={item.key}
-                        title={item.name}
-                        type={item.type}
-                      />
-                    </View>
-                  )}
+                  renderItem={renderVideoItem}
                   keyExtractor={(item: any) => item.id}
                   estimatedItemSize={272}
                   horizontal
@@ -3321,49 +3430,7 @@ export default function ShowScreen() {
               <RailArrowsBox>
               <FlashList
                   data={similarShowItems}
-                  renderItem={({ item }: { item: any }) => {
-                    const itemShow = item.show ?? item;
-                    const candidateShowId = item.showId ?? itemShow._id ?? itemShow.id ?? item._id;
-                    const itemShowId =
-                      typeof candidateShowId === "string" && candidateShowId.startsWith("show_")
-                        ? candidateShowId
-                        : undefined;
-                    const itemExternalId =
-                      item.externalId ?? itemShow.externalId ?? itemShow.id ?? candidateShowId;
-                    const itemTitle =
-                      itemShow.title ?? itemShow.name ?? itemShow.original_name ?? "Untitled";
-                    const itemPosterUrl =
-                      itemShow.posterUrl ??
-                      item.posterUrl ??
-                      tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
-                    const itemPosterPath =
-                      itemShow.posterPath ??
-                      item.posterPath ??
-                      tmdbImageUrl(itemShow.poster_path ?? item.poster_path, "w500");
-                    const itemRating =
-                      typeof item.score === "number"
-                        ? undefined
-                        : itemShow.tmdbVoteAverage ??
-                          itemShow.voteAverage ??
-                          itemShow.vote_average ??
-                          item.voteAverage;
-  
-                    return (
-                      <SimilarShowCard
-                        showId={itemShowId}
-                        externalId={itemShowId ? undefined : String(itemExternalId)}
-                        title={itemTitle}
-                        posterUrl={itemPosterUrl}
-                        posterPath={itemPosterPath}
-                        rating={itemRating}
-                        subtitle={
-                          item.sharedGenres?.length
-                            ? item.sharedGenres.join(" • ")
-                            : itemShow.overview ?? item.overview
-                        }
-                      />
-                  );
-                }}
+                  renderItem={renderSimilarShowItem}
                 keyExtractor={(item: any) => {
                   const itemShow = item.show ?? item;
                   return String(
@@ -3762,6 +3829,12 @@ export default function ShowScreen() {
             }
           }
           const sheetNextEpisode = episodeNavContext?.next?.episode ?? null;
+          // 104pt card — w300 decodes far fewer pixels than the stored w780
+          // still.
+          const sheetNextEpisodeStill =
+            typeof sheetNextEpisode?.stillPath === "string"
+              ? resizeTmdbImageUrl(sheetNextEpisode.stillPath, "w300")
+              : null;
           const episodePosition =
             episodeNavContext?.episodeCount
               ? `Episode ${selectedEpisode.episode.episodeNumber} of ${episodeNavContext.episodeCount}`
@@ -3839,6 +3912,10 @@ export default function ShowScreen() {
                 {selectedStillPath ? (
                   <Image
                     source={{ uri: selectedStillPath }}
+                    // The sheet instance is reused across prev/next episode
+                    // navigation; keying on the URI stops the previous
+                    // episode's still from lingering while the new one loads.
+                    recyclingKey={selectedStillPath}
                     accessibilityLabel={`${selectedEpisode.episode.name} still`}
                     style={{ width: "100%", height: "100%", backgroundColor: "#1C2028" }}
                     contentFit="cover"
@@ -4729,9 +4806,10 @@ export default function ShowScreen() {
                         void goToEpisode(episodeNavContext.next);
                       }}
                     >
-                      {sheetNextEpisode.stillPath ? (
+                      {sheetNextEpisodeStill ? (
                         <Image
-                          source={{ uri: sheetNextEpisode.stillPath }}
+                          source={{ uri: sheetNextEpisodeStill }}
+                          recyclingKey={sheetNextEpisodeStill}
                           accessibilityLabel={`${sheetNextEpisode.name} still`}
                           style={{
                             aspectRatio: 16 / 9,

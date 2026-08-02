@@ -8,7 +8,6 @@ import {
   type StoredSession,
   subscribeToSessionCleared,
 } from "../api/session";
-import { unregisterPushTokenFromServer } from "../pushToken";
 import { clearHomeWarmCache } from "../homeWarmCache";
 import { clearUpNextWidget } from "../upNextWidget";
 
@@ -144,7 +143,12 @@ export function useAuthActions() {
     },
     async signOut() {
       // Runs before logout so the still-valid session can disown the device.
-      await unregisterPushTokenFromServer().catch(() => undefined);
+      // Dynamic import: pushToken pulls expo-notifications (~90 modules) and
+      // sign-out is the only reason this file needs it — keep that graph off
+      // the root-layout startup path.
+      await import("../pushToken")
+        .then((pushToken) => pushToken.unregisterPushTokenFromServer())
+        .catch(() => undefined);
       await authApi.logout().catch(() => undefined);
       await clearStoredSession();
       // The warm-start snapshot and widget payload belong to this account;

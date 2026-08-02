@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -16,6 +16,7 @@ import {
   getSeasonToggleLabel,
   type SeasonLoadState,
 } from "../lib/seasonGuide";
+import { resizeTmdbImageUrl } from "../lib/tmdbImages";
 import { HorizontalRail } from "./HorizontalRail";
 import { GlassPressable, GlassSurface } from "./NativeGlass";
 import { ImdbLogo } from "./ImdbBadge";
@@ -112,12 +113,96 @@ function EpisodeGuideComponent({
   onSelectEpisode,
 }: EpisodeGuideProps) {
   const accent = useAccent();
+
+  const visibleSeasons = useMemo(
+    () => seasons.slice(0, visibleSeasonCount),
+    [seasons, visibleSeasonCount],
+  );
+
+  // Per-season derivations are layered so cheap prop churn stays cheap:
+  // toggling an episode (watchedEpisodeSet) only recounts, and IMDb ratings
+  // arriving only rebuilds the rating maps — neither re-runs the episode
+  // normalization (map/filter/Date parsing) below.
+  const seasonRows = useMemo(
+    () =>
+      visibleSeasons.map((season) => {
+        const details = seasonDetailsByNumber[season.season_number];
+        const episodes = (details?.episodes ?? []).map((episode) => {
+          const airDate = episode.airDate ?? episode.air_date ?? null;
+          const stillPath =
+            episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780");
+          return {
+            ...episode,
+            airDate,
+            episodeNumber: episode.episodeNumber ?? episode.episode_number,
+            stillPath,
+            // The 144pt card decodes ~7x fewer pixels at w300; the episode
+            // sheet keeps reading the full-size stillPath.
+            cardStillUri: resizeTmdbImageUrl(stillPath, "w300"),
+            isAvailable: isEpisodeAvailable(airDate),
+            voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
+            voteCount: episode.voteCount ?? episode.vote_count ?? 0,
+          };
+        });
+        const availableEpisodes = episodes.filter(
+          (episode) => episode.isAvailable,
+        );
+        return {
+          season,
+          details,
+          episodes,
+          availableEpisodes,
+          seasonPosterPath:
+            season.posterPath ?? tmdbImageUrl(season.poster_path, "w342"),
+          seasonYear: season.air_date
+            ? new Date(season.air_date).getFullYear()
+            : null,
+        };
+      }),
+    [isEpisodeAvailable, seasonDetailsByNumber, visibleSeasons],
+  );
+
+  const watchedCountBySeason = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const row of seasonRows) {
+      let watched = 0;
+      for (const episode of row.availableEpisodes) {
+        if (
+          watchedEpisodeSet.has(
+            `S${row.season.season_number}E${episode.episodeNumber}`,
+          )
+        ) {
+          watched += 1;
+        }
+      }
+      counts.set(row.season.season_number, watched);
+    }
+    return counts;
+  }, [seasonRows, watchedEpisodeSet]);
+
+  const imdbEpisodeRatingsBySeason = useMemo(() => {
+    const maps = new Map<number, Map<number, number>>();
+    for (const [seasonNumber, imdbSeason] of Object.entries(
+      imdbSeasonRatings ?? {},
+    )) {
+      maps.set(
+        Number(seasonNumber),
+        new Map(
+          (imdbSeason?.episodes ?? []).map((entry) => [
+            entry.episodeNumber,
+            entry.rating,
+          ]),
+        ),
+      );
+    }
+    return maps;
+  }, [imdbSeasonRatings]);
+
   if (seasons.length === 0) {
     return null;
   }
 
   const hasMore = seasons.length > INITIAL_VISIBLE_SEASONS;
-  const visibleSeasons = seasons.slice(0, visibleSeasonCount);
 
   return (
     <View className="mt-10">
@@ -134,23 +219,16 @@ function EpisodeGuideComponent({
       </View>
 
       <View className="mt-4 gap-10">
-        {visibleSeasons.map((season) => {
-          const details = seasonDetailsByNumber[season.season_number];
-          const episodes = (details?.episodes ?? []).map((episode) => ({
-            ...episode,
-            airDate: episode.airDate ?? episode.air_date ?? null,
-            episodeNumber: episode.episodeNumber ?? episode.episode_number,
-            stillPath:
-              episode.stillPath ?? tmdbImageUrl(episode.still_path, "w780"),
-            voteAverage: episode.voteAverage ?? episode.vote_average ?? 0,
-            voteCount: episode.voteCount ?? episode.vote_count ?? 0,
-          }));
-          const availableEpisodes = episodes.filter((episode) =>
-            isEpisodeAvailable(episode.airDate),
-          );
-          const watchedInSeason = availableEpisodes.filter((episode) =>
-            watchedEpisodeSet.has(`S${season.season_number}E${episode.episodeNumber}`),
-          ).length;
+        {seasonRows.map(({
+          season,
+          details,
+          episodes,
+          availableEpisodes,
+          seasonPosterPath,
+          seasonYear,
+        }) => {
+          const watchedInSeason =
+            watchedCountBySeason.get(season.season_number) ?? 0;
           const totalEpisodeCount =
             availableEpisodes.length > 0
               ? availableEpisodes.length
@@ -165,15 +243,10 @@ function EpisodeGuideComponent({
           const isLoading =
             loadState === "loading" || (loadState === "idle" && details === undefined);
           const hasLoadError = loadState === "error" && details === undefined;
-          const seasonPosterPath =
-            season.posterPath ?? tmdbImageUrl(season.poster_path, "w342");
-          const seasonYear = season.air_date
-            ? new Date(season.air_date).getFullYear()
-            : null;
           const imdbSeason = imdbSeasonRatings?.[season.season_number];
           const imdbSeasonLoading = imdbSeason === undefined;
-          const imdbEpisodeRatingByNumber = new Map(
-            (imdbSeason?.episodes ?? []).map((entry) => [entry.episodeNumber, entry.rating]),
+          const imdbEpisodeRatingByNumber = imdbEpisodeRatingsBySeason.get(
+            season.season_number,
           );
 
           return (
@@ -394,13 +467,13 @@ function EpisodeGuideComponent({
                   }}
                 >
                   {episodes.map((episode) => {
-                    const stillPath = episode.stillPath ?? episode.still_path ?? null;
+                    const stillPath = episode.cardStillUri ?? null;
                     const imdbRating =
-                      imdbEpisodeRatingByNumber.get(episode.episodeNumber)?.toFixed(1) ??
+                      imdbEpisodeRatingByNumber?.get(episode.episodeNumber)?.toFixed(1) ??
                       null;
                     const episodeKey = `S${season.season_number}E${episode.episodeNumber}`;
                     const isWatched = watchedEpisodeSet.has(episodeKey);
-                    const isAvailable = isEpisodeAvailable(episode.airDate);
+                    const isAvailable = episode.isAvailable;
                     const myRatingData = myEpisodeRatingMap.get(episodeKey);
                     const logCount = episodeLogCounts?.get(episodeKey) ?? 0;
 
@@ -442,6 +515,7 @@ function EpisodeGuideComponent({
                             {stillPath ? (
                               <Image
                                 source={{ uri: stillPath }}
+                                recyclingKey={stillPath}
                                 style={{
                                   width: 144,
                                   height: 81,

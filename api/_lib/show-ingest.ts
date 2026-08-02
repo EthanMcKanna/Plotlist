@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 
 import {
   ingestSyncMeta,
@@ -180,12 +180,24 @@ async function runBatches(statements: Array<{ run?: unknown }>) {
   }
 }
 
-async function readUserAttachedTmdbIds(): Promise<Set<number>> {
-  const rows = await db
-    .selectDistinct({ externalId: shows.externalId })
-    .from(shows)
-    .innerJoin(watchStates, eq(watchStates.showId, shows.id))
-    .where(eq(shows.externalSource, "tmdb"));
+// Only this tick's batch matters, so probe those ids instead of scanning the
+// whole watch_states table once a minute.
+async function readUserAttachedTmdbIds(tmdbIds: number[]): Promise<Set<number>> {
+  const uniqueIds = Array.from(new Set(tmdbIds.filter(Number.isFinite).map(String)));
+  if (uniqueIds.length === 0) {
+    return new Set();
+  }
+  const rows = (
+    await Promise.all(
+      chunkForSqlParams(uniqueIds, 1).map((chunk) =>
+        db
+          .selectDistinct({ externalId: shows.externalId })
+          .from(shows)
+          .innerJoin(watchStates, eq(watchStates.showId, shows.id))
+          .where(and(eq(shows.externalSource, "tmdb"), inArray(shows.externalId, chunk))),
+      ),
+    )
+  ).flat();
   return new Set(rows.map((row) => Number(row.externalId)).filter(Number.isFinite));
 }
 
@@ -227,7 +239,7 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
     return { selected: 0, ingested: 0, warmed: 0, failed: 0, gone: 0, changesSynced };
   }
 
-  const userAttached = await readUserAttachedTmdbIds();
+  const userAttached = await readUserAttachedTmdbIds(batch.map((state) => state.tmdbId));
 
   type FetchResult =
     | { state: (typeof batch)[number]; details: TmdbShowDetails; warm: boolean }

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -322,7 +322,7 @@ export function FriendActivityRow({
   );
 }
 
-export function FriendsActivity({
+export const FriendsActivity = memo(function FriendsActivity({
   index,
   viewerId,
   contactMatches,
@@ -499,7 +499,7 @@ export function FriendsActivity({
       ) : null}
     </View>
   );
-}
+});
 
 export function PersonChip({
   person,

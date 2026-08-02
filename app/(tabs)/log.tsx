@@ -55,6 +55,7 @@ import { formatTime } from "../../lib/format";
 import { api } from "../../lib/plotlist/api";
 import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
 import type { Id } from "../../lib/plotlist/types";
+import { TabMountPlaceholder, useDeferredTabMount } from "../../lib/useDeferredTabMount";
 
 const FILTER_OPTIONS: { value: DiaryFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -661,6 +662,14 @@ export function LogSurface({
 }
 
 export default function LogScreen() {
+  const tabMounted = useDeferredTabMount();
+  if (!tabMounted) {
+    return <TabMountPlaceholder />;
+  }
+  return <LogScreenContent />;
+}
+
+function LogScreenContent() {
   const accent = useAccent();
   const { isAuthenticated } = useAuth();
   const me = useQuery(api.users.me, isAuthenticated ? {} : "skip");
@@ -673,6 +682,16 @@ export default function LogScreen() {
   const activity = useQuery(
     api.watchLogs.listActivityForUser,
     me?._id ? { userId: me._id, limit } : "skip",
+  );
+
+  // A stable "now" (default-param Date.now() changed every render, so the
+  // diary pulse/feed memos in LogSurface never hit). Frozen per mount is
+  // fine: day boundaries only matter across app sessions.
+  const now = useMemo(() => Date.now(), []);
+  const items: DiaryItem[] = useMemo(
+    () =>
+      withLocalDiaryTimestamps((activity?.items as DiaryItem[] | undefined) ?? []),
+    [activity?.items],
   );
 
   const deleteLog = useMutation(api.watchLogs.deleteLog).withOptimisticUpdate(
@@ -748,14 +767,11 @@ export default function LogScreen() {
     );
   }
 
-  const items: DiaryItem[] = withLocalDiaryTimestamps(
-    (activity.items as DiaryItem[] | undefined) ?? [],
-  );
-
   return (
     <Screen hasTabBar>
       <LogSurface
         items={items}
+        now={now}
         hasMore={Boolean(activity.hasMore) && limit < MAX_LIMIT}
         onLoadMore={handleLoadMore}
         onDeleteLog={handleDeleteLog}

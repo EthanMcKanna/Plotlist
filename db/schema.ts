@@ -225,6 +225,12 @@ export const shows = sqliteTable(
     ),
     searchIdx: index("shows_search_text_idx").on(table.searchText),
     updatedAtIdx: index("shows_updated_at_idx").on(table.updatedAt),
+    // Home/rec fallbacks order the whole catalog by popularity; without this
+    // they full-scan and sort six-figure row counts per request.
+    popularityIdx: index("shows_popularity_idx").on(
+      table.tmdbPopularity,
+      table.tmdbVoteCount,
+    ),
   }),
 );
 
@@ -244,6 +250,16 @@ export const watchStates = sqliteTable(
   (table) => ({
     userUpdatedIdx: index("watch_states_user_updated_idx").on(table.userId, table.updatedAt),
     userShowIdx: uniqueIndex("watch_states_user_show_idx").on(table.userId, table.showId),
+    // trending:shows windows on updated_at alone; several refresh paths and
+    // the ingest tick filter by show_id (+status); continue/up-next reads are
+    // user_id + status ordered by recency.
+    updatedIdx: index("watch_states_updated_idx").on(table.updatedAt),
+    showStatusIdx: index("watch_states_show_status_idx").on(table.showId, table.status),
+    userStatusUpdatedIdx: index("watch_states_user_status_updated_idx").on(
+      table.userId,
+      table.status,
+      table.updatedAt,
+    ),
   }),
 );
 

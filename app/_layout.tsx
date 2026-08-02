@@ -1,6 +1,7 @@
 import "../global.css";
 
 import { useEffect } from "react";
+import { InteractionManager } from "react-native";
 import { Stack, useNavigationContainerRef } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -18,7 +19,12 @@ import { PurchasesBridge } from "../components/PurchasesBridge";
 import { QueryProvider } from "../components/QueryProvider";
 import { WebShell } from "../components/WebShell";
 import { PlotlistSessionProvider } from "../lib/plotlist/auth";
-import { initSentry, navigationIntegration, Sentry } from "../lib/sentry";
+import {
+  attachDeferredSentryIntegrations,
+  initSentry,
+  navigationIntegration,
+  Sentry,
+} from "../lib/sentry";
 
 initSentry();
 
@@ -35,6 +41,14 @@ function RootLayout() {
       navigationIntegration.registerNavigationContainer(navigationRef);
     }
   }, [navigationRef]);
+
+  // Replay/feedback/http-client integrations attach once launch work settles.
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      attachDeferredSentryIntegrations();
+    });
+    return () => task.cancel();
+  }, []);
 
   // Web ships a static boot shell in dist/index.html (dark page + wordmark)
   // so the pre-JS paint matches the launch overlay; drop it once React has

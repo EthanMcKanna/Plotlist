@@ -1953,6 +1953,10 @@ export const HOME_EDITORIAL_DEMAND_SOURCE_IDS: HomeEditorialResearchSourceId[] =
   "toms_guide_disney_june",
 ];
 
+const HOME_EDITORIAL_DEMAND_SOURCE_ID_SET = new Set(
+  HOME_EDITORIAL_DEMAND_SOURCE_IDS,
+);
+
 const HOME_EDITORIAL_DEMAND_SOURCE_WEIGHTS: Partial<
   Record<HomeEditorialResearchSourceId, number>
 > = {
@@ -2807,12 +2811,24 @@ function rotateSeedTitles(
   return [...titles.slice(offset), ...titles.slice(0, offset)];
 }
 
+// The valid-through dates are static module data; parse each one once.
+const seedGroupValidThroughCache = new Map<string, number>();
+
+function getCachedEndOfDayTimestamp(value: string) {
+  let timestamp = seedGroupValidThroughCache.get(value);
+  if (timestamp === undefined) {
+    timestamp = getEndOfDayTimestamp(value);
+    seedGroupValidThroughCache.set(value, timestamp);
+  }
+  return timestamp;
+}
+
 export function isHomeEditorialSeedGroupFresh(
   group: HomeEditorialSeedGroup,
   now: Date | string | number = new Date(),
 ) {
   const validThroughDate = HOME_EDITORIAL_SEED_VALID_THROUGH_DATES[group];
-  const validThrough = getEndOfDayTimestamp(validThroughDate);
+  const validThrough = getCachedEndOfDayTimestamp(validThroughDate);
   const current = toSeedTimestamp(now);
   if (!Number.isFinite(validThrough) || !Number.isFinite(current)) {
     return false;
@@ -2842,15 +2858,31 @@ export function getHomeEditorialSeedProvenance(title: string) {
   return { ...provenance, sourceIds: [...provenance.sourceIds] };
 }
 
-export function getHomeEditorialSeedItemByTitle(
+// Lazy index over the static seed catalog so title lookups avoid a
+// normalizing scan of every seed title per call.
+let seedTitleByNormalizedTitle: Map<string, string> | null = null;
+
+function getSeedTitleByNormalizedTitle(titleKey: string) {
+  if (!seedTitleByNormalizedTitle) {
+    const index = new Map<string, string>();
+    Object.keys(HOME_EDITORIAL_SEED_ITEMS).forEach((candidate) => {
+      const candidateKey = candidate.toLowerCase().replace(/\s+/g, " ");
+      if (!index.has(candidateKey)) {
+        index.set(candidateKey, candidate);
+      }
+    });
+    seedTitleByNormalizedTitle = index;
+  }
+  return seedTitleByNormalizedTitle.get(titleKey) ?? null;
+}
+
+function getActiveFreshGroupSeedTitle(
   title: string | null | undefined,
-  now: Date | string | number = new Date(),
+  now: Date | string | number,
 ) {
   const titleKey = title?.trim().toLowerCase().replace(/\s+/g, " ");
   if (!titleKey) return null;
-  const seedTitle = Object.keys(HOME_EDITORIAL_SEED_ITEMS).find(
-    (candidate) => candidate.toLowerCase().replace(/\s+/g, " ") === titleKey,
-  );
+  const seedTitle = getSeedTitleByNormalizedTitle(titleKey);
   if (!seedTitle || !isSeedTitleActive(seedTitle, now)) return null;
 
   const inFreshGroup = (Object.keys(HOME_EDITORIAL_SEED_TITLES) as HomeEditorialSeedGroup[]).some(
@@ -2858,7 +2890,15 @@ export function getHomeEditorialSeedItemByTitle(
       HOME_EDITORIAL_SEED_TITLES[group].includes(seedTitle) &&
       isHomeEditorialSeedGroupFresh(group, now),
   );
-  if (!inFreshGroup) return null;
+  return inFreshGroup ? seedTitle : null;
+}
+
+export function getHomeEditorialSeedItemByTitle(
+  title: string | null | undefined,
+  now: Date | string | number = new Date(),
+) {
+  const seedTitle = getActiveFreshGroupSeedTitle(title, now);
+  if (!seedTitle) return null;
 
   const item = HOME_EDITORIAL_SEED_ITEMS[seedTitle];
   return item ? { ...item, genreIds: [...item.genreIds] } : null;
@@ -2868,18 +2908,8 @@ export function getHomeEditorialPlatformKeyByTitle(
   title: string | null | undefined,
   now: Date | string | number = new Date(),
 ) {
-  const titleKey = title?.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!titleKey) return null;
-  const seedTitle = Object.keys(HOME_EDITORIAL_SEED_ITEMS).find(
-    (candidate) => candidate.toLowerCase().replace(/\s+/g, " ") === titleKey,
-  );
-  if (!seedTitle || !isSeedTitleActive(seedTitle, now)) return null;
-  const inFreshGroup = (Object.keys(HOME_EDITORIAL_SEED_TITLES) as HomeEditorialSeedGroup[]).some(
-    (group) =>
-      HOME_EDITORIAL_SEED_TITLES[group].includes(seedTitle) &&
-      isHomeEditorialSeedGroupFresh(group, now),
-  );
-  if (!inFreshGroup) return null;
+  const seedTitle = getActiveFreshGroupSeedTitle(title, now);
+  if (!seedTitle) return null;
 
   return HOME_EDITORIAL_PLATFORM_BY_TITLE[seedTitle] ?? null;
 }
@@ -2952,17 +2982,20 @@ function getHomeEditorialChartPositionBoost(title: string) {
   return HOME_EDITORIAL_CHART_POSITION_BOOST_BY_TITLE[title] ?? 0;
 }
 
-export function getHomeEditorialDemandConfidenceScore(title: string) {
+// Confidence scores only depend on static module data, so each title is
+// computed once and memoized for the rest of the session.
+const demandConfidenceScoreCache = new Map<string, number>();
+
+function computeHomeEditorialDemandConfidenceScore(title: string) {
   const provenance = HOME_EDITORIAL_SEED_PROVENANCE[title];
   const item = HOME_EDITORIAL_SEED_ITEMS[title];
   if (!provenance || !item) return 0;
 
-  const demandSourceIds = new Set(HOME_EDITORIAL_DEMAND_SOURCE_IDS);
   const sourceScore = provenance.sourceIds.reduce((total, sourceId) => {
     if (HOME_EDITORIAL_DEMAND_SOURCE_WEIGHTS[sourceId]) {
       return total + HOME_EDITORIAL_DEMAND_SOURCE_WEIGHTS[sourceId];
     }
-    return total + (demandSourceIds.has(sourceId) ? 6 : 0);
+    return total + (HOME_EDITORIAL_DEMAND_SOURCE_ID_SET.has(sourceId) ? 6 : 0);
   }, 0);
   const officialSourceId = HOME_EDITORIAL_OFFICIAL_SOURCE_BY_TITLE[title];
   const officialScore =
@@ -2973,6 +3006,15 @@ export function getHomeEditorialDemandConfidenceScore(title: string) {
   const chartPositionScore = getHomeEditorialChartPositionBoost(title);
 
   return sourceScore + officialScore + currentScore + signalScore + chartPositionScore;
+}
+
+export function getHomeEditorialDemandConfidenceScore(title: string) {
+  let score = demandConfidenceScoreCache.get(title);
+  if (score === undefined) {
+    score = computeHomeEditorialDemandConfidenceScore(title);
+    demandConfidenceScoreCache.set(title, score);
+  }
+  return score;
 }
 
 export function getHomeEditorialSeedEntriesByRationale(
@@ -2990,13 +3032,17 @@ export function getHomeEditorialSeedEntriesByRationale(
     });
   });
 
-  return [...entriesByTitle.values()].sort((left, right) => {
-    const confidenceDelta =
-      getHomeEditorialDemandConfidenceScore(right.title) -
-      getHomeEditorialDemandConfidenceScore(left.title);
-    if (confidenceDelta !== 0) return confidenceDelta;
-    return left.title.localeCompare(right.title);
-  });
+  return [...entriesByTitle.values()]
+    .map((entry) => ({
+      entry,
+      confidence: getHomeEditorialDemandConfidenceScore(entry.title),
+    }))
+    .sort((left, right) => {
+      const confidenceDelta = right.confidence - left.confidence;
+      if (confidenceDelta !== 0) return confidenceDelta;
+      return left.entry.title.localeCompare(right.entry.title);
+    })
+    .map(({ entry }) => entry);
 }
 
 export function getHomeEditorialCurrentDemandSeedItems(
@@ -3278,7 +3324,7 @@ export function auditHomeEditorialSeeds(
     ? new Date(current).getUTCFullYear()
     : new Date().getUTCFullYear();
   const knownSourceIds = new Set(Object.keys(HOME_EDITORIAL_RESEARCH_SOURCES));
-  const demandSourceIds = new Set(HOME_EDITORIAL_DEMAND_SOURCE_IDS);
+  const demandSourceIds = HOME_EDITORIAL_DEMAND_SOURCE_ID_SET;
   const findings: HomeEditorialSeedAuditFinding[] = [];
   const activeCurrentDemandTitles = new Map<string, HomeEditorialSeedItem>();
   let activeTitleCount = 0;

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, RefreshControl, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,6 +25,12 @@ import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react"
 import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
 import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
+
+// List entries carry their unread flag so renderItem (and its deps) stay
+// stable when one row is marked read — only that row's memo compare fails.
+type NotificationFeedEntry =
+  | Extract<NotificationListEntry, { kind: "header" }>
+  | (Extract<NotificationListEntry, { kind: "row" }> & { unread: boolean });
 
 function SectionHeader({ title }: { title: string }) {
   return (
@@ -70,24 +76,26 @@ export default function NotificationsScreen() {
     },
   );
 
-  const isUnread = useCallback(
-    (item: NotificationItem) =>
-      !item.readAt && !allReadLocally && !readOverrides.has(item._id),
-    [allReadLocally, readOverrides],
-  );
+  // Latest values behind stable refs so markNotificationRead (and everything
+  // downstream: openNotification, renderItem, every row's memo compare) keeps
+  // one identity for the life of the screen.
+  const markReadRef = useRef(markRead);
+  markReadRef.current = markRead;
+  const readStateRef = useRef({ allReadLocally, readOverrides });
+  readStateRef.current = { allReadLocally, readOverrides };
 
-  const markNotificationRead = useCallback(
-    (item: NotificationItem) => {
-      if (!isUnread(item)) return;
-      setReadOverrides((current) => {
-        const next = new Set(current);
-        next.add(item._id);
-        return next;
-      });
-      void markRead({ notificationId: item._id }).then(() => syncAppBadgeCount());
-    },
-    [isUnread, markRead],
-  );
+  const markNotificationRead = useCallback((item: NotificationItem) => {
+    const readState = readStateRef.current;
+    if (item.readAt || readState.allReadLocally || readState.readOverrides.has(item._id)) {
+      return;
+    }
+    setReadOverrides((current) => {
+      const next = new Set(current);
+      next.add(item._id);
+      return next;
+    });
+    void markReadRef.current({ notificationId: item._id }).then(() => syncAppBadgeCount());
+  }, []);
 
   const openNotification = useCallback(
     (item: NotificationItem) => {
@@ -106,24 +114,35 @@ export default function NotificationsScreen() {
     void markAllRead({}).then(() => syncAppBadgeCount());
   }, [markAllRead]);
 
-  const entries = useMemo(
-    () => notificationSections((items ?? []) as NotificationItem[]),
-    [items],
+  const entries = useMemo<NotificationFeedEntry[]>(
+    () =>
+      notificationSections((items ?? []) as NotificationItem[]).map((entry) =>
+        entry.kind === "row"
+          ? {
+              ...entry,
+              unread:
+                !entry.item.readAt &&
+                !allReadLocally &&
+                !readOverrides.has(entry.item._id),
+            }
+          : entry,
+      ),
+    [allReadLocally, items, readOverrides],
   );
 
   const renderItem = useCallback(
-    ({ item: entry }: { item: NotificationListEntry }) =>
+    ({ item: entry }: { item: NotificationFeedEntry }) =>
       entry.kind === "header" ? (
         <SectionHeader title={entry.title} />
       ) : (
         <NotificationRow
           item={entry.item}
-          unread={isUnread(entry.item)}
+          unread={entry.unread}
           onOpen={openNotification}
           onMarkRead={markNotificationRead}
         />
       ),
-    [isUnread, markNotificationRead, openNotification],
+    [markNotificationRead, openNotification],
   );
 
   const listContentStyle = useMemo(() => ({ paddingBottom: 24, paddingTop: 4 }), []);
@@ -199,8 +218,8 @@ export default function NotificationsScreen() {
             <FlashList
               data={entries}
               renderItem={renderItem}
-              keyExtractor={(entry: NotificationListEntry) => entry.key}
-              getItemType={(entry: NotificationListEntry) => entry.kind}
+              keyExtractor={(entry: NotificationFeedEntry) => entry.key}
+              getItemType={(entry: NotificationFeedEntry) => entry.kind}
               estimatedItemSize={72}
               contentContainerStyle={listContentStyle}
               refreshControl={

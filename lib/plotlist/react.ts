@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation as useTanstackMutation, useQuery as useTanstackQuery } from "@tanstack/react-query";
 
 import { getFunctionName } from "./api";
@@ -8,6 +8,10 @@ import { queryClient } from "../queryClient";
 import type { PaginatedResult, PlotlistFunctionReference } from "./types";
 
 type ArgsOrSkip = [] | [Record<string, any> | "skip"];
+
+// Stable empty page so loading/skipped paginated queries don't hand a fresh
+// [] to every consumer on every render (which poisons downstream useMemos).
+const EMPTY_PAGE: any[] = [];
 export type LocalStore = {
   getQuery: <Query extends PlotlistFunctionReference<"query">>(
     query: Query,
@@ -33,6 +37,79 @@ function queryKeyFor<Query extends PlotlistFunctionReference<"query">>(
   args?: Record<string, any>,
 ) {
   return ["plotlist-rpc", "query", getFunctionName(query as any), args] as const;
+}
+
+// Which query domains a mutation domain can change. Mutations used to
+// invalidate the entire ["plotlist-rpc"] cache, so one episode checkbox
+// refetched every mounted query on every screen (~15-20 RPCs per tap).
+// `null` keeps the old full-cache behavior; unknown domains also fall back
+// to it so a new mutation can never silently under-invalidate.
+const MUTATION_INVALIDATION_DOMAINS: Record<string, readonly string[] | null> = {
+  episodeProgress: [
+    "episodeProgress",
+    "watchStates",
+    "watchLogs",
+    "watchStats",
+    "shows",
+    "users",
+    "releaseCalendar",
+    "catchup",
+  ],
+  watchStates: [
+    "watchStates",
+    "episodeProgress",
+    "watchLogs",
+    "watchStats",
+    "shows",
+    "users",
+    "releaseCalendar",
+    "catchup",
+  ],
+  watchLogs: [
+    "watchLogs",
+    "watchStats",
+    "episodeProgress",
+    "watchStates",
+    "users",
+  ],
+  reviews: ["reviews", "watchStats", "users", "likes"],
+  likes: ["likes", "reviews", "comments"],
+  comments: ["comments", "reviews", "lists"],
+  lists: ["lists", "listItems", "users"],
+  listItems: ["listItems", "lists"],
+  follows: ["follows", "followRequests", "users", "feed", "contacts"],
+  followRequests: ["followRequests", "follows", "users", "feed"],
+  users: ["users", "follows", "followRequests", "contacts"],
+  notifications: ["notifications"],
+  contacts: ["contacts", "users"],
+  releaseCalendar: ["releaseCalendar"],
+  storage: ["storage", "users"],
+  shows: ["shows"],
+  phone: ["phone", "users"],
+  embeddings: ["embeddings", "users"],
+  reports: ["reports"],
+  catchup: ["catchup"],
+  blends: ["blends"],
+  people: ["people"],
+  // Blocking and Trakt imports change visibility/library state everywhere.
+  blocks: null,
+  traktImport: null,
+};
+
+function invalidationFilterForMutation(name: string) {
+  const affected = MUTATION_INVALIDATION_DOMAINS[name.split(":")[0] ?? ""];
+  if (affected == null) {
+    return { queryKey: ["plotlist-rpc"] as const };
+  }
+  const affectedSet = new Set(affected);
+  return {
+    predicate: (query: { queryKey: readonly unknown[] }) => {
+      const key = query.queryKey;
+      if (key[0] !== "plotlist-rpc") return false;
+      const fnName = key[2];
+      return typeof fnName === "string" && affectedSet.has(fnName.split(":")[0] ?? "");
+    },
+  };
 }
 
 function paginatedQueryMatches(
@@ -109,7 +186,8 @@ export function useQuery<Query extends PlotlistFunctionReference<"query">>(
   const rpcResult = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "query", name, queryArgs],
-      queryFn: () => callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any)),
+      queryFn: ({ signal }) =>
+        callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any), { signal }),
       enabled: queryArgs !== "skip",
     },
     queryClient,
@@ -133,7 +211,8 @@ export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
   const rpcResult = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "query", name, queryArgs],
-      queryFn: () => callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any)),
+      queryFn: ({ signal }) =>
+        callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any), { signal }),
       enabled: queryArgs !== "skip",
     },
     queryClient,
@@ -150,6 +229,7 @@ export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
 export function useMutation<Mutation extends PlotlistFunctionReference<"mutation">>(
   mutation: Mutation,
 ): MutationFn {
+  const name = getFunctionName(mutation as any);
   const rpcMutation = useTanstackMutation(
     {
       mutationFn: (args: any) => callMutation(mutation, args),
@@ -163,14 +243,15 @@ export function useMutation<Mutation extends PlotlistFunctionReference<"mutation
     ) => {
       const wrapped = (async (args?: any) => {
         const optimistic = optimisticHandler ? createLocalStore() : null;
+        const invalidationFilter = invalidationFilterForMutation(name);
         try {
           if (optimisticHandler) {
-            await queryClient.cancelQueries({ queryKey: ["plotlist-rpc"] });
+            await queryClient.cancelQueries(invalidationFilter as any);
           }
           optimisticHandler?.(optimistic!.localStore, args);
           const result = await rpcMutation.mutateAsync(args);
           void queryClient.invalidateQueries({
-            queryKey: ["plotlist-rpc"],
+            ...(invalidationFilter as any),
             refetchType: "active",
           });
           return result;
@@ -184,7 +265,7 @@ export function useMutation<Mutation extends PlotlistFunctionReference<"mutation
     };
 
     return buildMutation();
-  }, [rpcMutation.mutateAsync]);
+  }, [name, rpcMutation.mutateAsync]);
 }
 
 export function useAction<Action extends PlotlistFunctionReference<"action">>(
@@ -200,6 +281,36 @@ export function useAction<Action extends PlotlistFunctionReference<"action">>(
   return useCallback(async (args?: any) => await rpcAction.mutateAsync(args), [
     rpcAction.mutateAsync,
   ]);
+}
+
+// Read-only actions (TMDB details, seasons, IMDb ratings, recs) used to run
+// as mutations — no cache, no dedupe — so back-navigating to a show refetched
+// everything from scratch. This routes them through react-query with a long
+// staleTime; mutation invalidation still reaches them via the domain map.
+export function useActionQuery<Action extends PlotlistFunctionReference<"action">>(
+  action: Action,
+  args?: Record<string, any> | "skip",
+  options?: { staleTime?: number; gcTime?: number },
+): { data: any; isLoading: boolean; isError: boolean; refetch: () => void } {
+  const name = getFunctionName(action as any);
+  const queryArgs = args === "skip" ? undefined : args ?? {};
+  const result = useTanstackQuery(
+    {
+      queryKey: ["plotlist-rpc", "action", name, queryArgs],
+      queryFn: ({ signal }) => callAction(action, queryArgs, { signal }),
+      enabled: args !== "skip",
+      staleTime: options?.staleTime ?? 10 * 60_000,
+      ...(options?.gcTime !== undefined ? { gcTime: options.gcTime } : {}),
+    },
+    queryClient,
+  );
+
+  return {
+    data: args === "skip" ? undefined : result.data,
+    isLoading: args !== "skip" && result.isLoading,
+    isError: args !== "skip" && result.isError,
+    refetch: result.refetch,
+  };
 }
 
 export function usePaginatedQuery<Query extends PlotlistFunctionReference<"query">>(
@@ -221,19 +332,30 @@ export function usePaginatedQuery<Query extends PlotlistFunctionReference<"query
   const result = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "paginated", name, queryArgs],
-      queryFn: () => callQuery<PaginatedResult>(query, queryArgs === "skip" ? undefined : queryArgs),
+      queryFn: ({ signal }) =>
+        callQuery<PaginatedResult>(query, queryArgs === "skip" ? undefined : queryArgs, { signal }),
       enabled: args !== "skip",
     },
     queryClient,
   );
 
-  const currentPage = (result.data?.results ?? result.data?.page ?? []) as any[];
+  const currentPage = (result.data?.results ?? result.data?.page ?? EMPTY_PAGE) as any[];
   const allResults = useMemo(() => {
     if (cursor === null) {
       return currentPage;
     }
     return [...pages.flat(), ...currentPage];
   }, [currentPage, cursor, pages]);
+
+  // Changing the cursor changes the query key, which fires the next page's
+  // fetch on its own — no invalidation needed. The flag just needs to clear
+  // once that fetch settles.
+  const isFetching = result.isFetching;
+  useEffect(() => {
+    if (!isFetching) {
+      setLoadingMore(false);
+    }
+  }, [isFetching]);
 
   const loadMore = useCallback(
     (_numItems?: number) => {
@@ -244,15 +366,12 @@ export function usePaginatedQuery<Query extends PlotlistFunctionReference<"query
       setLoadingMore(true);
       setPages((existing) => [...existing, currentPage]);
       setCursor(nextCursor);
-      void queryClient
-        .invalidateQueries({ queryKey: ["plotlist-rpc", "paginated", name] })
-        .finally(() => setLoadingMore(false));
     },
-    [currentPage, loadingMore, name, result.data],
+    [currentPage, loadingMore, result.data],
   );
 
   return {
-    results: args === "skip" ? [] : allResults,
+    results: args === "skip" ? EMPTY_PAGE : allResults,
     status: result.isLoading
       ? "LoadingFirstPage"
       : loadingMore

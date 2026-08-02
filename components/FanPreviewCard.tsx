@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { memo, type ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -40,7 +40,7 @@ function FanPoster({ uri, style }: { uri: string | null; style: object }) {
 // (facet categories, lists). Purely presentational — callers own navigation
 // (via onPress, or href for link destinations), haptics, and long-press
 // behavior.
-export function FanPreviewCard({
+export const FanPreviewCard = memo(function FanPreviewCard({
   title,
   accent,
   posters,
@@ -173,7 +173,7 @@ export function FanPreviewCard({
       {body}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

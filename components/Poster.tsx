@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 
-export function Poster({
+import { resizeTmdbImageUrl } from "../lib/tmdbImages";
+
+export const Poster = memo(function Poster({
   uri,
   size = "md",
   width,
@@ -21,10 +23,16 @@ export function Poster({
   const [failed, setFailed] = useState(false);
   const dimension =
     width ?? (size === "sm" ? 60 : size === "lg" ? 140 : 90);
+  // Small thumbnails downshift the TMDB size segment so a fast scroll
+  // decodes far fewer pixels; larger renders keep the server's URL as-is.
+  const resizedUri =
+    uri && dimension <= 160
+      ? resizeTmdbImageUrl(uri, dimension <= 90 ? "w185" : "w342")
+      : uri;
 
   useEffect(() => {
     setFailed(false);
-  }, [uri]);
+  }, [resizedUri]);
 
   return (
     <View
@@ -42,10 +50,11 @@ export function Poster({
       >
         <Ionicons name="film-outline" size={Math.max(18, dimension * 0.24)} color="#5E6575" />
       </View>
-      {uri && !failed ? (
+      {resizedUri && !failed ? (
         <Image
           testID="poster-image"
-          source={{ uri }}
+          source={{ uri: resizedUri }}
+          recyclingKey={resizedUri}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           cachePolicy="memory-disk"
@@ -58,7 +67,7 @@ export function Poster({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   frame: {

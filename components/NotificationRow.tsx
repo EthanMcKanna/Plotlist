@@ -14,6 +14,7 @@ import {
   notificationVisuals,
   type NotificationItem,
 } from "../lib/notificationDisplay";
+import { resizeTmdbImageUrl } from "../lib/tmdbImages";
 import { Avatar } from "./Avatar";
 import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
@@ -68,6 +69,8 @@ function GlyphTile({ glyph, color, size }: { glyph: string; color: string; size:
 }
 
 function PosterThumb({ uri }: { uri: string }) {
+  // 44pt-wide thumb: w185 decodes ~7x fewer pixels than the server's w500.
+  const thumbUri = resizeTmdbImageUrl(uri, "w185");
   return (
     <View
       className="overflow-hidden bg-dark-elevated"
@@ -80,7 +83,8 @@ function PosterThumb({ uri }: { uri: string }) {
       }}
     >
       <Image
-        source={{ uri }}
+        source={{ uri: thumbUri }}
+        recyclingKey={thumbUri}
         style={{ height: "100%", width: "100%" }}
         contentFit="cover"
         cachePolicy="memory-disk"

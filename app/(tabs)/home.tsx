@@ -161,7 +161,11 @@ function getShelfTopUpCandidates(items: SignatureRailItem[], minimum: number) {
   );
 }
 
-function getFreshRoomTopUpItems(data: HomeData): SignatureRailItem[] {
+const homeSectionKeyExtractor = (item: HomeSection) => item.kind;
+
+function getFreshRoomTopUpItems(
+  data: Pick<HomeData, "streamingRooms" | "getCatalogForKey">,
+): SignatureRailItem[] {
   const rooms = data.streamingRooms.map((room) => ({
     items: room.items.flatMap((item) => {
       const key = String(getProviderRoomItemRailKey(item));
@@ -394,15 +398,15 @@ export function HomeSurface({
   );
   const heatRoomTopUpItems = useMemo(
     () => getHomeRoomHeatTopUpItems(data),
-    [data],
+    [data.generatedAt, data.getCatalogForKey, data.streamingRooms],
   );
   const qualityRoomTopUpItems = useMemo(
     () => getHomeRoomQualityTopUpItems(data),
-    [data],
+    [data.generatedAt, data.getCatalogForKey, data.streamingRooms],
   );
   const quickRoomTopUpItems = useMemo(
     () => getHomeRoomQuickTopUpItems(data),
-    [data],
+    [data.generatedAt, data.getCatalogForKey, data.streamingRooms],
   );
   const heatItems = useMemo(
     () => {
@@ -434,7 +438,7 @@ export function HomeSurface({
   );
   const freshRoomTopUpItems = useMemo(
     () => getFreshRoomTopUpItems(data),
-    [data],
+    [data.getCatalogForKey, data.streamingRooms],
   );
   const freshReservePreviewKeys = useMemo(
     () =>
@@ -726,7 +730,7 @@ export function HomeSurface({
     } finally {
       setRefreshing(false);
     }
-  }, [data, schedulePreview]);
+  }, [data.refresh, schedulePreview]);
 
   const openShowFromKey = useCallback(
     async (key: string, fallbackTitle: string) => {
@@ -764,7 +768,7 @@ export function HomeSurface({
         notifyError("Could not add show", String(error));
       }
     },
-    [data, ingestFromCatalog],
+    [data.getCatalogForKey, ingestFromCatalog],
   );
 
   const handlePressRailItem = useCallback(
@@ -788,7 +792,7 @@ export function HomeSurface({
           : item;
       });
     },
-    [data],
+    [data.getCatalogForKey],
   );
 
   const handleSyncContacts = useCallback(async () => {
@@ -902,13 +906,14 @@ export function HomeSurface({
     [sectionDisplayIndexByKind],
   );
 
-  const renderSectionContent = (item: HomeSection) => {
+  const renderSectionContent = useCallback((item: HomeSection) => {
     switch (item.kind) {
       case "continue-watching":
         if (!data.hasProfile) return null;
         return (
           <ContinueWatchingRail
             items={continueWatchingItems ?? null}
+            activeItems={activeContinueWatchingItems}
             hideWhenEmpty
             index={getSectionDisplayIndex(item.kind)}
           />
@@ -1183,23 +1188,62 @@ export function HomeSurface({
       default:
         return null;
     }
-  };
+  }, [
+    accent,
+    activeContinueWatchingItems,
+    continueWatchingItems,
+    criticsItems,
+    data.contactMatches,
+    data.feedEmpty,
+    data.friendActivity,
+    data.hasProfile,
+    data.hasSyncedContacts,
+    data.loading.critics,
+    data.loading.forYou,
+    data.loading.fresh,
+    data.loading.heat,
+    data.loading.quick,
+    data.me,
+    data.similarTaste,
+    data.suggested,
+    data.tasteRails,
+    featureCardWidth,
+    forYouItems,
+    freshItems,
+    getSectionDisplayIndex,
+    handleDismissNudge,
+    handlePressRailItem,
+    handleSyncContacts,
+    hasPersonalTasteSignals,
+    heatItems,
+    pulseHeatItems,
+    quickItems,
+    railHeaderCopy,
+    scheduleLoading,
+    schedulePreview,
+    syncing,
+    warmScheduleHasItems,
+    withShowHrefs,
+  ]);
 
-  const renderItem = ({ item }: { item: HomeSection }) => {
-    const content = renderSectionContent(item);
-    if (!content) return null;
-    const sectionTestID = getHomeSectionTestID(item.kind);
-    const sectionDataSet = getHomeSectionWebDataSet(item.kind, sectionTestID);
+  const renderItem = useCallback(
+    ({ item }: { item: HomeSection }) => {
+      const content = renderSectionContent(item);
+      if (!content) return null;
+      const sectionTestID = getHomeSectionTestID(item.kind);
+      const sectionDataSet = getHomeSectionWebDataSet(item.kind, sectionTestID);
 
-    return (
-      <WebDataSetView
-        testID={sectionTestID}
-        {...(sectionDataSet ? { dataSet: sectionDataSet } : {})}
-      >
-        {content}
-      </WebDataSetView>
-    );
-  };
+      return (
+        <WebDataSetView
+          testID={sectionTestID}
+          {...(sectionDataSet ? { dataSet: sectionDataSet } : {})}
+        >
+          {content}
+        </WebDataSetView>
+      );
+    },
+    [renderSectionContent],
+  );
 
   // Desktop web replaces the floating mobile top bar (avatar + bell live in
   // the sidebar there) with an inline greeting header.
@@ -1220,7 +1264,7 @@ export function HomeSurface({
         testID="home-surface-list"
         ref={listRef}
         data={sections}
-        keyExtractor={(item) => item.kind}
+        keyExtractor={homeSectionKeyExtractor}
         renderItem={renderItem}
         ListHeaderComponent={desktopHeader}
         initialNumToRender={initialRenderSectionCount}

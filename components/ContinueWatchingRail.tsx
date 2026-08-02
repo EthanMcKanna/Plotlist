@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { memo, useCallback, useRef } from "react";
 import {
   Platform,
   Pressable,
@@ -65,6 +65,11 @@ export type ContinueWatchingItem = {
 
 type ContinueWatchingRailProps = {
   items?: ContinueWatchingItem[] | null;
+  /**
+   * Pre-ranked active items (home.tsx already memoizes these for its preview
+   * keys); derived from `items` when omitted.
+   */
+  activeItems?: ContinueWatchingItem[];
   hideWhenEmpty?: boolean;
   index?: number;
 };
@@ -344,8 +349,9 @@ export function ContinueWatchingRailSkeleton({ index = 1 }: { index?: number }) 
   );
 }
 
-export function ContinueWatchingRail({
+export const ContinueWatchingRail = memo(function ContinueWatchingRail({
   items: providedItems,
+  activeItems: providedActiveItems,
   hideWhenEmpty = false,
   index = 1,
 }: ContinueWatchingRailProps = {}) {
@@ -447,7 +453,8 @@ export function ContinueWatchingRail({
     );
   }
 
-  const activeItems = getActiveContinueWatchingItems(items);
+  const activeItems =
+    providedActiveItems ?? getActiveContinueWatchingItems(items);
 
   if (activeItems.length === 0) {
     return (
@@ -531,9 +538,9 @@ export function ContinueWatchingRail({
       </HorizontalRail>
     </View>
   );
-}
+});
 
-export function ContinueWatchingCard({
+export const ContinueWatchingCard = memo(function ContinueWatchingCard({
   item,
   index,
   cardWidth,
@@ -721,7 +728,7 @@ export function ContinueWatchingCard({
       </View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   rail: {

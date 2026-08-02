@@ -106,9 +106,7 @@ function tasteScore(show: HomeRankableShow, genreWeights: Record<string, number>
   return clamp01(raw / Math.max(1, Math.sqrt(genres.length)));
 }
 
-function genreOverlap(left: HomeRankableShow, right: HomeRankableShow) {
-  const leftGenres = new Set(left.genreIds ?? []);
-  const rightGenres = right.genreIds ?? [];
+function genreOverlap(leftGenres: Set<number>, rightGenres: number[]) {
   if (leftGenres.size === 0 || rightGenres.length === 0) return 0;
   let shared = 0;
   rightGenres.forEach((genreId) => {
@@ -150,7 +148,13 @@ export function rankHomeShows<T extends HomeRankableShow>(
   const seedKeys = new Set(options.seedKeys ?? []);
   const maxPopularity =
     options.maxPopularity ??
-    Math.max(1, ...candidates.map((show) => Math.max(0, show.tmdbPopularity ?? 0)));
+    Math.max(
+      1,
+      candidates.reduce(
+        (max, show) => Math.max(max, show.tmdbPopularity ?? 0),
+        0,
+      ),
+    );
   const unique = new Map<string, T>();
 
   candidates.forEach((show) => {
@@ -160,7 +164,7 @@ export function rankHomeShows<T extends HomeRankableShow>(
     unique.set(key, show);
   });
 
-  const scored = Array.from(unique.values()).map((show) => {
+  const scored = Array.from(unique.values()).map((show, order) => {
     const { score, reasons } = scoreShow(show, { ...options, now, maxPopularity });
     const key = getHomeShowKey(show);
     const seedBoost = key && seedKeys.has(key) ? 0.08 : 0;
@@ -168,29 +172,43 @@ export function rankHomeShows<T extends HomeRankableShow>(
       item: show,
       score: score + seedBoost,
       reasons,
+      order,
+      genreSet: new Set(show.genreIds ?? []),
+      genreList: show.genreIds ?? [],
     };
   });
 
-  const selected: Array<{ item: T; score: number; reasons: HomeReasonSignal[] }> = [];
+  type ScoredEntry = (typeof scored)[number];
+  const selected: ScoredEntry[] = [];
   const remaining = [...scored];
   const diversityStrength = options.diversityStrength ?? 0.16;
 
   while (remaining.length > 0) {
     let bestIndex = 0;
     let bestScore = Number.NEGATIVE_INFINITY;
+    let bestOrder = Number.POSITIVE_INFINITY;
     for (let index = 0; index < remaining.length; index += 1) {
       const candidate = remaining[index];
-      const overlapPenalty = selected.reduce(
-        (max, picked) => Math.max(max, genreOverlap(candidate.item, picked.item)),
-        0,
-      );
+      let overlapPenalty = 0;
+      for (const picked of selected) {
+        const overlap = genreOverlap(candidate.genreSet, picked.genreList);
+        if (overlap > overlapPenalty) overlapPenalty = overlap;
+      }
       const diversifiedScore = candidate.score - overlapPenalty * diversityStrength;
-      if (diversifiedScore > bestScore) {
+      // Exact ties fall back to original score order so removal order below
+      // can never change the output.
+      if (
+        diversifiedScore > bestScore ||
+        (diversifiedScore === bestScore && candidate.order < bestOrder)
+      ) {
         bestScore = diversifiedScore;
         bestIndex = index;
+        bestOrder = candidate.order;
       }
     }
-    const [next] = remaining.splice(bestIndex, 1);
+    const next = remaining[bestIndex];
+    remaining[bestIndex] = remaining[remaining.length - 1];
+    remaining.pop();
     selected.push(next);
   }
 

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,7 +15,13 @@ type CastMemberProps = {
   onPress?: () => void;
 };
 
-export function CastMember({ name, role, profilePath, personId, onPress }: CastMemberProps) {
+export const CastMember = memo(function CastMember({
+  name,
+  role,
+  profilePath,
+  personId,
+  onPress,
+}: CastMemberProps) {
   const content = (
     <>
       {profilePath ? (
@@ -84,4 +91,4 @@ export function CastMember({ name, role, profilePath, personId, onPress }: CastM
       {content}
     </Pressable>
   );
-}
+});

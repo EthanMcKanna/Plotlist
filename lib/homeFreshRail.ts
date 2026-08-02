@@ -57,12 +57,21 @@ export function sortFreshRailItemsByReleaseProximity<
   items: T[],
   now?: Date | string | number,
 ) {
-  return [...items].sort((left, right) => {
-    const scoreDelta =
-      getFreshRailReleaseScore(right, now) - getFreshRailReleaseScore(left, now);
-    if (scoreDelta !== 0) return scoreDelta;
-    return (right.homeScore ?? 0) - (left.homeScore ?? 0);
-  });
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      score: getFreshRailReleaseScore(item, now),
+    }))
+    .sort((left, right) => {
+      const scoreDelta = right.score - left.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      const homeScoreDelta =
+        (right.item.homeScore ?? 0) - (left.item.homeScore ?? 0);
+      if (homeScoreDelta !== 0) return homeScoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 }
 
 function isPreviewedFreshRailItem(
@@ -112,41 +121,37 @@ function sortVisibleFreshRailItems<T extends HomeVisibleFreshRailItem>(
 ) {
   const titleCounts = getFreshRailTitleAppearanceCounts(precedingItems);
   const maxTitleAppearances = Math.max(1, Math.floor(maxAppearances));
-  return [...items].sort((left, right) => {
-    const leftIsOpeningRepeat = isOpeningRepeatFreshRailItem(
-      left,
-      previewKeys,
-      titleCounts,
-      maxTitleAppearances,
-    );
-    const rightIsOpeningRepeat = isOpeningRepeatFreshRailItem(
-      right,
-      previewKeys,
-      titleCounts,
-      maxTitleAppearances,
-    );
-    if (leftIsOpeningRepeat !== rightIsOpeningRepeat) {
-      return leftIsOpeningRepeat ? 1 : -1;
-    }
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      isOpeningRepeat: isOpeningRepeatFreshRailItem(
+        item,
+        previewKeys,
+        titleCounts,
+        maxTitleAppearances,
+      ),
+      score: getVisibleFreshRailScore(
+        item,
+        previewKeys,
+        titleCounts,
+        maxTitleAppearances,
+        now,
+      ),
+    }))
+    .sort((left, right) => {
+      if (left.isOpeningRepeat !== right.isOpeningRepeat) {
+        return left.isOpeningRepeat ? 1 : -1;
+      }
 
-    const scoreDelta =
-      getVisibleFreshRailScore(
-        right,
-        previewKeys,
-        titleCounts,
-        maxTitleAppearances,
-        now,
-      ) -
-      getVisibleFreshRailScore(
-        left,
-        previewKeys,
-        titleCounts,
-        maxTitleAppearances,
-        now,
-      );
-    if (scoreDelta !== 0) return scoreDelta;
-    return (right.homeScore ?? 0) - (left.homeScore ?? 0);
-  });
+      const scoreDelta = right.score - left.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      const homeScoreDelta =
+        (right.item.homeScore ?? 0) - (left.item.homeScore ?? 0);
+      if (homeScoreDelta !== 0) return homeScoreDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 }
 
 function getFreshRailTitleAppearanceCounts(items: HomeRailIdentityItem[]) {

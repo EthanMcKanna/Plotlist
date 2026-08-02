@@ -1,5 +1,3 @@
-import { format } from "date-fns";
-
 export const RELEASE_CALENDAR_MAX_ITEMS = 250;
 
 export const RELEASE_CALENDAR_PROVIDER_OPTIONS = [
@@ -188,8 +186,12 @@ export function normalizeSelectedProviders(selectedProviders?: string[] | null) 
   );
 }
 
+// Hand-rolled so this module (which QueryProvider pulls onto the root-layout
+// graph) doesn't drag the whole non-tree-shaken date-fns barrel into startup.
 export function getLocalDateString(value = new Date()) {
-  return format(value, "yyyy-MM-dd");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
 }
 
 export function addDaysToDateOnlyString(value: string, days: number) {

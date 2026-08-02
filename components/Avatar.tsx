@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Image } from "expo-image";
 import { Text, View } from "react-native";
 
@@ -11,7 +12,7 @@ function initials(label?: string | null) {
   return (first + second).toUpperCase();
 }
 
-export function Avatar({
+export const Avatar = memo(function Avatar({
   uri,
   label,
   size = 40,
@@ -26,6 +27,7 @@ export function Avatar({
   const avatar = uri ? (
     <Image
       source={{ uri }}
+      recyclingKey={uri}
       accessibilityLabel={label ?? "User avatar"}
       style={{ width: size, height: size, borderRadius: size / 2 }}
       contentFit="cover"
@@ -55,4 +57,4 @@ export function Avatar({
   }
 
   return avatar;
-}
+});

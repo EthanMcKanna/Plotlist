@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,7 +19,7 @@ type SimilarShowCardProps = {
   subtitle?: string | null;
 };
 
-export function SimilarShowCard({
+export const SimilarShowCard = memo(function SimilarShowCard({
   externalId,
   showId,
   title,
@@ -96,4 +97,4 @@ export function SimilarShowCard({
       {content}
     </Pressable>
   );
-}
+});

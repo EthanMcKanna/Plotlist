@@ -78,7 +78,25 @@ async function getUserFromRefreshToken(refreshToken: string) {
   return userRows[0] ?? null;
 }
 
+// The viewer lookup is the first serial step of every authenticated RPC, and
+// several handlers resolve the viewer more than once — memoize it per request
+// so it costs one D1 round trip at most.
+const authUserByRequest = new WeakMap<
+  IncomingMessage,
+  Promise<typeof users.$inferSelect | null>
+>();
+
 export async function getOptionalAuthUser(req: IncomingMessage) {
+  const cached = authUserByRequest.get(req);
+  if (cached) {
+    return await cached;
+  }
+  const pending = resolveOptionalAuthUser(req);
+  authUserByRequest.set(req, pending);
+  return await pending;
+}
+
+async function resolveOptionalAuthUser(req: IncomingMessage) {
   const token = getBearerToken(req);
   if (token) {
     try {

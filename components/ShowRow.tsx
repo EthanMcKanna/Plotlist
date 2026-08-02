@@ -1,9 +1,10 @@
+import { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
 
-export function ShowRow({
+export const ShowRow = memo(function ShowRow({
   id,
   title,
   year,
@@ -61,4 +62,4 @@ export function ShowRow({
       {body}
     </LinkPressable>
   );
-}
+});

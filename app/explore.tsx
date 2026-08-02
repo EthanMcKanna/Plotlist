@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Platform,
   Pressable,
@@ -49,20 +49,24 @@ const TILE_HEIGHT = 96;
 // session is plenty.
 let showCountCache: Map<string, number> | null = null;
 
-function FacetTile({
+// Poster arrives as a prop (looked up by the parent, which re-renders on
+// preview-store epoch bumps) so the memo compare stays honest — a tile whose
+// artwork just landed re-renders, the other ~118 skip.
+const FacetTile = memo(function FacetTile({
   facet,
   accent,
   count,
   width,
+  poster,
   onPress,
 }: {
   facet: FacetDef;
   accent: string;
   count: number;
   width: number;
+  poster: string | null;
   onPress: (facet: FacetDef) => void;
 }) {
-  const poster = getCachedFacetPosters(facet.key)[0] ?? null;
   const countLabel = formatShowCount(count);
   return (
     <LinkPressable
@@ -114,7 +118,7 @@ function FacetTile({
       </View>
     </LinkPressable>
   );
-}
+});
 
 // The full facet catalog, Spotify-browse style: pick a group, scan its
 // categories as accent-washed tiles with poster art peeking from the corner.
@@ -140,15 +144,18 @@ export default function ExploreScreen() {
   );
   const [, setPreviewEpoch] = useState(0);
 
-  const isFiltering = filter.trim().length > 0;
+  // The input tracks `filter` keystroke-by-keystroke; the 119-tile grid
+  // follows the deferred value so typing never blocks on re-rendering it.
+  const deferredFilter = useDeferredValue(filter);
+  const isFiltering = deferredFilter.trim().length > 0;
   const group = getGenreExplorerGroup(selectedGroup);
   const groupFacets = useMemo(
     () => getFacetsForGroup(selectedGroup),
     [selectedGroup],
   );
   const filteredFacets = useMemo(
-    () => (isFiltering ? filterFacets(FACET_DEFS, filter) : []),
-    [isFiltering, filter],
+    () => (isFiltering ? filterFacets(FACET_DEFS, deferredFilter) : []),
+    [isFiltering, deferredFilter],
   );
 
   useEffect(() => {
@@ -197,10 +204,10 @@ export default function ExploreScreen() {
   }, [visibleFacets, getFacetPreviews]);
 
   // Navigation belongs to the tile's LinkPressable; this is the press
-  // side effect only.
-  const handleOpenFacet = () => {
+  // side effect only. Stable identity keeps the memoized tiles quiet.
+  const handleOpenFacet = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
+  }, []);
 
   const renderTiles = (facets: FacetDef[], accentFor: (facet: FacetDef) => string) => (
     <View style={styles.tileGrid}>
@@ -211,6 +218,7 @@ export default function ExploreScreen() {
           accent={accentFor(facet)}
           count={showCounts?.get(facet.key) ?? 0}
           width={tileWidth}
+          poster={getCachedFacetPosters(facet.key)[0] ?? null}
           onPress={handleOpenFacet}
         />
       ))}

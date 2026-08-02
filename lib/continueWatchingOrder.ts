@@ -145,7 +145,32 @@ export function rankContinueWatchingItems<T extends ContinueWatchingOrderable>(
   items: T[],
   now = Date.now(),
 ): T[] {
-  return [...items].sort((left, right) =>
-    compareContinueWatchingOrder(left, right, now),
-  );
+  // Same ordering as `compareContinueWatchingOrder`, but with every score
+  // computed once per item instead of once per comparison.
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      tier: getContinueWatchingOrderTier(item, now),
+      upcomingSortDate: toFiniteNumber(getUpcomingSortDate(item, now)),
+      recencyScore: getContinueWatchingRecencyScore(item, now),
+      releasedToday: Number(Boolean(item.nextEpisodeReleasedToday)),
+    }))
+    .sort((left, right) => {
+      const tierDelta = left.tier - right.tier;
+      if (tierDelta !== 0) return tierDelta;
+
+      if (left.tier === CONTINUE_WATCHING_TIER_UPCOMING_DATED) {
+        const airDelta = left.upcomingSortDate - right.upcomingSortDate;
+        if (airDelta !== 0) return airDelta;
+      }
+
+      const recencyDelta = right.recencyScore - left.recencyScore;
+      if (recencyDelta !== 0) return recencyDelta;
+
+      const releasedTodayDelta = right.releasedToday - left.releasedToday;
+      if (releasedTodayDelta !== 0) return releasedTodayDelta;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 }

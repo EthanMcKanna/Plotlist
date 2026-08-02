@@ -148,19 +148,26 @@ export function shouldRefreshHomeSchedulePreview(
 
 type RefreshForMeAction = (args?: { today?: string }) => Promise<unknown>;
 type InvalidateHomeScheduleQueries = (args: {
-  queryKey: ["plotlist-rpc"];
+  queryKey: readonly unknown[];
   refetchType: "active";
 }) => Promise<unknown>;
 
 export async function refreshHomeSchedulePreviewData(
   refreshForMe: RefreshForMeAction,
   invalidateQueries: InvalidateHomeScheduleQueries = (args) =>
-    queryClient.invalidateQueries(args),
+    queryClient.invalidateQueries(args as any),
   today = getLocalDateString(),
 ) {
   await refreshForMe({ today });
+  // Only the release-calendar queries changed; a blanket ["plotlist-rpc"]
+  // invalidation here used to refetch every active query on home right as
+  // the screen settled.
   await invalidateQueries({
-    queryKey: ["plotlist-rpc"],
+    queryKey: ["plotlist-rpc", "query", "releaseCalendar:getHomePreview"],
+    refetchType: "active",
+  });
+  await invalidateQueries({
+    queryKey: ["plotlist-rpc", "query", "releaseCalendar:listForMe"],
     refetchType: "active",
   });
 }

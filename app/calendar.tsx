@@ -490,10 +490,18 @@ export default function CalendarScreen() {
 
     void refreshForMe({ today })
       .then(() =>
-        queryClient.invalidateQueries({
-          queryKey: ["plotlist-rpc"],
-          refetchType: "active",
-        }),
+        // Only the release-calendar queries can have changed; a blanket
+        // ["plotlist-rpc"] invalidation refetched every mounted query.
+        Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["plotlist-rpc", "query", "releaseCalendar:listForMe"],
+            refetchType: "active",
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["plotlist-rpc", "query", "releaseCalendar:getHomePreview"],
+            refetchType: "active",
+          }),
+        ]),
       )
       .catch(() => {
         // Render cached data even if refresh fails; clear the key so a later

@@ -21,39 +21,54 @@ export function initSentry() {
     environment: __DEV__ ? "development" : "production",
     tracesSampleRate: __DEV__ ? 1.0 : 0.25,
     // Session Replay: every error/feedback session is recorded; 10% of
-    // healthy sessions in production for context.
+    // healthy sessions in production for context. The replay recorder itself
+    // attaches after first frame (attachDeferredSentryIntegrations).
     replaysOnErrorSampleRate: 1.0,
     replaysSessionSampleRate: __DEV__ ? 1.0 : 0.1,
-    integrations: [
-      navigationIntegration,
-      Sentry.httpClientIntegration(),
-      Sentry.mobileReplayIntegration({
-        maskAllText: true,
-        maskAllImages: true,
-        maskAllVectors: true,
-      }),
-      Sentry.feedbackIntegration({
-        colorScheme: "dark",
-        formTitle: "Share feedback",
-        messagePlaceholder: "What's working? What's missing? What's broken?",
-        submitButtonLabel: "Send feedback",
-        // Accounts are phone-based, so both contact fields are optional.
-        isNameRequired: false,
-        isEmailRequired: false,
-        themeDark: {
-          background: "#151823",
-          foreground: "#F1F3F7",
-          // Captured once at initSentry(), before accent-theme hydration —
-          // the feedback form deliberately stays default sky blue.
-          accentBackground: "#0EA5E9",
-          border: "#2A2F3A",
-        },
-      }),
-    ],
+    // Boot with only the tracing-critical integration; replay, feedback, and
+    // http-client capture attach after the first interactive frame so their
+    // setup cost stays off the cold-start path.
+    integrations: [navigationIntegration],
     enableCaptureFailedRequests: true,
     enableAutoSessionTracking: true,
     sendDefaultPii: false,
   });
+}
+
+let deferredIntegrationsAttached = false;
+
+export function attachDeferredSentryIntegrations() {
+  if (deferredIntegrationsAttached) {
+    return;
+  }
+  deferredIntegrationsAttached = true;
+  Sentry.addIntegration(Sentry.httpClientIntegration());
+  Sentry.addIntegration(
+    Sentry.mobileReplayIntegration({
+      maskAllText: true,
+      maskAllImages: true,
+      maskAllVectors: true,
+    }),
+  );
+  Sentry.addIntegration(
+    Sentry.feedbackIntegration({
+      colorScheme: "dark",
+      formTitle: "Share feedback",
+      messagePlaceholder: "What's working? What's missing? What's broken?",
+      submitButtonLabel: "Send feedback",
+      // Accounts are phone-based, so both contact fields are optional.
+      isNameRequired: false,
+      isEmailRequired: false,
+      themeDark: {
+        background: "#151823",
+        foreground: "#F1F3F7",
+        // Captured before accent-theme hydration — the feedback form
+        // deliberately stays default sky blue.
+        accentBackground: "#0EA5E9",
+        border: "#2A2F3A",
+      },
+    }),
+  );
 }
 
 export function setSentryUser(user: { id: string; username?: string } | null) {
@@ -61,6 +76,9 @@ export function setSentryUser(user: { id: string; username?: string } | null) {
 }
 
 export function showFeedbackForm() {
+  // The feedback integration attaches lazily; make sure it exists before the
+  // widget is asked to show.
+  attachDeferredSentryIntegrations();
   Sentry.showFeedbackWidget();
 }
 
