@@ -405,7 +405,7 @@ export default function StatsShareScreen() {
               accessibilityRole="button"
               accessibilityLabel="Share this card"
               radius={14}
-              variant="prominent"
+              variant="accent"
               contentStyle={{
                 alignItems: "center",
                 flexDirection: "row",
@@ -432,7 +432,7 @@ export default function StatsShareScreen() {
               accessibilityRole="button"
               accessibilityLabel="Download this card as an image"
               radius={14}
-              variant="prominent"
+              variant="accent"
               contentStyle={{
                 alignItems: "center",
                 flexDirection: "row",

@@ -8,6 +8,7 @@ import {
   getHomeWarmForYou,
   getHomeWarmQueryCacheKey,
   getHomeWarmScheduleSnapshot,
+  getHomeWarmTrending,
   hydrateHomeQueryClientFromWarmCache,
   isHomeWarmQueryPersistable,
   normalizeHomeWarmCache,
@@ -15,6 +16,7 @@ import {
   recordHomeWarmForYou,
   recordHomeWarmQuery,
   recordHomeWarmSchedule,
+  recordHomeWarmTrending,
   resetHomeWarmCacheForTesting,
   shouldHydrateHomeWarmQuery,
 } from "../lib/homeWarmCache";
@@ -163,6 +165,25 @@ describe("record and read back", () => {
   it("expires the catalog independently of the envelope", () => {
     recordHomeWarmCatalog({ risingNow: [] }, NOW - HOME_WARM_CACHE_MAX_AGE_MS - 1);
     expect(getHomeWarmCatalog(NOW)).toBeNull();
+  });
+
+  it("round-trips community trending and expires it independently", () => {
+    recordHomeWarmTrending([{ show: { title: "Gamma" }, rank: 1 }], NOW);
+    expect(getHomeWarmTrending(NOW)).toEqual([
+      { show: { title: "Gamma" }, rank: 1 },
+    ]);
+    expect(
+      getHomeWarmTrending(NOW + HOME_WARM_CACHE_MAX_AGE_MS + 1),
+    ).toBeNull();
+
+    // Survives normalize (the disk round-trip path).
+    const normalized = normalizeHomeWarmCache(
+      JSON.parse(JSON.stringify(ensureHomeWarmCacheLoaded(NOW))),
+      NOW,
+    );
+    expect(normalized?.trending).toEqual([
+      { show: { title: "Gamma" }, rank: 1 },
+    ]);
   });
 
   it("wipes the previous account's snapshot when a new user signs in", () => {

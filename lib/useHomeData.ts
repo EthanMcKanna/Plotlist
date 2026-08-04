@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 import { api } from "./plotlist/api";
 import { getApiBaseUrl } from "./api/env";
 import { useAction, useAuth, usePaginatedQuery, useQuery } from "./plotlist/react";
+import { callQuery } from "./plotlist/rpc";
 import { queryClient } from "./queryClient";
 import {
   getHomeEditorialCurrentDemandSeedItems,
@@ -36,8 +37,10 @@ import { getHomepageCatalogDiagnostics } from "./homepageCatalogHealth";
 import {
   getHomeWarmCatalog,
   getHomeWarmForYou,
+  getHomeWarmTrending,
   recordHomeWarmCatalog,
   recordHomeWarmForYou,
+  recordHomeWarmTrending,
 } from "./homeWarmCache";
 import {
   buildStreamingAvailabilityIndex,
@@ -86,6 +89,11 @@ const MIN_PROVIDER_ROOM_ITEMS = 4;
 const MIN_EDITORIAL_PROVIDER_ROOM_ITEMS = 3;
 const FRESH_FEED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const EDITORIAL_SEED_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// The initial network results commit in one batch (see the barrier in
+// useHomeData) so the surface transitions from warm/skeleton content to
+// settled content exactly once. The cap bounds how long one slow loader can
+// hold everyone else's results back; past it, stragglers apply on arrival.
+const HOME_INITIAL_COMMIT_CAP_MS = 4000;
 const LIVE_HEAT_SIGNAL_PATTERN =
   /\b(airing|breakouts?|drops?|finale|launch|new|premiere|returns?|season|s\d+|today|tonight)\b/i;
 
@@ -1684,8 +1692,15 @@ export function useHomeData(): HomeData {
   const me = useQuery(api.users.me, isAuthenticated ? EMPTY_QUERY_ARGS : "skip");
   const hasProfile = Boolean(me?._id);
 
-  const trendingRaw =
-    useQuery(api.trending.shows, TRENDING_SHOWS_QUERY_ARGS) ?? EMPTY_ITEMS;
+  // Community trending joins the coordinated initial load below instead of
+  // subscribing live, so its arrival can never reshuffle settled rails on
+  // its own render tick.
+  const [trendingRaw, setTrendingRaw] = useState<AnyShowItem[]>(
+    () =>
+      (isAuthenticated
+        ? (getHomeWarmTrending() as AnyShowItem[] | null)
+        : null) ?? EMPTY_ITEMS,
+  );
 
   const {
     results: feed,
@@ -1766,14 +1781,12 @@ export function useHomeData(): HomeData {
   const [refreshKey, setRefreshKey] = useState(0);
   const [editorialSeedNow, setEditorialSeedNow] = useState(() => Date.now());
 
+  // One flag per coordinated loader (not per rail): all of them normally
+  // settle together in the barrier's single flush, and a straggler past the
+  // commit cap only keeps its own skeletons up.
   const [forYouLoading, setForYouLoading] = useState(true);
-  const [risingLoading, setRisingLoading] = useState(true);
-  const [premieresLoading, setPremieresLoading] = useState(true);
-  const [criticsLoading, setCriticsLoading] = useState(true);
-  const [quickLoading, setQuickLoading] = useState(true);
-  const [tmdbDailyTrendingLoading, setTmdbDailyTrendingLoading] = useState(true);
-  const [tmdbTrendingLoading, setTmdbTrendingLoading] = useState(true);
-  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [trendingLoading, setTrendingLoading] = useState(true);
 
   useEffect(() => {
     let lastRefreshAt = Date.now();
@@ -1809,105 +1822,135 @@ export function useHomeData(): HomeData {
       setAiringRaw([]);
       setTmdbDailyTrendingRaw([]);
       setTmdbTrendingRaw([]);
+      setTrendingRaw(EMPTY_ITEMS);
       setProviderCatalogProviders(null);
       setCatalogDiagnostics(getEmptyHomeCatalogDiagnostics());
       setTasteRailsRaw([]);
       setTasteRailsLoading(false);
       setForYouLoading(false);
-      setRisingLoading(false);
-      setPremieresLoading(false);
-      setCriticsLoading(false);
-      setQuickLoading(false);
-      setTmdbDailyTrendingLoading(false);
-      setTmdbTrendingLoading(false);
-      setRoomsLoading(false);
+      setCatalogLoading(false);
+      setTrendingLoading(false);
       return;
     }
 
     let cancelled = false;
     setForYouLoading(true);
-    setRisingLoading(true);
-    setPremieresLoading(true);
-    setCriticsLoading(true);
-    setQuickLoading(true);
-    setTmdbDailyTrendingLoading(true);
-    setTmdbTrendingLoading(true);
-    setRoomsLoading(true);
+    setCatalogLoading(true);
+    setTrendingLoading(true);
+    setTasteRailsLoading(true);
 
-    const run = async <T,>(
+    // Every loader runs concurrently but resolves to an applier instead of
+    // committing on arrival. The barrier below releases all appliers in one
+    // callback, so React batches the whole initial payload into a single
+    // render — the surface moves from warm/skeleton content to settled
+    // content exactly once instead of reshuffling per response.
+    const load = async <T,>(
       loader: () => Promise<T>,
-      onSuccess: (value: T) => void,
-      onSettled?: () => void,
-    ) => {
+      apply: (value: T) => void,
+      settle: () => void,
+    ): Promise<() => void> => {
+      let landed: { value: T } | null = null;
       try {
-        const value = await loader();
-        if (!cancelled) onSuccess(value);
+        landed = { value: await loader() };
       } catch {
-        // Swallow rail-level errors; sibling rails keep rendering.
-      } finally {
-        if (!cancelled) onSettled?.();
+        // Swallow rail-level errors; the rail keeps its warm/empty state.
       }
+      return () => {
+        if (landed) apply(landed.value);
+        settle();
+      };
     };
 
-    void run(
-      () => getPersonalized({ limit: 12 }),
-      (value) => {
-        setForYouRaw(value);
-        if (Array.isArray(value)) {
-          recordHomeWarmForYou(value);
+    const jobs: Array<Promise<() => void>> = [
+      load(
+        () => getPersonalized({ limit: 12 }),
+        (value) => {
+          setForYouRaw(value);
+          if (Array.isArray(value)) {
+            recordHomeWarmForYou(value);
+          }
+        },
+        () => setForYouLoading(false),
+      ),
+      load(
+        () => getRecommendationRails({ limitPerRail: 10 }),
+        (value) => {
+          // The "for_you" rail duplicates the For You section above; only the
+          // facet rails ("Because you're into X") are new information here.
+          const rails = Array.isArray(value) ? value : [];
+          setTasteRailsRaw(
+            rails
+              .filter(
+                (rail: any) =>
+                  typeof rail?.key === "string" &&
+                  rail.key.startsWith("facet:") &&
+                  Array.isArray(rail.items),
+              )
+              .slice(0, 2),
+          );
+        },
+        () => setTasteRailsLoading(false),
+      ),
+      load(
+        () => loadHomeCatalog(getHomeCatalog, getTmdbList),
+        (payload) => {
+          setRisingRaw(payload.risingNow ?? []);
+          setPremieresRaw(payload.breakoutPremieres ?? []);
+          setCriticsRaw(payload.criticsChoice ?? []);
+          setQuickRaw(payload.quickPicks ?? []);
+          setAiringRaw(payload.airingToday ?? []);
+          setTmdbDailyTrendingRaw(payload.trendingDay ?? []);
+          setTmdbTrendingRaw(payload.trendingWeek ?? []);
+          setProviderCatalogProviders(payload.providers ?? {});
+          setCatalogDiagnostics(payload.diagnostics);
+          recordHomeWarmCatalog(payload);
+        },
+        () => setCatalogLoading(false),
+      ),
+      load(
+        () =>
+          callQuery<AnyShowItem[]>(
+            api.trending.shows,
+            TRENDING_SHOWS_QUERY_ARGS,
+          ),
+        (value) => {
+          const items = Array.isArray(value) ? value : [];
+          setTrendingRaw(items);
+          recordHomeWarmTrending(items);
+        },
+        () => setTrendingLoading(false),
+      ),
+    ];
+
+    let holding = true;
+    const held: Array<() => void> = [];
+    let remaining = jobs.length;
+    const flush = () => {
+      holding = false;
+      if (cancelled) return;
+      held.splice(0).forEach((applyResult) => applyResult());
+    };
+    const cap = setTimeout(flush, HOME_INITIAL_COMMIT_CAP_MS);
+    jobs.forEach((job) => {
+      void job.then((applyResult) => {
+        if (cancelled) return;
+        if (!holding) {
+          // Missed the batch (cap elapsed): apply individually on arrival.
+          applyResult();
+          return;
         }
-      },
-      () => setForYouLoading(false),
-    );
-
-    setTasteRailsLoading(true);
-    void run(
-      () => getRecommendationRails({ limitPerRail: 10 }),
-      (value) => {
-        // The "for_you" rail duplicates the For You section above; only the
-        // facet rails ("Because you're into X") are new information here.
-        const rails = Array.isArray(value) ? value : [];
-        setTasteRailsRaw(
-          rails
-            .filter(
-              (rail: any) =>
-                typeof rail?.key === "string" &&
-                rail.key.startsWith("facet:") &&
-                Array.isArray(rail.items),
-            )
-            .slice(0, 2),
-        );
-      },
-      () => setTasteRailsLoading(false),
-    );
-
-    void run(
-      () => loadHomeCatalog(getHomeCatalog, getTmdbList),
-      (payload) => {
-        setRisingRaw(payload.risingNow ?? []);
-        setPremieresRaw(payload.breakoutPremieres ?? []);
-        setCriticsRaw(payload.criticsChoice ?? []);
-        setQuickRaw(payload.quickPicks ?? []);
-        setAiringRaw(payload.airingToday ?? []);
-        setTmdbDailyTrendingRaw(payload.trendingDay ?? []);
-        setTmdbTrendingRaw(payload.trendingWeek ?? []);
-        setProviderCatalogProviders(payload.providers ?? {});
-        setCatalogDiagnostics(payload.diagnostics);
-        recordHomeWarmCatalog(payload);
-      },
-      () => {
-        setRisingLoading(false);
-        setPremieresLoading(false);
-        setCriticsLoading(false);
-        setQuickLoading(false);
-        setTmdbDailyTrendingLoading(false);
-        setTmdbTrendingLoading(false);
-        setRoomsLoading(false);
-      },
-    );
+        held.push(applyResult);
+        remaining -= 1;
+        if (remaining === 0) {
+          clearTimeout(cap);
+          flush();
+        }
+      });
+    });
 
     return () => {
       cancelled = true;
+      clearTimeout(cap);
     };
   }, [
     getHomeCatalog,
@@ -2278,11 +2321,11 @@ export function useHomeData(): HomeData {
   );
   const feedEmpty = friendActivity.length === 0 && feedStatus !== "LoadingFirstPage";
 
-  const heroLoading = heroSlides.length === 0 && (forYouLoading || tmdbTrendingLoading);
+  const heroLoading = heroSlides.length === 0 && (forYouLoading || catalogLoading);
   const heatLoading =
     trendingRaw.length === 0 &&
     tmdbDailyTrendingRaw.length === 0 &&
-    (tmdbDailyTrendingLoading || risingLoading || tmdbTrendingLoading);
+    (catalogLoading || trendingLoading);
   const hasSyncedContacts = Boolean(contactStatus?.hasSynced);
   const contactStatusKnown = Boolean(contactStatus);
 
@@ -2292,20 +2335,17 @@ export function useHomeData(): HomeData {
       forYou: forYouLoading,
       tasteRails: tasteRailsLoading,
       heat: heatLoading,
-      fresh: premieresLoading,
-      critics: criticsLoading,
-      quick: quickLoading,
-      rooms: roomsLoading,
+      fresh: catalogLoading,
+      critics: catalogLoading,
+      quick: catalogLoading,
+      rooms: catalogLoading,
     }),
     [
       heroLoading,
       forYouLoading,
       tasteRailsLoading,
       heatLoading,
-      premieresLoading,
-      criticsLoading,
-      quickLoading,
-      roomsLoading,
+      catalogLoading,
     ],
   );
 

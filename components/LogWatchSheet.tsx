@@ -600,7 +600,7 @@ export function LogWatchSheet({
           <SectionLabel>Note (optional)</SectionLabel>
           <GlassSurface
             radius={16}
-            variant="control"
+            variant="tinted"
             fallbackColor="rgba(22,26,34,0.72)"
             contentStyle={{ minHeight: 100 }}
           >

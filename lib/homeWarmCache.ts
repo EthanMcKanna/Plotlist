@@ -57,6 +57,8 @@ export type HomeWarmCache = {
   catalogSavedAt?: number;
   forYou?: unknown[];
   forYouSavedAt?: number;
+  trending?: unknown[];
+  trendingSavedAt?: number;
   schedule?: HomeWarmScheduleSnapshot | null;
 };
 
@@ -146,6 +148,14 @@ export function normalizeHomeWarmCache(
         : undefined,
     forYouSavedAt: isHomeWarmEntryFresh(value.forYouSavedAt, now)
       ? value.forYouSavedAt
+      : undefined,
+    trending:
+      isHomeWarmEntryFresh(value.trendingSavedAt, now) &&
+      Array.isArray(value.trending)
+        ? value.trending
+        : undefined,
+    trendingSavedAt: isHomeWarmEntryFresh(value.trendingSavedAt, now)
+      ? value.trendingSavedAt
       : undefined,
     schedule:
       value.schedule && typeof value.schedule === "object"
@@ -363,6 +373,14 @@ export function recordHomeWarmForYou(items: unknown[], now = Date.now()) {
   scheduleWarmCacheWrite();
 }
 
+export function recordHomeWarmTrending(items: unknown[], now = Date.now()) {
+  if (!Array.isArray(items)) return;
+  const target = getWritableCache(now);
+  target.trending = items;
+  target.trendingSavedAt = now;
+  scheduleWarmCacheWrite();
+}
+
 export function recordHomeWarmSchedule(
   snapshot: HomeWarmScheduleSnapshot,
   now = Date.now(),
@@ -386,6 +404,14 @@ export function getHomeWarmForYou(now = Date.now()): unknown[] | null {
     return null;
   }
   return Array.isArray(current.forYou) ? current.forYou : null;
+}
+
+export function getHomeWarmTrending(now = Date.now()): unknown[] | null {
+  const current = ensureHomeWarmCacheLoaded(now);
+  if (!current || !isHomeWarmEntryFresh(current.trendingSavedAt, now)) {
+    return null;
+  }
+  return Array.isArray(current.trending) ? current.trending : null;
 }
 
 export function getHomeWarmScheduleSnapshot(

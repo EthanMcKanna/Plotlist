@@ -165,7 +165,7 @@ function AllTimeLockedCard() {
           accessibilityRole="button"
           accessibilityLabel="Unlock all-time insights with Plotlist Pro"
           radius={10}
-          variant="prominent"
+          variant="accent"
           style={{ marginTop: 14 }}
           contentStyle={{ alignItems: "center", paddingVertical: 11 }}
         >
@@ -291,7 +291,7 @@ export default function WatchStatsScreen() {
               <GlassPressable
                 onPress={() => guardedPush("/search")}
                 radius={12}
-                variant="control"
+                variant="tinted"
                 contentStyle={{ alignItems: "center", padding: 16 }}
               >
                 <Text className="text-sm font-semibold text-brand-400">
@@ -312,7 +312,7 @@ export default function WatchStatsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Share your year so far"
                   radius={12}
-                  variant="prominent"
+                  variant="accent"
                   style={{ marginTop: 12 }}
                   contentStyle={{
                     alignItems: "center",

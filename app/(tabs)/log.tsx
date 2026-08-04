@@ -496,7 +496,7 @@ function EmptyDiary() {
                 accessibilityLabel="Find something to watch"
                 onPress={lightHaptic}
                 radius={8}
-                variant="prominent"
+                variant="accent"
                 style={styles.emptyCta}
                 contentStyle={styles.emptyCtaContent}
               >
@@ -513,7 +513,7 @@ function EmptyDiary() {
                 router.push("/search");
               }}
               radius={8}
-              variant="prominent"
+              variant="accent"
               style={styles.emptyCta}
               contentStyle={styles.emptyCtaContent}
             >

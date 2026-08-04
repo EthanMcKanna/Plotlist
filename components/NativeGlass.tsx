@@ -13,12 +13,21 @@ import {
 import type { AccentTheme } from "../lib/appearance";
 import { useAccent } from "../lib/appearanceStore";
 
-type GlassVariant = "surface" | "control" | "prominent" | "sheet";
+type GlassVariant =
+  | "surface"
+  | "control"
+  | "prominent"
+  | "sheet"
+  | "tinted"
+  | "accent";
 
 // Apple's Liquid Glass guidance: glass belongs on the control/navigation
 // layer floating above content, never on the content itself. "surface" is
-// our content-card variant (settings groups, stats panels, detail sections),
-// so it always renders the solid tinted fallback; only true controls and
+// our content-card variant (settings groups, stats panels, detail sections)
+// and always renders the solid tinted fallback. "tinted" and "accent" are
+// the content-layer twins of "control" and "prominent": identical tokens,
+// but always the JS fallback — use them for buttons, chips, pills, and
+// cards that scroll with page content. Only true floating controls and
 // overlays ("control", "prominent", "sheet") get native glass.
 const NATIVE_GLASS_VARIANTS: ReadonlySet<GlassVariant> = new Set([
   "control",
@@ -33,10 +42,10 @@ type VariantTokens = {
   tintColor: string;
 };
 
-// "prominent" is the only brand-tinted variant, so its tokens follow the
-// active accent theme; the neutral variants stay static.
+// "prominent"/"accent" are the only brand-tinted variants, so their tokens
+// follow the active accent theme; the neutral variants stay static.
 function variantTokens(variant: GlassVariant, accent: AccentTheme): VariantTokens {
-  if (variant === "prominent") {
+  if (variant === "prominent" || variant === "accent") {
     return {
       borderColor: accent.rgba(300, 0.28),
       fallbackColor: accent.rgba(500, 0.2),
@@ -46,17 +55,23 @@ function variantTokens(variant: GlassVariant, accent: AccentTheme): VariantToken
   return STATIC_VARIANT_TOKENS[variant];
 }
 
-const STATIC_VARIANT_TOKENS: Record<Exclude<GlassVariant, "prominent">, VariantTokens> = {
+const CONTROL_TOKENS: VariantTokens = {
+  borderColor: "rgba(255,255,255,0.14)",
+  fallbackColor: "rgba(255,255,255,0.07)",
+  tintColor: "rgba(16,20,28,0.24)",
+};
+
+const STATIC_VARIANT_TOKENS: Record<
+  Exclude<GlassVariant, "prominent" | "accent">,
+  VariantTokens
+> = {
   surface: {
     borderColor: "rgba(255,255,255,0.11)",
     fallbackColor: "rgba(22,26,34,0.88)",
     tintColor: "rgba(13,15,20,0.42)",
   },
-  control: {
-    borderColor: "rgba(255,255,255,0.14)",
-    fallbackColor: "rgba(255,255,255,0.07)",
-    tintColor: "rgba(16,20,28,0.24)",
-  },
+  control: CONTROL_TOKENS,
+  tinted: CONTROL_TOKENS,
   sheet: {
     borderColor: "rgba(255,255,255,0.14)",
     fallbackColor: "rgba(17,20,27,0.96)",

@@ -64,7 +64,7 @@ export function PrimaryButton({
       accessibilityState={{ disabled: disabled || loading, busy: loading }}
       className={className}
       radius={999}
-      variant="prominent"
+      variant="accent"
       fallbackColor={
         disabled || loading ? accent.rgba(500, 0.12) : accent.rgba(500, 0.88)
       }

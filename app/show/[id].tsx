@@ -2913,7 +2913,7 @@ export default function ShowScreen() {
               accessibilityLabel="Log a watch"
               accessibilityRole="button"
               radius={16}
-              variant="control"
+              variant="tinted"
               fallbackColor={accent.rgba(500, 0.1)}
               tintColor={accent.rgba(500, 0.1)}
               borderColor={accent.rgba(500, 0.2)}
@@ -2938,7 +2938,7 @@ export default function ShowScreen() {
               accessibilityLabel="Write a review"
               accessibilityRole="button"
               radius={16}
-              variant="control"
+              variant="tinted"
               fallbackColor="rgba(245,158,11,0.10)"
               tintColor="rgba(245,158,11,0.10)"
               borderColor="rgba(245,158,11,0.20)"
@@ -2963,7 +2963,7 @@ export default function ShowScreen() {
               accessibilityLabel="Add to list"
               accessibilityRole="button"
               radius={16}
-              variant={memberSet.size > 0 ? "prominent" : "control"}
+              variant={memberSet.size > 0 ? "accent" : "tinted"}
               fallbackColor={
                 memberSet.size > 0 ? "rgba(34,197,94,0.10)" : "rgba(255,255,255,0.06)"
               }
@@ -3005,7 +3005,7 @@ export default function ShowScreen() {
                 accessibilityLabel="Where was I? Get a spoiler-safe recap"
                 accessibilityRole="button"
                 radius={16}
-                variant="control"
+                variant="tinted"
                 fallbackColor="rgba(255,255,255,0.06)"
                 contentStyle={{
                   alignItems: "center",
@@ -3142,7 +3142,7 @@ export default function ShowScreen() {
                     disabled={!provider.deepLinkUrl}
                     onPress={() => handleProviderPress(provider)}
                     radius={999}
-                    variant="control"
+                    variant="tinted"
                     fallbackColor="rgba(22,26,34,0.70)"
                     style={{ marginRight: 10 }}
                     surfaceStyle={{ opacity: provider.deepLinkUrl ? 1 : 0.55 }}
@@ -3513,7 +3513,7 @@ export default function ShowScreen() {
                           key={list._id}
                           onPress={() => handleToggleList(list._id)}
                           radius={14}
-                          variant={isIn ? "prominent" : "control"}
+                          variant={isIn ? "accent" : "tinted"}
                           fallbackColor={
                             isIn ? accent.rgba(500, 0.12) : "rgba(255,255,255,0.03)"
                           }
@@ -3704,7 +3704,7 @@ export default function ShowScreen() {
                 </Text>
                 <GlassSurface
                   radius={18}
-                  variant="control"
+                  variant="tinted"
                   fallbackColor="rgba(22,26,34,0.72)"
                   contentStyle={{ minHeight: 140 }}
                 >
@@ -3731,7 +3731,7 @@ export default function ShowScreen() {
                     setSpoiler((prev) => !prev);
                   }}
                   radius={999}
-                  variant="control"
+                  variant="tinted"
                   fallbackColor={spoiler ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)"}
                   tintColor={spoiler ? "rgba(239,68,68,0.10)" : undefined}
                   borderColor={spoiler ? "rgba(239,68,68,0.28)" : undefined}
@@ -4098,7 +4098,7 @@ export default function ShowScreen() {
                       accessibilityRole="button"
                       disabled={!episodeNavContext?.prev}
                       radius={16}
-                      variant="control"
+                      variant="tinted"
                       fallbackColor="rgba(255,255,255,0.05)"
                       surfaceStyle={{ opacity: episodeNavContext?.prev ? 1 : 0.35 }}
                       contentStyle={{
@@ -4119,7 +4119,7 @@ export default function ShowScreen() {
                       accessibilityRole="button"
                       disabled={!episodeNavContext?.next}
                       radius={16}
-                      variant="control"
+                      variant="tinted"
                       fallbackColor="rgba(255,255,255,0.05)"
                       surfaceStyle={{ opacity: episodeNavContext?.next ? 1 : 0.35 }}
                       contentStyle={{

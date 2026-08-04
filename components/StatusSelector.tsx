@@ -260,7 +260,7 @@ export function StatusSelector({
       >
         <GlassSurface
           radius={16}
-          variant={hasStatus ? "prominent" : "control"}
+          variant={hasStatus ? "accent" : "tinted"}
           borderColor={hasStatus ? config!.borderColor : undefined}
           fallbackColor={hasStatus ? config!.bg : "#161A22"}
           tintColor={hasStatus ? `${config!.color}26` : undefined}

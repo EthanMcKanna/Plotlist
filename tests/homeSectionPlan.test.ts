@@ -6,6 +6,8 @@ import {
   getHomeSectionPlan,
   getHomeSectionTestID,
   getRankedHomeDiscoverySections,
+  reconcileHomeSectionOrder,
+  type HomeSection,
   type HomeSectionKind,
 } from "../lib/homeSectionPlan";
 
@@ -454,5 +456,83 @@ describe("home section plan", () => {
         },
       }).slice(3, 7),
     ).toEqual(["fresh", "for-you", "taste-rails", "heat"]);
+  });
+});
+
+describe("reconcileHomeSectionOrder", () => {
+  const plan = (...planKinds: HomeSectionKind[]): HomeSection[] =>
+    planKinds.map((kind) => ({ kind }) as HomeSection);
+  const orderOf = (sections: HomeSection[]) =>
+    sections.map((section) => section.kind);
+
+  it("returns the planned order when nothing was rendered before", () => {
+    const planned = plan("ask", "heat", "fresh");
+    expect(reconcileHomeSectionOrder(null, planned)).toEqual(planned);
+    expect(reconcileHomeSectionOrder([], planned)).toEqual(planned);
+  });
+
+  it("keeps the on-screen order when the plan re-ranks the same sections", () => {
+    const previous: HomeSectionKind[] = ["ask", "heat", "fresh", "critics"];
+    const rearranged = plan("ask", "critics", "heat", "fresh");
+    expect(orderOf(reconcileHomeSectionOrder(previous, rearranged))).toEqual(
+      previous,
+    );
+  });
+
+  it("inserts a newly appearing section at its planned position", () => {
+    const previous: HomeSectionKind[] = ["ask", "heat", "critics"];
+    const withFriends = plan("ask", "heat", "friends", "critics");
+    expect(orderOf(reconcileHomeSectionOrder(previous, withFriends))).toEqual([
+      "ask",
+      "heat",
+      "friends",
+      "critics",
+    ]);
+  });
+
+  it("appends a new trailing section when nothing follows it in the plan", () => {
+    const previous: HomeSectionKind[] = ["ask", "heat"];
+    const withTrailing = plan("ask", "heat", "contact-sync");
+    expect(orderOf(reconcileHomeSectionOrder(previous, withTrailing))).toEqual([
+      "ask",
+      "heat",
+      "contact-sync",
+    ]);
+  });
+
+  it("keeps planned relative order for multiple insertions sharing an anchor", () => {
+    const previous: HomeSectionKind[] = ["ask", "critics"];
+    const grown = plan("ask", "heat", "fresh", "critics");
+    expect(orderOf(reconcileHomeSectionOrder(previous, grown))).toEqual([
+      "ask",
+      "heat",
+      "fresh",
+      "critics",
+    ]);
+  });
+
+  it("drops sections that fell out of the plan without disturbing the rest", () => {
+    const previous: HomeSectionKind[] = ["ask", "tonight", "heat", "fresh"];
+    const shrunk = plan("ask", "heat", "fresh");
+    expect(orderOf(reconcileHomeSectionOrder(previous, shrunk))).toEqual([
+      "ask",
+      "heat",
+      "fresh",
+    ]);
+  });
+
+  it("is idempotent so a second reconcile pass cannot reorder anything", () => {
+    const previous: HomeSectionKind[] = ["ask", "heat", "critics"];
+    const planned = plan("ask", "critics", "fresh", "heat", "friends");
+    const first = reconcileHomeSectionOrder(previous, planned);
+    const second = reconcileHomeSectionOrder(orderOf(first), planned);
+    expect(orderOf(second)).toEqual(orderOf(first));
+  });
+
+  it("falls back to the plan when no previously rendered section survives", () => {
+    const planned = plan("heat", "fresh");
+    expect(
+      reconcileHomeSectionOrder(["tonight", "friends"], planned),
+    ).toEqual(planned);
   });
 });

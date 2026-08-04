@@ -218,6 +218,48 @@ export function getHomeSectionDisplayIndexes(
   return indexes;
 }
 
+/**
+ * Keep the on-screen section order stable while data loads. The plan
+ * re-ranks discovery rails as their signals arrive, which is right across
+ * visits but jarring mid-session: rails the user is already looking at
+ * would trade places. Given the previously rendered order, this keeps the
+ * relative order of every surviving section, slots newly appearing kinds in
+ * at their planned position (before the nearest surviving section that
+ * follows them in the plan), and drops kinds no longer planned.
+ */
+export function reconcileHomeSectionOrder(
+  previousKinds: readonly HomeSectionKind[] | null | undefined,
+  planned: HomeSection[],
+): HomeSection[] {
+  if (!previousKinds || previousKinds.length === 0) return planned;
+
+  const sectionByKind = new Map(
+    planned.map((section) => [section.kind, section]),
+  );
+  const surviving = previousKinds.filter((kind) => sectionByKind.has(kind));
+  if (surviving.length === 0) return planned;
+
+  const survivingSet = new Set(surviving);
+  const orderedKinds: HomeSectionKind[] = [...surviving];
+  const plannedKinds = planned.map((section) => section.kind);
+  plannedKinds.forEach((kind, plannedIndex) => {
+    if (survivingSet.has(kind)) return;
+    const anchor = plannedKinds
+      .slice(plannedIndex + 1)
+      .find((candidate) => survivingSet.has(candidate));
+    const anchorIndex = anchor ? orderedKinds.indexOf(anchor) : -1;
+    if (anchorIndex === -1) {
+      orderedKinds.push(kind);
+    } else {
+      orderedKinds.splice(anchorIndex, 0, kind);
+    }
+  });
+
+  return orderedKinds
+    .map((kind) => sectionByKind.get(kind))
+    .filter((section): section is HomeSection => Boolean(section));
+}
+
 export function getHomeSectionPlan({
   hasProfile,
   showContactSyncNudge,

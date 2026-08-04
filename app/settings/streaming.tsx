@@ -149,7 +149,7 @@ export default function StreamingServicesScreen() {
           onPress={save}
           disabled={!isDirty || saving}
           radius={12}
-          variant={isDirty ? "prominent" : "control"}
+          variant={isDirty ? "accent" : "tinted"}
           style={{ marginTop: 20, opacity: !isDirty || saving ? 0.55 : 1 }}
           contentStyle={{
             alignItems: "center",

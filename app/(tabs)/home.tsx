@@ -96,6 +96,7 @@ import {
   getHomeSectionPlan,
   getHomeSectionTestID,
   isNumberedHomeSectionKind,
+  reconcileHomeSectionOrder,
   type HomeSection,
   type HomeSectionKind,
 } from "../../lib/homeSectionPlan";
@@ -807,9 +808,15 @@ export function HomeSurface({
     setContactNudgeDismissed(true);
   }, []);
 
+  // Section order is sticky for the life of the surface: data arriving after
+  // first paint may add or remove sections, but never reorders the ones
+  // already on screen. Re-ranking (signals, rotation) applies on the next
+  // mount. The ref mutation inside the memo is safe because reconciling an
+  // already-reconciled order is a no-op.
+  const stickySectionOrderRef = useRef<HomeSectionKind[] | null>(null);
   const sections = useMemo(
-    () =>
-      getHomeSectionPlan({
+    () => {
+      const planned = getHomeSectionPlan({
         hasProfile: data.hasProfile,
         showContactSyncNudge: data.showContactSyncNudge,
         contactNudgeDismissed,
@@ -822,7 +829,14 @@ export function HomeSurface({
         },
         now: surfaceNow,
         rotationSeed: getHomeRotationEpoch(surfaceNow),
-      }),
+      });
+      const reconciled = reconcileHomeSectionOrder(
+        stickySectionOrderRef.current,
+        planned,
+      );
+      stickySectionOrderRef.current = reconciled.map((section) => section.kind);
+      return reconciled;
+    },
     [
       data.hasProfile,
       data.showContactSyncNudge,
@@ -951,6 +965,7 @@ export function HomeSurface({
                 guardedPush("/ask");
               }}
               radius={16}
+              variant="tinted"
               accessibilityRole="button"
               accessibilityLabel="Ask Plotlist what to watch tonight"
               contentStyle={styles.askCardContent}

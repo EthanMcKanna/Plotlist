@@ -24,7 +24,7 @@ export function SecondaryButton({
       accessibilityLabel={label}
       className={className}
       radius={999}
-      variant="control"
+      variant="tinted"
       surfaceStyle={styles.surface}
       contentStyle={styles.content}
     >

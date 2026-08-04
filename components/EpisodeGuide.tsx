@@ -447,7 +447,7 @@ function EpisodeGuideComponent({
                   </Text>
                   <GlassPressable
                     radius={10}
-                    variant="control"
+                    variant="tinted"
                     style={{ marginTop: 16 }}
                     contentStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
                     onPress={() => {
@@ -547,7 +547,7 @@ function EpisodeGuideComponent({
                             {isAuthenticated && isAvailable ? (
                               <GlassPressable
                                 radius={11}
-                                variant={isWatched ? "prominent" : "control"}
+                                variant={isWatched ? "accent" : "tinted"}
                                 fallbackColor={
                                   isWatched
                                     ? accent.rgba(500, 0.82)
@@ -659,7 +659,7 @@ function EpisodeGuideComponent({
               onLoadMoreSeasons();
             }}
             radius={12}
-            variant="control"
+            variant="tinted"
             style={{ marginHorizontal: 24 }}
             contentStyle={{
               alignItems: "center",
