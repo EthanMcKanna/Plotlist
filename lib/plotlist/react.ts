@@ -177,6 +177,16 @@ export function useAuth() {
   return useWrappedAuth();
 }
 
+// When the cached data for a query was last fetched (null if never). Lets
+// screens refetch on focus only when the cache is actually old, without
+// re-deriving the query-key convention.
+export function queryDataUpdatedAt<Query extends PlotlistFunctionReference<"query">>(
+  query: Query,
+  args?: Record<string, any>,
+): number | null {
+  return queryClient.getQueryState(queryKeyFor(query, args) as any)?.dataUpdatedAt ?? null;
+}
+
 export function useQuery<Query extends PlotlistFunctionReference<"query">>(
   query: Query,
   ...args: ArgsOrSkip

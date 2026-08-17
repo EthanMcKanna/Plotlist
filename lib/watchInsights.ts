@@ -9,14 +9,26 @@ const MS_PER_DAY = 86_400_000;
 const FUTURE_TIMESTAMP_GRACE_MS = 5 * 60 * 1000;
 const MAX_UTC_OFFSET_MINUTES = 14 * 60;
 
-export const WATCH_INSIGHTS_VERSION = 3;
+export const WATCH_INSIGHTS_VERSION = 4;
 export const WATCH_INSIGHTS_DEFAULT_RUNTIME_MINUTES = 42;
 export const WATCH_INSIGHTS_MAX_RUNTIME_MINUTES = 720;
 // A "binge" is a run of consecutive local days watching one show; runs with
 // fewer episodes than this never qualify.
 export const WATCH_INSIGHTS_BINGE_MIN_EPISODES = 4;
 
-const WATCH_STATUSES = ["watchlist", "watching", "completed", "dropped"] as const;
+// Mirrors db/schema.ts watchStatusValues. Rows still carrying the retired
+// "completed" status (pre watch-status-v2 writes) count as finished.
+const WATCH_STATUSES = [
+  "watchlist",
+  "watching",
+  "caught_up",
+  "finished",
+  "paused",
+  "dropped",
+] as const;
+const LEGACY_STATUS_ALIASES: Record<string, (typeof WATCH_STATUSES)[number]> = {
+  completed: "finished",
+};
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const DAYPART_LABELS = ["Morning", "Afternoon", "Evening", "Late night"] as const;
 const MONTH_LABELS = [
@@ -430,9 +442,10 @@ function buildRuntimeResolver(
 function buildLibraryCounts(rows: WatchInsightsStateInput[]): WatchInsights["library"] {
   const latestByShow = new Map<string, { status: WatchStatus; updatedAt: number }>();
   rows.forEach((row, index) => {
-    const status = WATCH_STATUSES.includes(row.status as WatchStatus)
-      ? (row.status as WatchStatus)
-      : null;
+    const rawStatus = typeof row.status === "string" ? row.status : "";
+    const status = WATCH_STATUSES.includes(rawStatus as WatchStatus)
+      ? (rawStatus as WatchStatus)
+      : LEGACY_STATUS_ALIASES[rawStatus] ?? null;
     if (!status) return;
     const showId = readString(row.showId) ?? `__row_${index}`;
     const updatedAt = readNumber(row.updatedAt) ?? 0;
@@ -441,7 +454,15 @@ function buildLibraryCounts(rows: WatchInsightsStateInput[]): WatchInsights["lib
       latestByShow.set(showId, { status, updatedAt });
     }
   });
-  const counts = { watchlist: 0, watching: 0, completed: 0, dropped: 0, total: 0 };
+  const counts = {
+    watchlist: 0,
+    watching: 0,
+    caught_up: 0,
+    finished: 0,
+    paused: 0,
+    dropped: 0,
+    total: 0,
+  };
   for (const entry of latestByShow.values()) {
     counts[entry.status] += 1;
     counts.total += 1;

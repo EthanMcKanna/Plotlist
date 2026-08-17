@@ -183,11 +183,15 @@ async function computeInsightsFingerprint(
   userId: string,
   utcOffsetMinutes: number,
 ): Promise<string> {
+  // Each table contributes count + max + sum. Count alone misses same-size
+  // edits (unmark one episode, backdate-log another); max alone misses edits
+  // below the newest row. The sum term makes any single-row change visible.
   const [episodeAgg, stateAgg, reviewAgg] = await Promise.all([
     db
       .select({
         count: sql<number>`count(*)`,
         latest: sql<number | null>`max(${episodeProgress.watchedAt})`,
+        sum: sql<number | null>`total(${episodeProgress.watchedAt})`,
       })
       .from(episodeProgress)
       .where(eq(episodeProgress.userId, userId)),
@@ -195,6 +199,7 @@ async function computeInsightsFingerprint(
       .select({
         count: sql<number>`count(*)`,
         latest: sql<number | null>`max(${watchStates.updatedAt})`,
+        sum: sql<number | null>`total(${watchStates.updatedAt})`,
       })
       .from(watchStates)
       .where(eq(watchStates.userId, userId)),
@@ -202,12 +207,14 @@ async function computeInsightsFingerprint(
       .select({
         count: sql<number>`count(*)`,
         latest: sql<number | null>`max(coalesce(${reviews.updatedAt}, ${reviews.createdAt}))`,
+        sum: sql<number | null>`total(coalesce(${reviews.updatedAt}, ${reviews.createdAt}))`,
       })
       .from(reviews)
       .where(eq(reviews.authorId, userId)),
   ]);
-  const part = (row: { count: number; latest: number | null } | undefined) =>
-    `${row?.count ?? 0}:${row?.latest ?? 0}`;
+  const part = (
+    row: { count: number; latest: number | null; sum: number | null } | undefined,
+  ) => `${row?.count ?? 0}:${row?.latest ?? 0}:${Math.round(row?.sum ?? 0)}`;
   return [
     `v${WATCH_INSIGHTS_VERSION}`,
     `e${part(episodeAgg[0])}`,

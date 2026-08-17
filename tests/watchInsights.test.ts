@@ -151,14 +151,19 @@ describe("buildWatchInsights", () => {
         { showId: "s1", status: "completed", updatedAt: 2 },
         { showId: "s2", status: "watchlist", updatedAt: 1 },
         { showId: "s3", status: "not-a-status", updatedAt: 1 },
+        { showId: "s4", status: "caught_up", updatedAt: 1 },
+        { showId: "s5", status: "paused", updatedAt: 1 },
       ],
     });
     expect(insights.library).toEqual({
       watchlist: 1,
       watching: 0,
-      completed: 1,
+      caught_up: 1,
+      // Legacy "completed" rows count as finished.
+      finished: 1,
+      paused: 1,
       dropped: 0,
-      total: 2,
+      total: 4,
     });
   });
 

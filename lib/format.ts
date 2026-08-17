@@ -32,6 +32,22 @@ export function formatCalendarDay(value: number | string) {
   return format(date, "EEEE, MMM d");
 }
 
+// Day-granular label for recent activity rows: "Today", "Yesterday", the
+// weekday name inside the last week, then "Aug 12".
+export function formatRelativeDay(value: number, now: number = Date.now()) {
+  const startOfDay = (timestamp: number) => {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  };
+  const today = startOfDay(now);
+  const day = startOfDay(value);
+  if (day >= today) return "Today";
+  if (day >= today - 86_400_000) return "Yesterday";
+  if (day >= today - 6 * 86_400_000) return format(new Date(value), "EEEE");
+  return formatShortDate(value);
+}
+
 export function formatEpisodeCode(seasonNumber: number, episodeNumber: number) {
   return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
 }

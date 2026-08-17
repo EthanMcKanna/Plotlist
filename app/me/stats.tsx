@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -14,8 +14,8 @@ import { api } from "../../lib/plotlist/api";
 import type { AccentTheme } from "../../lib/appearance";
 import { useAccent } from "../../lib/appearanceStore";
 import { guardedPush } from "../../lib/navigation";
-import { formatEpisodeCode, formatShortDate, formatWatchTimeLabel } from "../../lib/format";
-import { useAuth, useQuery } from "../../lib/plotlist/react";
+import { formatEpisodeCode, formatRelativeDay, formatWatchTimeLabel } from "../../lib/format";
+import { queryDataUpdatedAt, useAuth, useQueryState } from "../../lib/plotlist/react";
 import { presentProPaywall } from "../../lib/purchases";
 import { queryClient } from "../../lib/queryClient";
 import type { WatchInsights, WatchInsightsPayload } from "../../lib/watchInsights";
@@ -84,18 +84,25 @@ function BarRow({
   );
 }
 
+// Bars use explicit pixel heights: percentage heights inside auto-sized flex
+// columns resolve to 0 on web, which rendered this chart blank there.
+const MONTHLY_CHART_BAR_AREA = 76;
+
 function MonthlyChart({ months }: { months: WatchInsights["monthlyActivity"] }) {
   const accent = useAccent();
   const max = Math.max(1, ...months.map((month) => month.episodes));
   return (
-    <View className="flex-row items-end gap-1.5" style={{ height: 96 }}>
+    <View className="flex-row gap-1.5">
       {months.map((month) => (
         <View key={month.key} className="flex-1 items-center gap-1.5">
-          <View className="w-full flex-1 justify-end">
+          <View className="w-full justify-end" style={{ height: MONTHLY_CHART_BAR_AREA }}>
             <View
               className="w-full rounded-md"
               style={{
-                height: `${Math.max((month.episodes / max) * 100, month.episodes > 0 ? 6 : 2)}%`,
+                height: Math.max(
+                  (month.episodes / max) * MONTHLY_CHART_BAR_AREA,
+                  month.episodes > 0 ? 5 : 2,
+                ),
                 backgroundColor:
                   month.episodes > 0 ? accent.ramp[400] : "rgba(255,255,255,0.08)",
               }}
@@ -181,16 +188,56 @@ export default function WatchStatsScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated, isLoading } = useAuth();
   const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
-  const insights = useQuery(
+  const insightsQuery = useQueryState(
     api.watchStats.getInsights,
     isAuthenticated ? { utcOffsetMinutes } : "skip",
-  ) as WatchInsightsPayload | undefined;
+  );
+  const insights = insightsQuery.data as WatchInsightsPayload | undefined;
 
-  if (isLoading || (isAuthenticated && !insights)) {
+  // Mutations already invalidate this query, but streaks and pace windows
+  // also shift at midnight with no mutation at all. Refetch on focus when the
+  // cached payload is older than a few seconds — the server's fingerprint
+  // check makes a no-change refetch nearly free.
+  const refetchInsights = insightsQuery.refetch;
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated) return;
+      const updatedAt = queryDataUpdatedAt(api.watchStats.getInsights, { utcOffsetMinutes });
+      if (updatedAt !== null && Date.now() - updatedAt > 15_000) {
+        refetchInsights();
+      }
+    }, [isAuthenticated, refetchInsights, utcOffsetMinutes]),
+  );
+
+  if (isLoading || (isAuthenticated && !insights && !insightsQuery.isError)) {
     return (
       <Screen>
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={accent.ramp[400]} />
+        </View>
+      </Screen>
+    );
+  }
+
+  if (isAuthenticated && !insights && insightsQuery.isError) {
+    return (
+      <Screen>
+        <View className="flex-1 justify-center px-6">
+          <EmptyState
+            title="Couldn't load your stats"
+            description="Check your connection and try again."
+          />
+          <GlassPressable
+            onPress={() => refetchInsights()}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading watch stats"
+            radius={12}
+            variant="tinted"
+            style={{ marginTop: 16 }}
+            contentStyle={{ alignItems: "center", padding: 14 }}
+          >
+            <Text className="text-sm font-semibold text-brand-400">Try again</Text>
+          </GlassPressable>
         </View>
       </Screen>
     );
@@ -220,12 +267,16 @@ export default function WatchStatsScreen() {
   const maxGenreMinutes = Math.max(1, ...insights.topGenres.map((genre) => genre.minutes));
   const daypartPalette = daypartColors(accent);
   const genrePalette = genreColors(accent);
+  // Full watch-status-v2 tiers; zero-count rows are noise, so only what the
+  // user actually has renders.
   const librarySeries: Array<{ label: string; value: number; color: string }> = [
     { label: "Watching", value: insights.library.watching, color: "#22C55E" },
-    { label: "Completed", value: insights.library.completed, color: accent.ramp[400] },
+    { label: "Caught up", value: insights.library.caught_up, color: "#22D3EE" },
+    { label: "Finished", value: insights.library.finished, color: accent.ramp[400] },
     { label: "Watchlist", value: insights.library.watchlist, color: "#F59E0B" },
+    { label: "Paused", value: insights.library.paused, color: "#94A3B8" },
     { label: "Dropped", value: insights.library.dropped, color: "#EF4444" },
-  ];
+  ].filter((entry) => entry.value > 0);
 
   return (
     <Screen>
@@ -378,7 +429,9 @@ export default function WatchStatsScreen() {
               <View className="mt-8">
                 <SectionTitle
                   title="Past 12 months"
-                  aside={`${insights.window.episodesLast30Days} episodes in the last 30 days`}
+                  aside={`${insights.window.episodesLast30Days} episode${
+                    insights.window.episodesLast30Days === 1 ? "" : "s"
+                  } in the last 30 days`}
                 />
                 <GlassSurface radius={12} variant="surface" contentStyle={{ padding: 16 }}>
                   <MonthlyChart months={insights.monthlyActivity} />
@@ -481,23 +534,25 @@ export default function WatchStatsScreen() {
               )}
 
               {/* Library mix */}
-              <View className="mt-8">
-                <SectionTitle
-                  title="Library"
-                  aside={`${insights.library.total.toLocaleString()} shows`}
-                />
-                <GlassSurface radius={12} variant="surface" contentStyle={{ padding: 16 }}>
-                  {librarySeries.map((entry) => (
-                    <BarRow
-                      key={entry.label}
-                      label={entry.label}
-                      value={entry.value}
-                      max={Math.max(1, insights.library.total)}
-                      color={entry.color}
-                    />
-                  ))}
-                </GlassSurface>
-              </View>
+              {librarySeries.length > 0 ? (
+                <View className="mt-8">
+                  <SectionTitle
+                    title="Library"
+                    aside={`${insights.library.total.toLocaleString()} shows`}
+                  />
+                  <GlassSurface radius={12} variant="surface" contentStyle={{ padding: 16 }}>
+                    {librarySeries.map((entry) => (
+                      <BarRow
+                        key={entry.label}
+                        label={entry.label}
+                        value={entry.value}
+                        max={Math.max(1, insights.library.total)}
+                        color={entry.color}
+                      />
+                    ))}
+                  </GlassSurface>
+                </View>
+              ) : null}
 
               {/* Ratings */}
               {insights.reviews.total > 0 ? (
@@ -551,9 +606,7 @@ export default function WatchStatsScreen() {
                             : ""
                         }`}
                       >
-                        <View className="h-9 w-9 items-center justify-center rounded-xl bg-brand-500/15">
-                          <Ionicons name="play" size={15} color={accent.ramp[400]} />
-                        </View>
+                        <Poster uri={episode.posterUrl} width={40} />
                         <View className="flex-1">
                           <Text
                             className="text-sm font-semibold text-text-primary"
@@ -563,10 +616,12 @@ export default function WatchStatsScreen() {
                           </Text>
                           <Text className="mt-0.5 text-xs text-text-tertiary">
                             {formatEpisodeCode(episode.seasonNumber, episode.episodeNumber)} ·{" "}
-                            {formatShortDate(episode.watchedAt)} · {episode.runtimeMinutes}m
+                            {episode.runtimeMinutes}m
                           </Text>
                         </View>
-                        <Ionicons name="chevron-forward" size={15} color="#5A6070" />
+                        <Text className="text-[11px] font-medium tabular-nums text-text-tertiary">
+                          {formatRelativeDay(episode.watchedAt)}
+                        </Text>
                       </LinkPressable>
                     ))}
                   </GlassSurface>

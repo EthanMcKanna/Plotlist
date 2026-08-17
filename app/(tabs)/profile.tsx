@@ -1,6 +1,6 @@
-import { useMemo, type ReactElement } from "react";
+import { useCallback, useMemo, type ReactElement } from "react";
 import { Platform, Text, View } from "react-native";
-import { Link, useRouter, type Href } from "expo-router";
+import { Link, useFocusEffect, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 
@@ -11,7 +11,7 @@ import { Avatar } from "../../components/Avatar";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
 import { LinkPressable } from "../../components/LinkPressable";
 import { formatWatchTimeLabel } from "../../lib/format";
-import { usePaginatedQuery, useQuery } from "../../lib/plotlist/react";
+import { queryDataUpdatedAt, usePaginatedQuery, useQuery, useQueryState } from "../../lib/plotlist/react";
 import { resolveStorageUrl } from "../../lib/storageUrl";
 import { TabMountPlaceholder, useDeferredTabMount } from "../../lib/useDeferredTabMount";
 import { useIsDesktopWeb } from "../../lib/webLayout";
@@ -128,10 +128,26 @@ function ProfileTabContent() {
   const me = useQuery(api.users.me);
   const avatarUrl = resolveStorageUrl(me?.avatarStorageId);
   const utcOffsetMinutes = useMemo(() => -new Date().getTimezoneOffset(), []);
-  const insights = useQuery(
+  const insightsQuery = useQueryState(
     api.watchStats.getInsights,
     me ? { utcOffsetMinutes } : "skip",
-  ) as WatchInsights | undefined;
+  );
+  const insights = insightsQuery.data as WatchInsights | undefined;
+
+  // Streak and totals shift at midnight without any mutation, so refresh the
+  // card when the tab regains focus with a stale payload; the server-side
+  // fingerprint makes a no-change refetch nearly free.
+  const refetchInsights = insightsQuery.refetch;
+  const hasUser = Boolean(me);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasUser) return;
+      const updatedAt = queryDataUpdatedAt(api.watchStats.getInsights, { utcOffsetMinutes });
+      if (updatedAt !== null && Date.now() - updatedAt > 15_000) {
+        refetchInsights();
+      }
+    }, [hasUser, refetchInsights, utcOffsetMinutes]),
+  );
 
   // Warm the exact caches behind "View public profile" and the follower /
   // following screens (same query keys) so tapping through renders instantly.
