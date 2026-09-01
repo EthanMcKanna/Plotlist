@@ -370,3 +370,238 @@ describe("episode progress optimistic cache updates", () => {
       .toEqual([]);
   });
 });
+
+describe("queue-driven optimistic repaints", () => {
+  const { getLocalDateString, addDaysToDateOnlyString } = require("../lib/releaseCalendar");
+  const today: string = getLocalDateString(new Date());
+  const day = (offset: number) => addDaysToDateOnlyString(today, offset) as string;
+  const dayTs = (offset: number) => Date.parse(`${day(offset)}T00:00:00.000Z`);
+  const queued = (
+    seasonNumber: number,
+    episodeNumber: number,
+    name: string,
+    airOffset: number | null,
+  ) => ({
+    seasonNumber,
+    episodeNumber,
+    name,
+    stillUrl: `${name}.jpg`,
+    overview: `${name} overview`,
+    runtime: 45,
+    airDate: airOffset === null ? null : day(airOffset),
+    airDateTs: airOffset === null ? null : dayTs(airOffset),
+  });
+
+  it("paints the next episode's real metadata from the queue instead of a placeholder", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 4,
+            totalEpisodes: 10,
+            nextSeasonNumber: 2,
+            nextEpisodeNumber: 5,
+            nextEpisodeName: "Five",
+            nextEpisodeStillUrl: "five.jpg",
+            nextEpisodeRuntime: 44,
+            seasons: [{ seasonNumber: 1, episodeCount: 0 }, { seasonNumber: 2, episodeCount: 10 }],
+            nextEpisodes: [
+              queued(2, 6, "Six", -20),
+              queued(2, 7, "Seven", -13),
+              queued(2, 8, "Eight", -6),
+            ],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 2, episodeNumber: 5 });
+
+    expect(get(api.episodeProgress.getUpNext)).toEqual([
+      expect.objectContaining({
+        totalWatched: 5,
+        nextSeasonNumber: 2,
+        nextEpisodeNumber: 6,
+        nextEpisodeName: "Six",
+        nextEpisodeStillUrl: "Six.jpg",
+        nextEpisodeOverview: "Six overview",
+        nextEpisodeRuntime: 45,
+        isUpcoming: false,
+        isCaughtUp: false,
+        // An old backlog episode is not a fresh drop.
+        nextEpisodeReleasedToday: false,
+        nextEpisodes: [
+          expect.objectContaining({ episodeNumber: 7 }),
+          expect.objectContaining({ episodeNumber: 8 }),
+        ],
+      }),
+    ]);
+    expect(get(api.episodeProgress.getUpNext)[0].nextReleaseDate).toBe(dayTs(-20));
+  });
+
+  it("flips a weekly show to 'airs next week' the moment tonight's episode is marked", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 5,
+            totalEpisodes: 10,
+            nextSeasonNumber: 2,
+            nextEpisodeNumber: 6,
+            nextEpisodeReleasedToday: true,
+            nextReleaseDate: dayTs(0),
+            seasons: [{ seasonNumber: 2, episodeCount: 10 }],
+            nextEpisodes: [queued(2, 7, "Seven", 7), queued(2, 8, "Eight", 14)],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 2, episodeNumber: 6 });
+
+    expect(get(api.episodeProgress.getUpNext)[0]).toMatchObject({
+      nextEpisodeNumber: 7,
+      nextEpisodeName: "Seven",
+      isUpcoming: true,
+      nextAirDate: dayTs(7),
+      nextEpisodeReleasedToday: false,
+      isCaughtUp: false,
+    });
+  });
+
+  it("crosses into the next season when the queue looked ahead", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 7,
+            totalEpisodes: 8,
+            nextSeasonNumber: 1,
+            nextEpisodeNumber: 8,
+            seasons: [{ seasonNumber: 1, episodeCount: 8 }],
+            nextEpisodes: [queued(2, 1, "Premiere", -3)],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 1, episodeNumber: 8 });
+
+    // The summary alone would have called this caught up; the queue knows better.
+    expect(get(api.episodeProgress.getUpNext)[0]).toMatchObject({
+      nextSeasonNumber: 2,
+      nextEpisodeNumber: 1,
+      nextEpisodeName: "Premiere",
+      isCaughtUp: false,
+      totalEpisodes: 9,
+      nextEpisodes: [],
+    });
+  });
+
+  it("reads an empty queue after the finale as caught up rather than inventing an episode", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 7,
+            totalEpisodes: 8,
+            nextSeasonNumber: 1,
+            nextEpisodeNumber: 8,
+            seasons: [{ seasonNumber: 1, episodeCount: 8 }],
+            nextEpisodes: [],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 1, episodeNumber: 8 });
+
+    expect(get(api.episodeProgress.getUpNext)[0]).toMatchObject({
+      isCaughtUp: true,
+      optimisticCaughtUp: true,
+      nextEpisodes: [],
+    });
+  });
+
+  it("shows an announced-but-empty next season as coming soon after the finale", () => {
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getUpNext,
+        data: [
+          {
+            showId: "show_1",
+            totalWatched: 7,
+            totalEpisodes: 8,
+            nextSeasonNumber: 1,
+            nextEpisodeNumber: 8,
+            seasons: [
+              { seasonNumber: 1, episodeCount: 8 },
+              { seasonNumber: 2, episodeCount: 0 },
+            ],
+            nextEpisodes: [],
+          },
+        ],
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 1, episodeNumber: 8 });
+
+    expect(get(api.episodeProgress.getUpNext)[0]).toMatchObject({
+      nextSeasonNumber: 2,
+      nextEpisodeNumber: 1,
+      isCaughtUp: false,
+      isUpcoming: true,
+      nextAirDate: null,
+      nextEpisodeName: null,
+    });
+  });
+
+  it("patches every bucket of the sectioned continue surface too", () => {
+    const card = {
+      showId: "show_1",
+      totalWatched: 4,
+      totalEpisodes: 10,
+      nextSeasonNumber: 2,
+      nextEpisodeNumber: 5,
+      seasons: [{ seasonNumber: 2, episodeCount: 10 }],
+      nextEpisodes: [queued(2, 6, "Six", -1)],
+    };
+    const { store, get } = createLocalStore([
+      {
+        query: api.episodeProgress.getContinue,
+        args: { utcOffsetMinutes: -new Date().getTimezoneOffset() },
+        data: {
+          resume: [card],
+          newEpisodes: [],
+          returning: [{ showId: "show_2", nextSeasonNumber: 1, nextEpisodeNumber: 1 }],
+          gaps: [card],
+          paused: [],
+          dropped: [],
+          generatedAt: 1,
+        },
+      },
+    ]);
+
+    optimisticMarkEpisodeWatched(store, { showId: "show_1", seasonNumber: 2, episodeNumber: 5 });
+
+    const surface = get(api.episodeProgress.getContinue, {
+      utcOffsetMinutes: -new Date().getTimezoneOffset(),
+    });
+    expect(surface.resume[0]).toMatchObject({ nextEpisodeNumber: 6, nextEpisodeName: "Six" });
+    expect(surface.gaps[0]).toMatchObject({ nextEpisodeNumber: 6 });
+    expect(surface.returning[0]).toEqual({
+      showId: "show_2",
+      nextSeasonNumber: 1,
+      nextEpisodeNumber: 1,
+    });
+    expect(surface.generatedAt).toBe(1);
+  });
+});

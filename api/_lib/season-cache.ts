@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { tmdbSeasonCache } from "../../db/schema";
+import { deferBackgroundWork } from "./background";
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
@@ -292,18 +293,28 @@ async function fetchTmdbSeason(externalId: string, seasonNumber: number) {
 }
 
 // Fetch a season from TMDB and cache the slimmed payload. Returns null (never
-// throws) so enrichment paths can treat metadata as best-effort.
+// throws) so enrichment paths can treat metadata as best-effort. With
+// `deferWrite` the D1 upsert rides on the request's background scope so a
+// read path never waits on a cache write.
 export async function fetchAndCacheSeason(
   externalId: string,
   seasonNumber: number,
   now = Date.now(),
+  options: { deferWrite?: boolean } = {},
 ): Promise<CachedSeasonPayload | null> {
   try {
     const payload = slimSeasonPayload(await fetchTmdbSeason(externalId, seasonNumber));
     if (!payload) {
       return null;
     }
-    await upsertSeasonCacheEntry(externalId, payload, now);
+    if (options.deferWrite) {
+      deferBackgroundWork(
+        upsertSeasonCacheEntry(externalId, payload, now),
+        `season cache upsert ${externalId}:${seasonNumber}`,
+      );
+    } else {
+      await upsertSeasonCacheEntry(externalId, payload, now);
+    }
     return payload;
   } catch {
     return null;

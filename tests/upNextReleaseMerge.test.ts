@@ -142,3 +142,67 @@ describe("getReleaseAwareUpNextEpisode", () => {
     });
   });
 });
+
+describe("getReleaseAwareUpNextEpisode with a release lookback", () => {
+  it("counts a drop from earlier in the window as released, not skipped", () => {
+    const result = getReleaseAwareUpNextEpisode({
+      fallback: fallback({ nextSeasonNumber: 1, nextEpisodeNumber: 8, totalEpisodes: 8 }),
+      latestWatched: { season: 1, episode: 8 },
+      watchedEpisodeCount: 8,
+      releaseEvents: [
+        release({
+          airDate: "2026-05-26",
+          airDateTs: Date.parse("2026-05-26T00:00:00.000Z"),
+          seasonNumber: 2,
+          episodeNumber: 1,
+          episodeTitle: "Four Days Ago",
+        }),
+        release({
+          airDate: "2026-06-02",
+          airDateTs: Date.parse("2026-06-02T00:00:00.000Z"),
+          seasonNumber: 2,
+          episodeNumber: 2,
+        }),
+      ],
+      today: "2026-05-30",
+      releasedSince: "2026-05-16",
+    });
+
+    expect(result).toMatchObject({
+      nextSeasonNumber: 2,
+      nextEpisodeNumber: 1,
+      nextEpisodeName: "Four Days Ago",
+      isUpcoming: false,
+      nextEpisodeReleasedToday: false,
+      nextReleaseDate: Date.parse("2026-05-26T00:00:00.000Z"),
+      totalEpisodes: 9,
+    });
+  });
+
+  it("ranks a released event by the caller's local day start", () => {
+    const result = getReleaseAwareUpNextEpisode({
+      fallback: fallback(),
+      latestWatched: { season: 1, episode: 4 },
+      watchedEpisodeCount: 4,
+      releaseEvents: [release()],
+      today: "2026-05-30",
+      rankReleaseTimestamp: (event) => event.airDateTs + 7 * 60 * 60 * 1000,
+    });
+
+    expect(result.sortTimestamp).toBe(Date.parse("2026-05-30T19:00:00.000Z"));
+    expect(result.nextReleaseDate).toBe(Date.parse("2026-05-30T12:00:00.000Z"));
+  });
+
+  it("does not drag an unstarted show to a later season's episode", () => {
+    const original = fallback({ nextSeasonNumber: 1, nextEpisodeNumber: 1 });
+    const result = getReleaseAwareUpNextEpisode({
+      fallback: original,
+      latestWatched: null,
+      watchedEpisodeCount: 0,
+      releaseEvents: [release({ seasonNumber: 3, episodeNumber: 6 })],
+      today: "2026-05-30",
+    });
+
+    expect(result).toEqual(original);
+  });
+});

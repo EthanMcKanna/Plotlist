@@ -8,6 +8,7 @@ import {
   type ComponentType,
 } from "react";
 import {
+  AppState,
   Platform,
   Pressable,
   RefreshControl,
@@ -15,7 +16,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams, type Href } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Animated, {
@@ -27,7 +28,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAccent } from "../../lib/appearanceStore";
 import { notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
-import { useAction, useQuery } from "../../lib/plotlist/react";
+import { queryDataUpdatedAt, useAction, useQuery } from "../../lib/plotlist/react";
+import { queryClient } from "../../lib/queryClient";
+import { getUpNextQueryArgs } from "../../lib/upNextQueryArgs";
 import { api } from "../../lib/plotlist/api";
 
 import { ContactsSyncCard } from "../../components/ContactsSyncCard";
@@ -119,6 +122,8 @@ const HEAT_ACCENT = "#F59E0B";
 const CRITICS_ACCENT = "#F472B6";
 const QUICK_ACCENT = "#A3E635";
 const MIN_FEATURE_RAIL_ITEMS = 3;
+// Foregrounding after this long refetches the Continue rail before re-ranking it.
+const CONTINUE_FOREGROUND_REFRESH_MS = 5 * 60 * 1000;
 const MIN_POSTER_RAIL_ITEMS = 4;
 const MIN_DISTINCT_POSTER_RAIL_ITEMS = 3;
 const MIN_QUICK_RAIL_ITEMS = 2;
@@ -240,6 +245,31 @@ export function HomeSurface({
   useScrollToTopOnTabPress(listRef as any);
 
   const [refreshing, setRefreshing] = useState(false);
+  // The Continue rail re-ranks only at natural "fresh look" moments — tab
+  // focus, pull-to-refresh, app foreground — so a mark-watched tap never
+  // reorders cards under the user's finger (see ContinueWatchingRail).
+  const [continueOrderEpoch, setContinueOrderEpoch] = useState(0);
+  const bumpContinueOrderEpoch = useCallback(() => {
+    setContinueOrderEpoch((current) => current + 1);
+  }, []);
+  useFocusEffect(bumpContinueOrderEpoch);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      bumpContinueOrderEpoch();
+      // Episodes drop while the app is backgrounded; if the rail's data is
+      // old enough to have missed one, refetch it (cheap, per-user) so a
+      // fresh look really is fresh.
+      const updatedAt = queryDataUpdatedAt(api.episodeProgress.getUpNext, getUpNextQueryArgs());
+      if (updatedAt !== null && Date.now() - updatedAt > CONTINUE_FOREGROUND_REFRESH_MS) {
+        void queryClient.invalidateQueries({
+          queryKey: ["plotlist-rpc", "query", "episodeProgress:getUpNext"],
+          refetchType: "active",
+        });
+      }
+    });
+    return () => subscription.remove();
+  }, [bumpContinueOrderEpoch]);
   const [contactNudgeDismissed, setContactNudgeDismissed] = useState<boolean | null>(null);
   const queriedContinueWatchingItems = useContinueWatchingItems(
     data.hasProfile && providedContinueWatchingItems === undefined,
@@ -730,8 +760,9 @@ export function HomeSurface({
       await Promise.all([data.refresh(), schedulePreview.refresh()]);
     } finally {
       setRefreshing(false);
+      bumpContinueOrderEpoch();
     }
-  }, [data.refresh, schedulePreview]);
+  }, [bumpContinueOrderEpoch, data.refresh, schedulePreview]);
 
   const openShowFromKey = useCallback(
     async (key: string, fallbackTitle: string) => {
@@ -930,6 +961,7 @@ export function HomeSurface({
             activeItems={activeContinueWatchingItems}
             hideWhenEmpty
             index={getSectionDisplayIndex(item.kind)}
+            orderEpoch={continueOrderEpoch}
           />
         );
       case "tonight":
@@ -1226,6 +1258,7 @@ export function HomeSurface({
     forYouItems,
     freshItems,
     getSectionDisplayIndex,
+    continueOrderEpoch,
     handleDismissNudge,
     handlePressRailItem,
     handleSyncContacts,

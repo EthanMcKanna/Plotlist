@@ -31,7 +31,7 @@ import { useAccent } from "../lib/appearanceStore";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
-import { formatShortDate } from "../lib/format";
+import { formatAirDay } from "../lib/format";
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { SHOW_BACK_BUTTON, WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
 
@@ -74,7 +74,7 @@ export function getReturningSubtitle(entry: {
       (entry.nextEpisodeNumber ?? 1) === 1
         ? `Season ${entry.nextSeasonNumber ?? 1}`
         : `S${entry.nextSeasonNumber ?? 1} E${entry.nextEpisodeNumber ?? 1}`;
-    return `${code} · ${formatShortDate(entry.nextAirDate)}`;
+    return `${code} · ${formatAirDay(entry.nextAirDate)}`;
   }
   return "Waiting for new episodes";
 }
