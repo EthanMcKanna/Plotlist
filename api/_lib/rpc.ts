@@ -137,6 +137,10 @@ import {
 } from "../../lib/watchStatusReconciliation";
 import { parseLibrarySort, sortLibraryEntries } from "../../lib/librarySort";
 import {
+  classifyCachedDetailFreshness,
+  mergeEpisodeProgressRows,
+} from "./status-change-details";
+import {
   fetchAndCacheSeason,
   findCachedSeasonEpisode,
   readSeasonCacheEntries,
@@ -611,15 +615,25 @@ type ShowMetadataContext = {
   show: typeof shows.$inferSelect | null;
   /** Slim details payload (status / seasons / last-aired); undefined when uncached. */
   detailPayload: unknown;
+  /** Cache row id, so a stale row can be refreshed in place without re-reading it. */
+  detailCacheId: string | null;
+  detailExpiresAt: number | null;
+  /** IMDb id from the cached payload's external_ids, when TMDB has one. */
+  detailImdbId: string | null;
 };
 
-// The three details fields the progress engines read, extracted in SQL so a
+// The details fields the progress engines read, extracted in SQL so a
 // show's ~100KB cached payload never crosses the wire. Every field carries an
 // explicit SQL alias on purpose: inside `db.batch` D1 returns object rows
 // keyed by column name, so a bare joined `external_id` collides with the
 // show's own `external_id` and shifts every value one slot over.
 const slimTmdbDetailFields = {
   detailExternalId: sql<string | null>`${tmdbDetailsCache.externalId}`.as("detail_external_id"),
+  detailCacheId: sql<string | null>`${tmdbDetailsCache.id}`.as("detail_cache_id"),
+  detailExpiresAt: sql<number | null>`${tmdbDetailsCache.expiresAt}`.as("detail_expires_at"),
+  detailImdbId: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.external_ids.imdb_id')`.as(
+    "detail_imdb_id",
+  ),
   detailStatus: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.status')`.as(
     "detail_status",
   ),
@@ -633,6 +647,9 @@ const slimTmdbDetailFields = {
 
 type SlimTmdbDetailFieldsRow = {
   detailExternalId: string | null;
+  detailCacheId: string | null;
+  detailExpiresAt: number | null;
+  detailImdbId: string | null;
   detailStatus: string | null;
   detailSeasonsJson: string | null;
   detailLastEpisodeJson: string | null;
@@ -671,13 +688,41 @@ function selectShowsWithSlimDetails() {
     );
 }
 
-async function loadShowMetadataContext(showId: string): Promise<ShowMetadataContext> {
-  const rows = await selectShowsWithSlimDetails().where(eq(shows.id, showId)).limit(1);
+// The one-row statement behind loadShowMetadataContext, exposed so write
+// paths can ride it inside a db.batch alongside their own reads.
+function selectShowMetadataContextRows(showId: string) {
+  return selectShowsWithSlimDetails().where(eq(shows.id, showId)).limit(1);
+}
+
+function showMetadataContextFromRows(
+  rows: ReadonlyArray<{ show: typeof shows.$inferSelect } & SlimTmdbDetailFieldsRow>,
+): ShowMetadataContext {
   const row = rows[0];
   if (!row) {
-    return { show: null, detailPayload: undefined };
+    return {
+      show: null,
+      detailPayload: undefined,
+      detailCacheId: null,
+      detailExpiresAt: null,
+      detailImdbId: null,
+    };
   }
-  return { show: row.show, detailPayload: slimDetailPayloadFromFields(row) };
+  const hasCacheRow = row.detailExternalId !== null;
+  return {
+    show: row.show,
+    detailPayload: slimDetailPayloadFromFields(row),
+    detailCacheId: hasCacheRow ? row.detailCacheId : null,
+    detailExpiresAt:
+      hasCacheRow && typeof row.detailExpiresAt === "number" ? row.detailExpiresAt : null,
+    detailImdbId:
+      typeof row.detailImdbId === "string" && row.detailImdbId.startsWith("tt")
+        ? row.detailImdbId
+        : null,
+  };
+}
+
+async function loadShowMetadataContext(showId: string): Promise<ShowMetadataContext> {
+  return showMetadataContextFromRows(await selectShowMetadataContextRows(showId));
 }
 
 // Where the user actually stands on a show, derived from their progress rows
@@ -714,13 +759,7 @@ async function loadShowProgressFacts(
   if (!resolved.show || resolved.show.externalSource !== "tmdb") {
     return computeShowProgressFactsFromContext(resolved, []);
   }
-  const progressRows = await db
-    .select({
-      seasonNumber: episodeProgress.seasonNumber,
-      episodeNumber: episodeProgress.episodeNumber,
-    })
-    .from(episodeProgress)
-    .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId)));
+  const progressRows = await selectEpisodeProgressPositions(userId, showId);
   return computeShowProgressFactsFromContext(resolved, progressRows);
 }
 
@@ -817,6 +856,59 @@ async function syncWatchStateAfterEpisodeChange(
   await upsertWatchStatus(userId, showId, status, updatedAt);
 }
 
+// Details payload for a status change, from the slim context the caller
+// already holds: a cached row — fresh or expired — is used as-is (an expired
+// one refreshes in the background so the response never waits on TMDB); only
+// a show with no cached details at all fetches inline, because there is
+// nothing else to backfill from. A failed inline fetch yields null, which the
+// caller treats as "no metadata".
+async function resolveStatusChangeDetailPayload(
+  context: ShowMetadataContext,
+  now: number,
+): Promise<unknown> {
+  const show = context.show;
+  if (!show) return null;
+  const freshness = classifyCachedDetailFreshness(context, now);
+  if (freshness !== "missing") {
+    if (freshness === "stale" && context.detailCacheId) {
+      deferBackgroundWork(
+        fetchAndCacheShowDetails(show, { id: context.detailCacheId }),
+        "status-change details refresh",
+      );
+    }
+    return context.detailPayload;
+  }
+  try {
+    return await fetchAndCacheShowDetails(show);
+  } catch {
+    return null;
+  }
+}
+
+type EpisodeProgressPositionRow = { seasonNumber: number; episodeNumber: number };
+
+function selectEpisodeProgressPositions(userId: string, showId: string) {
+  return db
+    .select({
+      seasonNumber: episodeProgress.seasonNumber,
+      episodeNumber: episodeProgress.episodeNumber,
+    })
+    .from(episodeProgress)
+    .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId)));
+}
+
+type BackfillReleasedEpisodesResult = {
+  marked: number;
+  /**
+   * The user's progress rows after the write (existing + backfilled), so the
+   * caller can resolve the watch tier without re-reading the table. Null when
+   * the backfill bailed before reading progress.
+   */
+  progressRows: EpisodeProgressPositionRow[] | null;
+  /** The details payload the backfill acted on (fresh, stale, or just fetched). */
+  detailPayload: unknown;
+};
+
 // Marking a show finished (or catching up "to here") is a statement about a
 // whole stretch of the show, so the server backfills every released-but-
 // unwatched episode into progress and the diary in the same request. This
@@ -829,17 +921,28 @@ async function backfillReleasedEpisodes(
   userId: string,
   showId: string,
   now: number,
-  upTo?: { seasonNumber: number; episodeNumber: number },
-) {
-  const showRows = await db.select().from(shows).where(eq(shows.id, showId)).limit(1);
-  const show = showRows[0];
+  options: {
+    upTo?: { seasonNumber: number; episodeNumber: number };
+    /** Show + slim details the caller already loaded (saves the re-read). */
+    context?: ShowMetadataContext;
+    /** Progress rows the caller already loaded alongside the context. */
+    existingProgress?: EpisodeProgressPositionRow[];
+  } = {},
+): Promise<BackfillReleasedEpisodesResult> {
+  const { upTo } = options;
+  const context = options.context ?? (await loadShowMetadataContext(showId));
+  const show = context.show;
   if (!show || show.externalSource !== "tmdb") {
-    return { marked: 0 };
+    return {
+      marked: 0,
+      progressRows: options.existingProgress ?? null,
+      detailPayload: context.detailPayload,
+    };
   }
-  const payload = await readShowDetailsPayloadForStatusChange(show);
+  const payload = await resolveStatusChangeDetailPayload(context, now);
   const seasons = readSeasonSummaries(payload);
   if (seasons.length === 0) {
-    return { marked: 0 };
+    return { marked: 0, progressRows: options.existingProgress ?? null, detailPayload: payload };
   }
   const released = listReleasedEpisodes({
     seasons,
@@ -853,16 +956,11 @@ async function backfillReleasedEpisodes(
         episode.episodeNumber <= upTo.episodeNumber),
   );
   if (released.length === 0) {
-    return { marked: 0 };
+    return { marked: 0, progressRows: options.existingProgress ?? null, detailPayload: payload };
   }
 
-  const existing = await db
-    .select({
-      seasonNumber: episodeProgress.seasonNumber,
-      episodeNumber: episodeProgress.episodeNumber,
-    })
-    .from(episodeProgress)
-    .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId)));
+  const existing =
+    options.existingProgress ?? (await selectEpisodeProgressPositions(userId, showId));
   const watchedKeys = new Set(
     existing.map((row) => `${row.seasonNumber}:${row.episodeNumber}`),
   );
@@ -870,7 +968,7 @@ async function backfillReleasedEpisodes(
     (episode) => !watchedKeys.has(`${episode.seasonNumber}:${episode.episodeNumber}`),
   );
   if (missing.length === 0) {
-    return { marked: 0 };
+    return { marked: 0, progressRows: existing, detailPayload: payload };
   }
 
   // Episode titles come from whatever season cache is already warm; a cold
@@ -936,7 +1034,11 @@ async function backfillReleasedEpisodes(
       ],
     );
   }
-  return { marked: missing.length };
+  return {
+    marked: missing.length,
+    progressRows: mergeEpisodeProgressRows(existing, missing),
+    detailPayload: payload,
+  };
 }
 
 async function readShowSeasonSummaries(showId: string, context?: ShowMetadataContext) {
@@ -1061,7 +1163,10 @@ function isAutoManagedWatchLogCondition() {
   ];
 }
 
-async function deletePlainEpisodeWatchLogs(args: {
+// One statement that removes the plain auto-logs for an episode (or a whole
+// season) and reports which ids went, so the unmark paths can batch it with
+// their progress delete and clean the feed up afterwards.
+function deletePlainEpisodeWatchLogsStatement(args: {
   userId: string;
   showId: string;
   seasonNumber: number;
@@ -1076,17 +1181,18 @@ async function deletePlainEpisodeWatchLogs(args: {
   if (typeof args.episodeNumber === "number") {
     conditions.push(eq(watchLogs.episodeNumber, args.episodeNumber));
   }
-  const rows = await db
-    .select({ id: watchLogs.id })
-    .from(watchLogs)
-    .where(and(...conditions));
-  if (rows.length === 0) return;
-  for (const chunk of chunkForSqlParams(rows.map((row) => row.id), 1, 80)) {
-    await db.delete(watchLogs).where(inArray(watchLogs.id, chunk));
-    await db
-      .delete(feedItems)
-      .where(and(eq(feedItems.type, "log"), inArray(feedItems.targetId, chunk)));
-  }
+  return db
+    .delete(watchLogs)
+    .where(and(...conditions))
+    .returning({ id: watchLogs.id });
+}
+
+async function deleteFeedItemsForWatchLogs(logIds: ReadonlyArray<string>) {
+  if (logIds.length === 0) return;
+  const statements = chunkForSqlParams([...logIds], 1, 80).map((chunk) =>
+    db.delete(feedItems).where(and(eq(feedItems.type, "log"), inArray(feedItems.targetId, chunk))),
+  );
+  await db.batch(statements as [(typeof statements)[number], ...(typeof statements)[number][]]);
 }
 
 const WATCH_LOG_DATE_PRECISIONS = ["exact", "day", "month", "year", "unknown"] as const;
@@ -1255,10 +1361,7 @@ async function readReconciledWatchStatuses<Row extends WatchStateRowLike>(
 
   const contextByShowId = new Map<string, ShowMetadataContext>();
   for (const row of showRows) {
-    contextByShowId.set(row.show.id, {
-      show: row.show,
-      detailPayload: slimDetailPayloadFromFields(row),
-    });
+    contextByShowId.set(row.show.id, showMetadataContextFromRows([row]));
   }
   const progressByShowId = new Map<string, Array<{ seasonNumber: number; episodeNumber: number }>>();
   for (const entry of progressRows) {
@@ -2313,7 +2416,9 @@ function readImdbIdFromDetailsPayload(payload: unknown): string | null {
 // imdb-id/artwork side channels that ride along with a fresh payload).
 async function fetchAndCacheShowDetails(
   show: typeof shows.$inferSelect,
-  cachedRow?: typeof tmdbDetailsCache.$inferSelect,
+  // Only the id is needed: an existing row is refreshed in place, so callers
+  // holding just the slim projection can pass `{ id }`.
+  cachedRow?: Pick<typeof tmdbDetailsCache.$inferSelect, "id">,
 ) {
   const payload = normalizeTmdbShowDetails(
     await tmdb(`/tv/${show.externalId}`, { append_to_response: "credits,videos,watch/providers,similar,recommendations,external_ids" }),
@@ -2486,51 +2591,24 @@ async function resolvePersonCredits(merged: PersonCreditAccumulator[]) {
   });
 }
 
-// Details payload for status changes: fresh cache wins, then a live fetch,
-// then a stale cache row — a slightly old released-through pointer beats
-// refusing to backfill at all.
-async function readShowDetailsPayloadForStatusChange(show: typeof shows.$inferSelect) {
-  const cached = await db
-    .select()
-    .from(tmdbDetailsCache)
-    .where(
-      and(
-        eq(tmdbDetailsCache.externalSource, show.externalSource),
-        eq(tmdbDetailsCache.externalId, show.externalId),
-      ),
-    )
-    .limit(1);
-  if (cached[0] && cached[0].expiresAt > Date.now()) {
-    return cached[0].payload;
+// Resolve a show's IMDb id from the context the caller already holds (the
+// slim projection carries the cached payload's external_ids), persisting it
+// on the shows row in the background. An empty string records "TMDB has no
+// mapping" so unrated shows don't refetch every call; transient TMDB failures
+// leave the column null so a later call retries. The write only ever fills a
+// null column — a concurrent fill of the same value never re-writes it.
+async function ensureShowImdbId(context: ShowMetadataContext): Promise<string | null> {
+  const show = context.show;
+  if (!show) {
+    return null;
   }
-  try {
-    return await fetchAndCacheShowDetails(show, cached[0]);
-  } catch {
-    return cached[0]?.payload ?? null;
-  }
-}
-
-// Resolve a show's IMDb id, persisting it on the shows row. An empty string
-// records "TMDB has no mapping" so unrated shows don't refetch every call;
-// transient TMDB failures leave the column null so a later call retries.
-async function ensureShowImdbId(show: typeof shows.$inferSelect): Promise<string | null> {
   if (typeof show.imdbId === "string") {
     return show.imdbId.startsWith("tt") ? show.imdbId : null;
   }
   if (show.externalSource !== "tmdb") {
     return null;
   }
-  const cached = await db
-    .select()
-    .from(tmdbDetailsCache)
-    .where(
-      and(
-        eq(tmdbDetailsCache.externalSource, show.externalSource),
-        eq(tmdbDetailsCache.externalId, show.externalId),
-      ),
-    )
-    .limit(1);
-  let imdbId = readImdbIdFromDetailsPayload(cached[0]?.payload);
+  let imdbId = context.detailImdbId;
   if (!imdbId) {
     try {
       const payload = (await tmdb(`/tv/${show.externalId}/external_ids`)) as {
@@ -2544,10 +2622,13 @@ async function ensureShowImdbId(show: typeof shows.$inferSelect): Promise<string
       return null;
     }
   }
-  await db
-    .update(shows)
-    .set({ imdbId: imdbId ?? "", updatedAt: Date.now() })
-    .where(eq(shows.id, show.id));
+  deferBackgroundWork(
+    db
+      .update(shows)
+      .set({ imdbId: imdbId ?? "", updatedAt: Date.now() })
+      .where(and(eq(shows.id, show.id), isNull(shows.imdbId))),
+    "show imdb id write-back",
+  );
   return imdbId;
 }
 
@@ -4229,7 +4310,8 @@ async function acceptFollowRequestEdge(
       .set({ countsFollowers: sql`${users.countsFollowers} + 1` })
       .where(eq(users.id, target.id)),
   ]);
-  await notifyFollowAccepted(target, requesterId);
+  // The accepted-request notification rides past the response.
+  deferBackgroundWork(notifyFollowAccepted(target, requesterId), "follow accepted notification");
   return true;
 }
 
@@ -6149,7 +6231,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         .onConflictDoNothing({ target: [followRequests.requesterId, followRequests.targetId] })
         .returning({ id: followRequests.id });
       if (requested.length > 0) {
-        await notifyFollowRequest(user, parsed.userIdToFollow);
+        deferBackgroundWork(
+          notifyFollowRequest(user, parsed.userIdToFollow),
+          "follow request notification",
+        );
       }
       return { status: "requested" };
     }
@@ -6190,10 +6275,14 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         .where(eq(users.id, parsed.userIdToFollow)),
     ]);
 
-    await notifyFollow(user, parsed.userIdToFollow);
-    // Followers hear about new connections in their feed. Private-account
+    // Neither the notification nor the feed fan-out gates the response.
+    // Followers hear about new connections in their feed; private-account
     // follows go through the request path and deliberately never fan out.
-    await addFeedForFollowers(user.id, "follow", parsed.userIdToFollow, null, Date.now());
+    deferBackgroundWork(notifyFollow(user, parsed.userIdToFollow), "follow notification");
+    deferBackgroundWork(
+      addFeedForFollowers(user.id, "follow", parsed.userIdToFollow, null, Date.now()),
+      "follow feed fan-out",
+    );
 
     return { status: "following", followId: inserted[0].id };
   },
@@ -6396,7 +6485,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("like");
     await db.insert(likes).values({ id, userId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, createdAt: Date.now() });
-    await notifyLike(user, parsed.targetType, parsed.targetId);
+    deferBackgroundWork(notifyLike(user, parsed.targetType, parsed.targetId), "like notification");
     return true;
   },
   "comments:add": async ({ args, req }) => {
@@ -6438,7 +6527,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     await assertTargetOwnerNotBlocked(user.id, parsed.targetType, parsed.targetId);
     const id = createId("comment");
     await db.insert(comments).values({ id, authorId: user.id, targetType: parsed.targetType, targetId: parsed.targetId, parentId: parsed.parentId ?? null, text: parsed.text, createdAt: Date.now() });
-    await notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text, parentAuthorId);
+    deferBackgroundWork(
+      notifyComment(user, parsed.targetType, parsed.targetId, id, parsed.text, parentAuthorId),
+      "comment notification",
+    );
     const rows = await db.select().from(comments).where(eq(comments.id, id)).limit(1);
     return rows[0]
       ? { comment: { ...toDoc(rows[0]), likeCount: 0, viewerLiked: false }, author: toClientUser(user), replies: [] }
@@ -6508,8 +6600,22 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       // ended shows, caught_up for returning ones. A backfill hiccup falls
       // back to the user's literal choice — a retap retries it (idempotent).
       try {
-        await backfillReleasedEpisodes(user.id, parsed.showId, now);
-        const facts = await loadShowProgressFacts(user.id, parsed.showId);
+        // Show, slim details and current progress arrive in one round trip;
+        // the backfill writes against them and hands back the resulting
+        // progress, so the tier resolves without re-reading anything.
+        const [contextRows, existingProgress] = await db.batch([
+          selectShowMetadataContextRows(parsed.showId),
+          selectEpisodeProgressPositions(user.id, parsed.showId),
+        ]);
+        const context = showMetadataContextFromRows(contextRows);
+        const backfill = await backfillReleasedEpisodes(user.id, parsed.showId, now, {
+          context,
+          existingProgress,
+        });
+        const facts = computeShowProgressFactsFromContext(
+          { ...context, detailPayload: backfill.detailPayload },
+          backfill.progressRows ?? existingProgress,
+        );
         status = resolveWatchTier(facts);
         if (status === "watching" && facts.releasedCount === 0) {
           // Metadata too thin to judge: honor the user's statement instead
@@ -6522,16 +6628,28 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       }
     }
 
-    const existing = await db.select().from(watchStates).where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, parsed.showId))).limit(1);
-    let stateId: string;
-    if (existing[0]) {
-      await db.update(watchStates).set({ status, updatedAt: now }).where(eq(watchStates.id, existing[0].id));
-      stateId = existing[0].id;
-    } else {
-      stateId = createId("state");
-      await db.insert(watchStates).values({ id: stateId, userId: user.id, showId: parsed.showId, status, updatedAt: now });
+    // One upsert replaces the old read-then-update/insert pair; on conflict
+    // SQLite's RETURNING yields the existing row's id.
+    const upserted = await db
+      .insert(watchStates)
+      .values({ id: createId("state"), userId: user.id, showId: parsed.showId, status, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [watchStates.userId, watchStates.showId],
+        set: { status, updatedAt: now },
+      })
+      .returning({ id: watchStates.id });
+    if (upserted[0]) {
+      return upserted[0].id;
     }
-    return stateId;
+    const existing = await db
+      .select({ id: watchStates.id })
+      .from(watchStates)
+      .where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, parsed.showId)))
+      .limit(1);
+    if (!existing[0]) {
+      throw new ApiError(500, "watch_state_write_failed", "Couldn't save the watch status");
+    }
+    return existing[0].id;
   },
   "watchStates:removeStatus": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -6589,20 +6707,27 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     // For episode scope the progress table decides rewatch-ness (already
     // watched = rewatch) unless the client overrides it.
     let alreadyWatched = false;
+    // Show metadata (existence check + status re-resolve) rides the same
+    // round trip as the progress lookup when an episode is in scope.
+    let context: ShowMetadataContext | null = null;
     if (isEpisodeScope) {
-      const existing = await db
-        .select({ id: episodeProgress.id })
-        .from(episodeProgress)
-        .where(
-          and(
-            eq(episodeProgress.userId, user.id),
-            eq(episodeProgress.showId, parsed.showId),
-            eq(episodeProgress.seasonNumber, parsed.seasonNumber!),
-            eq(episodeProgress.episodeNumber, parsed.episodeNumber!),
-          ),
-        )
-        .limit(1);
+      const [existing, contextRows] = await db.batch([
+        db
+          .select({ id: episodeProgress.id })
+          .from(episodeProgress)
+          .where(
+            and(
+              eq(episodeProgress.userId, user.id),
+              eq(episodeProgress.showId, parsed.showId),
+              eq(episodeProgress.seasonNumber, parsed.seasonNumber!),
+              eq(episodeProgress.episodeNumber, parsed.episodeNumber!),
+            ),
+          )
+          .limit(1),
+        selectShowMetadataContextRows(parsed.showId),
+      ]);
       alreadyWatched = Boolean(existing[0]);
+      context = showMetadataContextFromRows(contextRows);
     }
     const isRewatch = parsed.isRewatch ?? alreadyWatched;
 
@@ -6610,7 +6735,13 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     // never create the plain auto-log — this log IS the diary entry).
     if (parsed.markWatched !== false) {
       if (isEpisodeScope && !alreadyWatched) {
-        await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber!, parsed.episodeNumber!);
+        const resolvedContext = context ?? (await loadShowMetadataContext(parsed.showId));
+        await assertEpisodeExistsForMark(
+          parsed.showId,
+          parsed.seasonNumber!,
+          parsed.episodeNumber!,
+          resolvedContext,
+        );
         const created = await insertEpisodeProgressOnce({
           userId: user.id,
           showId: parsed.showId,
@@ -6619,10 +6750,17 @@ export const mutationHandlers: Record<string, RpcHandler> = {
           watchedAt: resolved.watchedAt,
         });
         if (created) {
-          await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+          await syncWatchStateAfterEpisodeChange(
+            user.id,
+            parsed.showId,
+            now,
+            "marked",
+            resolvedContext,
+          );
         }
       } else if (!isEpisodeScope && parsed.seasonNumber != null && parsed.markEpisodes?.length) {
-        const seasonSummaries = await readShowSeasonSummaries(parsed.showId);
+        const resolvedContext = context ?? (await loadShowMetadataContext(parsed.showId));
+        const seasonSummaries = await readShowSeasonSummaries(parsed.showId, resolvedContext);
         const markable = seasonSummaries
           ? parsed.markEpisodes.filter((episode) =>
               isEpisodeVerified(
@@ -6631,19 +6769,49 @@ export const mutationHandlers: Record<string, RpcHandler> = {
               ),
             )
           : parsed.markEpisodes;
-        let createdAny = false;
-        for (const episode of markable) {
-          const created = await insertEpisodeProgressOnce({
-            userId: user.id,
-            showId: parsed.showId,
-            seasonNumber: parsed.seasonNumber!,
-            episodeNumber: episode.episodeNumber,
-            watchedAt: resolved.watchedAt,
-          });
-          createdAny = createdAny || created;
-        }
+        // One batched round trip for the whole season instead of one insert
+        // per episode; RETURNING says whether anything actually landed.
+        const insertStatements = chunkForSqlParams(markable, 6, 80).map((chunk) =>
+          db
+            .insert(episodeProgress)
+            .values(
+              chunk.map((episode) => ({
+                id: createId("episode"),
+                userId: user.id,
+                showId: parsed.showId,
+                seasonNumber: parsed.seasonNumber!,
+                episodeNumber: episode.episodeNumber,
+                watchedAt: resolved.watchedAt,
+              })),
+            )
+            .onConflictDoNothing({
+              target: [
+                episodeProgress.userId,
+                episodeProgress.showId,
+                episodeProgress.seasonNumber,
+                episodeProgress.episodeNumber,
+              ],
+            })
+            .returning({ id: episodeProgress.id }),
+        );
+        const insertResults =
+          insertStatements.length > 0
+            ? await db.batch(
+                insertStatements as [
+                  (typeof insertStatements)[number],
+                  ...(typeof insertStatements)[number][],
+                ],
+              )
+            : [];
+        const createdAny = insertResults.some((rows) => rows.length > 0);
         if (createdAny) {
-          await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+          await syncWatchStateAfterEpisodeChange(
+            user.id,
+            parsed.showId,
+            now,
+            "marked",
+            resolvedContext,
+          );
         }
       }
     }
@@ -6666,8 +6834,12 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       isRewatch,
     });
     // One feed item per logged viewing, stamped "now" so a backdated entry
-    // surfaces to followers when it was logged, not buried years deep.
-    await addFeedForFollowers(user.id, "log", logId, parsed.showId, now);
+    // surfaces to followers when it was logged, not buried years deep. The
+    // fan-out never gates the response.
+    deferBackgroundWork(
+      addFeedForFollowers(user.id, "log", logId, parsed.showId, now),
+      "watch log feed fan-out",
+    );
     return logId;
   },
   // Every field of a logged viewing is editable independently — including
@@ -6793,7 +6965,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       createdAt: now,
       updatedAt: now,
     });
-    await addFeedForFollowers(user.id, "review", id, parsed.showId, now);
+    deferBackgroundWork(
+      addFeedForFollowers(user.id, "review", id, parsed.showId, now),
+      "review feed fan-out",
+    );
     return id;
   },
   "reviews:rateEpisode": async ({ args, req }) => {
@@ -6826,7 +7001,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     await db.insert(reviews).values({ id, authorId: user.id, showId: parsed.showId, rating: parsed.rating, reviewText: normalizedText ?? null, spoiler: false, seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber, episodeTitle: parsed.episodeTitle ?? null, createdAt: now, updatedAt: now });
     // First rating of an episode reaches followers like any other review;
     // later rating tweaks on the same episode don't re-fan.
-    await addFeedForFollowers(user.id, "review", id, parsed.showId, now);
+    deferBackgroundWork(
+      addFeedForFollowers(user.id, "review", id, parsed.showId, now),
+      "episode rating feed fan-out",
+    );
     return id;
   },
   "reviews:removeEpisodeRating": async ({ args, req }) => {
@@ -6886,7 +7064,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       }
     }
     if (parsed.isPublic ?? true) {
-      await addFeedForFollowers(user.id, "list", id, null, now);
+      deferBackgroundWork(
+        addFeedForFollowers(user.id, "list", id, null, now),
+        "list feed fan-out",
+      );
     }
     return id;
   },
@@ -6991,7 +7172,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         userId: user.id,
         createdAt: Date.now(),
       });
-      await notifyListFollow(user, list.ownerId, listId, list.title);
+      deferBackgroundWork(
+        notifyListFollow(user, list.ownerId, listId, list.title),
+        "list follow notification",
+      );
     }
     return { following: true };
   },
@@ -7073,19 +7257,51 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number(), episodeTitle: z.string().optional(), createLog: z.boolean().optional() }).parse(args ?? {});
     const now = Date.now();
-    const existing = await db.select().from(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber), eq(episodeProgress.episodeNumber, parsed.episodeNumber))).limit(1);
-    if (existing[0]) {
-      await db.delete(episodeProgress).where(eq(episodeProgress.id, existing[0].id));
-      await deletePlainEpisodeWatchLogs({
-        userId: user.id,
-        showId: parsed.showId,
-        seasonNumber: parsed.seasonNumber,
-        episodeNumber: parsed.episodeNumber,
-      });
-      await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked");
+    // The current progress row and the show's metadata don't depend on each
+    // other, so both come back in one round trip; the metadata then feeds
+    // the existence check and the status re-resolve instead of being re-read
+    // at every step (this tap used to cost ~12 serial D1 round trips).
+    const [existingRows, contextRows] = await db.batch([
+      db
+        .select({ id: episodeProgress.id })
+        .from(episodeProgress)
+        .where(
+          and(
+            eq(episodeProgress.userId, user.id),
+            eq(episodeProgress.showId, parsed.showId),
+            eq(episodeProgress.seasonNumber, parsed.seasonNumber),
+            eq(episodeProgress.episodeNumber, parsed.episodeNumber),
+          ),
+        )
+        .limit(1),
+      selectShowMetadataContextRows(parsed.showId),
+    ]);
+    const context = showMetadataContextFromRows(contextRows);
+    const existing = existingRows[0];
+    if (existing) {
+      // Unmark: the progress row and its plain auto-log go in one batch; the
+      // feed cleanup and the status re-resolve don't read each other.
+      const [, deletedLogs] = await db.batch([
+        db.delete(episodeProgress).where(eq(episodeProgress.id, existing.id)),
+        deletePlainEpisodeWatchLogsStatement({
+          userId: user.id,
+          showId: parsed.showId,
+          seasonNumber: parsed.seasonNumber,
+          episodeNumber: parsed.episodeNumber,
+        }),
+      ]);
+      await Promise.all([
+        deleteFeedItemsForWatchLogs(deletedLogs.map((row) => row.id)),
+        syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked", context),
+      ]);
       return false;
     }
-    await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
+    await assertEpisodeExistsForMark(
+      parsed.showId,
+      parsed.seasonNumber,
+      parsed.episodeNumber,
+      context,
+    );
     const created = await insertEpisodeProgressOnce({
       userId: user.id,
       showId: parsed.showId,
@@ -7095,19 +7311,23 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     });
     // Single-episode marks are deliberate watch moments: they log by default
     // (createLog omitted or true); older clients that never sent the flag get
-    // diary entries too, which is the product intent.
-    if ((parsed.createLog ?? true) && created) {
-      await createEpisodeWatchLog({
-        userId: user.id,
-        showId: parsed.showId,
-        seasonNumber: parsed.seasonNumber,
-        episodeNumber: parsed.episodeNumber,
-        episodeTitle: parsed.episodeTitle,
-        watchedAt: now,
-        fanOutToFeeds: true,
-      });
-    }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+    // diary entries too, which is the product intent. The diary entry and the
+    // status re-resolve run side by side; follower fan-out is deferred past
+    // the response.
+    await Promise.all([
+      (parsed.createLog ?? true) && created
+        ? createEpisodeWatchLog({
+            userId: user.id,
+            showId: parsed.showId,
+            seasonNumber: parsed.seasonNumber,
+            episodeNumber: parsed.episodeNumber,
+            episodeTitle: parsed.episodeTitle,
+            watchedAt: now,
+            fanOutToFeeds: true,
+          })
+        : Promise.resolve(null),
+      syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked", context),
+    ]);
     return true;
   },
   "episodeProgress:markEpisodeWatched": async ({ args, req }) => {
@@ -7159,16 +7379,30 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       })
       .parse(args ?? {});
     const now = Date.now();
-    await assertEpisodeExistsForMark(parsed.showId, parsed.seasonNumber, parsed.episodeNumber);
+    // Show metadata and current progress in one round trip; both feed the
+    // existence check, the backfill and the status re-resolve below.
+    const [contextRows, existingProgress] = await db.batch([
+      selectShowMetadataContextRows(parsed.showId),
+      selectEpisodeProgressPositions(user.id, parsed.showId),
+    ]);
+    const context = showMetadataContextFromRows(contextRows);
+    await assertEpisodeExistsForMark(
+      parsed.showId,
+      parsed.seasonNumber,
+      parsed.episodeNumber,
+      context,
+    );
     // Everything released up to and including the target: logged like other
     // bulk catch-ups (diary yes, feed fan-out no).
     const backfill = await backfillReleasedEpisodes(user.id, parsed.showId, now, {
-      seasonNumber: parsed.seasonNumber,
-      episodeNumber: parsed.episodeNumber,
+      upTo: { seasonNumber: parsed.seasonNumber, episodeNumber: parsed.episodeNumber },
+      context,
+      existingProgress,
     });
     // A just-aired target can sit past a stale released frontier (the release
     // event proved it exists above) — make sure the tapped episode itself
-    // always lands.
+    // always lands. This stays after the backfill on purpose: run side by
+    // side, both could log the same episode.
     const createdTarget = await insertEpisodeProgressOnce({
       userId: user.id,
       showId: parsed.showId,
@@ -7176,18 +7410,20 @@ export const mutationHandlers: Record<string, RpcHandler> = {
       episodeNumber: parsed.episodeNumber,
       watchedAt: now,
     });
-    if (createdTarget) {
-      await createEpisodeWatchLog({
-        userId: user.id,
-        showId: parsed.showId,
-        seasonNumber: parsed.seasonNumber,
-        episodeNumber: parsed.episodeNumber,
-        episodeTitle: parsed.episodeTitle,
-        watchedAt: now,
-        fanOutToFeeds: false,
-      });
-    }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+    await Promise.all([
+      createdTarget
+        ? createEpisodeWatchLog({
+            userId: user.id,
+            showId: parsed.showId,
+            seasonNumber: parsed.seasonNumber,
+            episodeNumber: parsed.episodeNumber,
+            episodeTitle: parsed.episodeTitle,
+            watchedAt: now,
+            fanOutToFeeds: false,
+          })
+        : Promise.resolve(null),
+      syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked", context),
+    ]);
     return { marked: backfill.marked + (createdTarget ? 1 : 0) };
   },
   "episodeProgress:markSeasonWatched": async ({ args, req }) => {
@@ -7195,8 +7431,10 @@ export const mutationHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodes: z.array(z.object({ episodeNumber: z.number(), title: z.string().optional() })), createLog: z.boolean().optional() }).parse(args ?? {});
     const now = Date.now();
     // Bulk marks silently skip episodes the metadata can't confirm rather
-    // than failing the whole season.
-    const seasonSummaries = await readShowSeasonSummaries(parsed.showId);
+    // than failing the whole season. The metadata loads once and also feeds
+    // the status re-resolve at the end.
+    const context = await loadShowMetadataContext(parsed.showId);
+    const seasonSummaries = await readShowSeasonSummaries(parsed.showId, context);
     const markableEpisodes = seasonSummaries
       ? parsed.episodes.filter((episode) =>
           isEpisodeVerified(
@@ -7244,51 +7482,71 @@ export const mutationHandlers: Record<string, RpcHandler> = {
             ],
           )
         : [];
-    if (parsed.createLog === true) {
-      const createdEpisodeNumbers = new Set(
-        insertResults.flat().map((row) => row.episodeNumber),
-      );
-      const loggableEpisodes = markableEpisodes.filter((episode) =>
-        createdEpisodeNumbers.has(episode.episodeNumber),
-      );
-      const logStatements = chunkForSqlParams(loggableEpisodes, 8, 80).map((chunk) =>
-        db.insert(watchLogs).values(
-          chunk.map((episode) => ({
-            id: createId("log"),
-            userId: user.id,
-            showId: parsed.showId,
-            watchedAt: now,
-            note: null,
-            seasonNumber: parsed.seasonNumber,
-            episodeNumber: episode.episodeNumber,
-            episodeTitle: episode.title ?? null,
-            createdAt: now,
-          })),
-        ),
-      );
-      if (logStatements.length > 0) {
-        await db.batch(
-          logStatements as [
-            (typeof logStatements)[number],
-            ...(typeof logStatements)[number][],
-          ],
-        );
-      }
-    }
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked");
+    const createdEpisodeNumbers = new Set(
+      insertResults.flat().map((row) => row.episodeNumber),
+    );
+    const loggableEpisodes =
+      parsed.createLog === true
+        ? markableEpisodes.filter((episode) => createdEpisodeNumbers.has(episode.episodeNumber))
+        : [];
+    const logStatements = chunkForSqlParams(loggableEpisodes, 8, 80).map((chunk) =>
+      db.insert(watchLogs).values(
+        chunk.map((episode) => ({
+          id: createId("log"),
+          userId: user.id,
+          showId: parsed.showId,
+          watchedAt: now,
+          note: null,
+          seasonNumber: parsed.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeTitle: episode.title ?? null,
+          createdAt: now,
+        })),
+      ),
+    );
+    // The diary rows and the status re-resolve don't read each other.
+    await Promise.all([
+      logStatements.length > 0
+        ? db.batch(
+            logStatements as [
+              (typeof logStatements)[number],
+              ...(typeof logStatements)[number][],
+            ],
+          )
+        : Promise.resolve(null),
+      syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "marked", context),
+    ]);
     return { success: true };
   },
   "episodeProgress:unmarkSeasonWatched": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number() }).parse(args ?? {});
     const now = Date.now();
-    await db.delete(episodeProgress).where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, parsed.showId), eq(episodeProgress.seasonNumber, parsed.seasonNumber)));
-    await deletePlainEpisodeWatchLogs({
-      userId: user.id,
-      showId: parsed.showId,
-      seasonNumber: parsed.seasonNumber,
-    });
-    await syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked");
+    // Progress delete, plain-log delete and the metadata read share one
+    // round trip; the feed cleanup and the status re-resolve then run side
+    // by side.
+    const [, deletedLogs, contextRows] = await db.batch([
+      db
+        .delete(episodeProgress)
+        .where(
+          and(
+            eq(episodeProgress.userId, user.id),
+            eq(episodeProgress.showId, parsed.showId),
+            eq(episodeProgress.seasonNumber, parsed.seasonNumber),
+          ),
+        ),
+      deletePlainEpisodeWatchLogsStatement({
+        userId: user.id,
+        showId: parsed.showId,
+        seasonNumber: parsed.seasonNumber,
+      }),
+      selectShowMetadataContextRows(parsed.showId),
+    ]);
+    const context = showMetadataContextFromRows(contextRows);
+    await Promise.all([
+      deleteFeedItemsForWatchLogs(deletedLogs.map((row) => row.id)),
+      syncWatchStateAfterEpisodeChange(user.id, parsed.showId, now, "unmarked", context),
+    ]);
     return { success: true };
   },
   "reports:create": async ({ args, req }) => {
@@ -7629,10 +7887,11 @@ export const actionHandlers: Record<string, RpcHandler> = {
       .parse(args ?? {});
     // Without an OMDb key the feature is off; skip the external-ids lookup too.
     if (!process.env.OMDB_API_KEY) return null;
-    const showRows = await db.select().from(shows).where(eq(shows.id, parsed.showId)).limit(1);
-    const show = showRows[0];
-    if (!show) return null;
-    const imdbId = await ensureShowImdbId(show);
+    // Show + cached external_ids in one slim read; no full payload crosses
+    // the wire and the id write-back never blocks the rating fetch.
+    const context = await loadShowMetadataContext(parsed.showId);
+    if (!context.show) return null;
+    const imdbId = await ensureShowImdbId(context);
     if (!imdbId) return null;
     return await getImdbRatings(imdbId, parsed.seasonNumbers ?? []);
   },
