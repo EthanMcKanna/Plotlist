@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation as useTanstackMutation, useQuery as useTanstackQuery } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
+import {
+  hashKey,
+  keepPreviousData,
+  useMutation as useTanstackMutation,
+  useQueries as useTanstackQueries,
+  useQuery as useTanstackQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 
 import { getFunctionName } from "./api";
 import { callAction, callMutation, callQuery } from "./rpc";
@@ -212,18 +219,27 @@ export function useQuery<Query extends PlotlistFunctionReference<"query">>(
 
 // Like useQuery, but exposes fetch state so screens can tell "still loading"
 // apart from "the server said this does not exist" and offer a retry on error.
+// `keepPreviousData` keeps the last args' data on screen while new args load
+// (a growing `limit`, a filter change) instead of blanking to a spinner.
 export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
   query: Query,
-  ...args: ArgsOrSkip
-): { data: any; isLoading: boolean; isError: boolean; refetch: () => void } {
+  queryArgs?: Record<string, any> | "skip",
+  options?: { keepPreviousData?: boolean },
+): {
+  data: any;
+  isLoading: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  refetch: () => void;
+} {
   const name = getFunctionName(query as any);
-  const queryArgs = args[0];
   const rpcResult = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "query", name, queryArgs],
       queryFn: ({ signal }) =>
         callQuery(query, queryArgs === "skip" ? undefined : (queryArgs as any), { signal }),
       enabled: queryArgs !== "skip",
+      ...(options?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
     },
     queryClient,
   );
@@ -232,6 +248,7 @@ export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
     data: queryArgs === "skip" ? undefined : rpcResult.data,
     isLoading: queryArgs !== "skip" && rpcResult.isLoading,
     isError: queryArgs !== "skip" && rpcResult.isError,
+    isFetching: queryArgs !== "skip" && rpcResult.isFetching,
     refetch: rpcResult.refetch,
   };
 }
@@ -323,6 +340,39 @@ export function useActionQuery<Action extends PlotlistFunctionReference<"action"
   };
 }
 
+type PaginatedPage = PaginatedResult | undefined;
+
+type PaginationState = {
+  // Serialized query args the cursors belong to; a different args key means
+  // the consumer changed filters and pagination starts over from page one.
+  argsKey: string;
+  // Cursors of every page loaded after the first, in order.
+  cursors: string[];
+};
+
+const NO_CURSORS: string[] = [];
+
+function pageRows(page: PaginatedPage): any[] {
+  return (page?.results ?? page?.page ?? EMPTY_PAGE) as any[];
+}
+
+// Stable module-level combiner so react-query can structurally share the
+// combined result: `pages` keeps its identity while no page's data changed.
+function combinePaginatedPages(results: UseQueryResult<PaginatedResult>[]) {
+  return {
+    pages: results.map((result) => result.data as PaginatedPage),
+    firstPageLoading: results.length === 0 || (results[0]?.isLoading ?? true),
+    lastPageLoading: results.length > 1 && (results[results.length - 1]?.isLoading ?? false),
+  };
+}
+
+// Every loaded page is a live react-query observer on its own cache entry
+// (one query key per cursor), and `results` is assembled from those entries.
+// Earlier pages used to be frozen in component state, so optimistic
+// `setPaginatedQuery` patches and mutation invalidation only ever reached the
+// last page — rows on older pages kept stale like/read/edit state until the
+// screen remounted. Now a cache write to any page repaints it, and
+// invalidation refetches all of them.
 export function usePaginatedQuery<Query extends PlotlistFunctionReference<"query">>(
   query: Query,
   args: Record<string, any> | "skip",
@@ -333,62 +383,83 @@ export function usePaginatedQuery<Query extends PlotlistFunctionReference<"query
   loadMore: (numItems?: number) => void;
 } {
   const name = getFunctionName(query as any);
-  const initialItems = options?.initialNumItems ?? options?.numItems ?? 20;
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [pages, setPages] = useState<any[][]>([]);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const numItems = options?.initialNumItems ?? options?.numItems ?? 20;
+  const skipped = args === "skip";
+  const argsKey = skipped ? "skip" : hashKey([name, args]);
+  const [pagination, setPagination] = useState<PaginationState>({ argsKey, cursors: NO_CURSORS });
+  const cursors = pagination.argsKey === argsKey ? pagination.cursors : NO_CURSORS;
 
-  const queryArgs = args === "skip" ? "skip" : { ...args, paginationOpts: { cursor, numItems: initialItems } };
-  const result = useTanstackQuery(
-    {
-      queryKey: ["plotlist-rpc", "paginated", name, queryArgs],
-      queryFn: ({ signal }) =>
-        callQuery<PaginatedResult>(query, queryArgs === "skip" ? undefined : queryArgs, { signal }),
-      enabled: args !== "skip",
-    },
+  const pageQueries = useMemo(() => {
+    if (skipped) {
+      return [];
+    }
+    return [null, ...cursors].map((cursor) => {
+      const queryArgs = { ...args, paginationOpts: { cursor, numItems } };
+      return {
+        queryKey: ["plotlist-rpc", "paginated", name, queryArgs] as const,
+        queryFn: ({ signal }: { signal?: AbortSignal }) =>
+          callQuery<PaginatedResult>(query, queryArgs, { signal }),
+      };
+    });
+    // args is re-created inline by every consumer; argsKey is its identity.
+  }, [argsKey, cursors, name, numItems, query, skipped]);
+
+  const { pages, firstPageLoading, lastPageLoading } = useTanstackQueries(
+    { queries: pageQueries, combine: combinePaginatedPages },
     queryClient,
   );
 
-  const currentPage = (result.data?.results ?? result.data?.page ?? EMPTY_PAGE) as any[];
-  const allResults = useMemo(() => {
-    if (cursor === null) {
-      return currentPage;
+  // Offset cursors mean a row can land on two pages after a prepend or a
+  // server-side shift (and optimistic prepends hit every cached page), so
+  // the first occurrence of an id wins.
+  const results = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: any[] = [];
+    for (const page of pages) {
+      for (const row of pageRows(page)) {
+        const id = row?._id ?? row?.id;
+        if (typeof id === "string") {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        merged.push(row);
+      }
     }
-    return [...pages.flat(), ...currentPage];
-  }, [currentPage, cursor, pages]);
+    return merged.length === 0 ? EMPTY_PAGE : merged;
+  }, [pages]);
 
-  // Changing the cursor changes the query key, which fires the next page's
-  // fetch on its own — no invalidation needed. The flag just needs to clear
-  // once that fetch settles.
-  const isFetching = result.isFetching;
-  useEffect(() => {
-    if (!isFetching) {
-      setLoadingMore(false);
-    }
-  }, [isFetching]);
+  const exhausted = pages.some((page) => page?.isDone === true);
+  const nextCursor = pages[pages.length - 1]?.continueCursor ?? null;
 
   const loadMore = useCallback(
     (_numItems?: number) => {
-      const nextCursor = result.data?.continueCursor ?? null;
-      if (!nextCursor || result.data?.isDone || loadingMore) {
+      if (skipped || firstPageLoading || lastPageLoading || exhausted || !nextCursor) {
         return;
       }
-      setLoadingMore(true);
-      setPages((existing) => [...existing, currentPage]);
-      setCursor(nextCursor);
+      setPagination((current) => {
+        const currentCursors = current.argsKey === argsKey ? current.cursors : NO_CURSORS;
+        if (currentCursors.includes(nextCursor)) {
+          return current;
+        }
+        return { argsKey, cursors: [...currentCursors, nextCursor] };
+      });
     },
-    [currentPage, loadingMore, result.data],
+    [argsKey, exhausted, firstPageLoading, lastPageLoading, nextCursor, skipped],
   );
 
   return {
-    results: args === "skip" ? EMPTY_PAGE : allResults,
-    status: result.isLoading
-      ? "LoadingFirstPage"
-      : loadingMore
-        ? "LoadingMore"
-        : result.data?.isDone
-          ? "Exhausted"
-          : "CanLoadMore",
+    results: skipped ? EMPTY_PAGE : results,
+    // Skipped queries keep reporting "CanLoadMore" (never loading, never
+    // done), matching the disabled-query state consumers already handle.
+    status: skipped
+      ? "CanLoadMore"
+      : firstPageLoading
+        ? "LoadingFirstPage"
+        : lastPageLoading
+          ? "LoadingMore"
+          : exhausted
+            ? "Exhausted"
+            : "CanLoadMore",
     loadMore,
   };
 }

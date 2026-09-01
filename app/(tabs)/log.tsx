@@ -53,7 +53,9 @@ import {
 import { LogWatchSheet, type EditableWatchLog } from "../../components/LogWatchSheet";
 import { formatTime } from "../../lib/format";
 import { api } from "../../lib/plotlist/api";
-import { useAuth, useMutation, useQuery } from "../../lib/plotlist/react";
+import { cachedQueryArgs } from "../../lib/plotlist/cachedQueryArgs";
+import { useAuth, useMutation, useQuery, useQueryState } from "../../lib/plotlist/react";
+import { isOptimisticId, removeDiaryItem } from "../../lib/watchLogOptimistic";
 import type { Id } from "../../lib/plotlist/types";
 import { TabMountPlaceholder, useDeferredTabMount } from "../../lib/useDeferredTabMount";
 
@@ -578,6 +580,11 @@ export function LogSurface({
       });
     } else {
       const { logId, title, item } = pendingAction;
+      // A just-saved entry keeps its optimistic id until the diary refetches;
+      // the server can't edit or delete a row it hasn't named yet.
+      if (isOptimisticId(logId)) {
+        return options;
+      }
       if (onEditLog) {
         options.push({
           label: "Edit entry",
@@ -679,10 +686,16 @@ function LogScreenContent() {
     showId: string;
     showTitle: string;
   } | null>(null);
-  const activity = useQuery(
+  // `limit` is part of the query key, so each load-more is a new query;
+  // keepPreviousData holds the current diary on screen (footer spinner) until
+  // the longer page lands instead of blanking to a full-screen spinner.
+  const activityQuery = useQueryState(
     api.watchLogs.listActivityForUser,
     me?._id ? { userId: me._id, limit } : "skip",
+    { keepPreviousData: true },
   );
+  const activity = activityQuery.data;
+  const activityFetching = activityQuery.isFetching;
 
   // A stable "now" (default-param Date.now() changed every render, so the
   // diary pulse/feed memos in LogSurface never hit). Frozen per mount is
@@ -694,29 +707,22 @@ function LogScreenContent() {
     [activity?.items],
   );
 
-  const deleteLog = useMutation(api.watchLogs.deleteLog).withOptimisticUpdate(
-    (localStore, args) => {
-      if (!me?._id) return;
-      const queryArgs = { userId: me._id, limit };
+  // The diary is cached once per `limit` it has been fetched at; drop the
+  // entry from every one of them, not just the limit this screen is on.
+  const removeDiaryItemEverywhere = useCallback((localStore: any, itemId: string) => {
+    for (const queryArgs of cachedQueryArgs(api.watchLogs.listActivityForUser)) {
       const current = localStore.getQuery(api.watchLogs.listActivityForUser, queryArgs);
-      if (!current?.items) return;
-      localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, {
-        ...current,
-        items: current.items.filter((item: DiaryItem) => item.id !== args.logId),
-      });
-    },
+      const next = removeDiaryItem(current, itemId);
+      if (next !== current) {
+        localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, next);
+      }
+    }
+  }, []);
+  const deleteLog = useMutation(api.watchLogs.deleteLog).withOptimisticUpdate(
+    (localStore, args) => removeDiaryItemEverywhere(localStore, args.logId),
   );
   const deleteReview = useMutation(api.reviews.deleteReview).withOptimisticUpdate(
-    (localStore, args) => {
-      if (!me?._id) return;
-      const queryArgs = { userId: me._id, limit };
-      const current = localStore.getQuery(api.watchLogs.listActivityForUser, queryArgs);
-      if (!current?.items) return;
-      localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, {
-        ...current,
-        items: current.items.filter((item: DiaryItem) => item.id !== args.reviewId),
-      });
-    },
+    (localStore, args) => removeDiaryItemEverywhere(localStore, args.reviewId),
   );
 
   const handleDeleteLog = useCallback(
@@ -754,8 +760,11 @@ function LogScreenContent() {
   );
 
   const handleLoadMore = useCallback(() => {
+    // The list stays mounted while the next limit loads, so onEndReached can
+    // keep firing; one in-flight page at a time.
+    if (activityFetching) return;
     setLimit((current) => Math.min(current + PAGE_SIZE, MAX_LIMIT));
-  }, []);
+  }, [activityFetching]);
 
   if (!isAuthenticated || me === undefined || activity === undefined) {
     return (

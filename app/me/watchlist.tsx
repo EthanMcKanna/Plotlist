@@ -11,6 +11,7 @@ import { ActionSheet, type ActionSheetOption } from "../../components/ActionShee
 import { EmptyState } from "../../components/EmptyState";
 import { LinkPressable } from "../../components/LinkPressable";
 import { Poster } from "../../components/Poster";
+import { PosterGridSkeleton } from "../../components/PosterGridSkeleton";
 import { FilterDropdown } from "../../components/FilterDropdown";
 import { api } from "../../lib/plotlist/api";
 import { usePosterGridLayout, WEB_PAGE_MAX_WIDTH } from "../../lib/webLayout";
@@ -308,7 +309,11 @@ export default function WatchlistScreen() {
         </View>
 
         <View className="mt-6 flex-1">
-          {items.length > 0 ? (
+          {/* A filter or sort change keys a fresh first page; the skeleton
+              covers that load so the grid never flashes "Nothing here yet". */}
+          {status === "LoadingFirstPage" ? (
+            <PosterGridSkeleton numColumns={numColumns} itemWidth={itemWidth} gap={GAP} />
+          ) : items.length > 0 ? (
             <FlashList
               key={`grid-${numColumns}`}
               data={items}
