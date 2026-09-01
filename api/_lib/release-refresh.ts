@@ -14,6 +14,7 @@ import {
   buildTmdbReleaseEventsForShow,
   getDateOnlyStartTimestamp,
   getReleaseCalendarShowIds,
+  getReleaseEventWindowStart,
   getTmdbReleaseCandidateSeasonNumbers,
   isDateOnlyString,
   isReleaseSyncStateStale,
@@ -241,12 +242,17 @@ async function refreshReleaseEventsForShow(show: ShowRow, now: number, anchorTod
       }
     }
 
+    // The rebuild below is delete-then-insert, so anything outside the window
+    // vanishes for every reader. The cron anchors on UTC "today"; keeping a
+    // couple of prior days means a Pacific user's "tonight" episode survives
+    // the 00:40Z run (readers filter on the user's own local day).
     const nextEvents = buildTmdbReleaseEventsForShow({
       showId: show.id,
       details,
       seasonPayloads,
       today,
       horizon,
+      windowStart: getReleaseEventWindowStart(today),
     }).map((event) => ({
       id: createId("release"),
       ...event,

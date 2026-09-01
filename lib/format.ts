@@ -16,34 +16,56 @@ export function formatShortDate(value: number) {
   return format(new Date(value), "MMM d");
 }
 
-/**
- * "MMM d" for a day-granular air timestamp. Servers encode date-only air
- * dates as UTC midnight, which local formatting would show as the previous
- * evening anywhere west of UTC ("Airs Sep 7" for a Sep 8 premiere). Reading
- * the UTC calendar day keeps the label on the right date in every timezone.
- */
-export function formatAirDay(value: number) {
-  const date = new Date(value);
-  return format(
-    new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12),
-    "MMM d",
-  );
-}
-
 function parseDateOnlyString(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
   if (!match) return null;
 
   const [, year, month, day] = match;
   return new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0);
 }
 
+/**
+ * Resolve a day-granular air date to local noon of its calendar day.
+ *
+ * TMDB air dates are calendar days with no timezone. Servers encode them as
+ * UTC midnight (or UTC noon) timestamps, and clients also pass the raw
+ * "YYYY-MM-DD" string around. Formatting either through `new Date(...)` in
+ * local time shows the previous evening anywhere west of UTC ("Airs Sep 7"
+ * for a Sep 8 premiere), so both shapes are read by calendar day instead:
+ * strings by their leading YYYY-MM-DD, numbers by their UTC calendar day.
+ */
+function toCalendarDayDate(value: number | string) {
+  if (typeof value === "string") {
+    return parseDateOnlyString(value) ?? new Date(value);
+  }
+  const date = new Date(value);
+  return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12);
+}
+
+/** "MMM d" for a date-only air date (string or UTC-day timestamp). */
+export function formatAirDay(value: number | string) {
+  return format(toCalendarDayDate(value), "MMM d");
+}
+
+/** "MMM d, yyyy" for a date-only air date (string or UTC-day timestamp). */
+export function formatAirDate(value: number | string) {
+  return format(toCalendarDayDate(value), "MMM d, yyyy");
+}
+
+/**
+ * "YYYY-MM-DD" for a UTC-day air timestamp — the inverse of the server's
+ * date-only encoding, for handing an air date back to string-based readers.
+ */
+export function toAirDateString(value: number) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+/**
+ * "EEEE, MMM d" for a release-calendar day. Numeric inputs are air
+ * timestamps (UTC-day encoded), never wall-clock instants.
+ */
 export function formatCalendarDay(value: number | string) {
-  const date =
-    typeof value === "string"
-      ? parseDateOnlyString(value) ?? new Date(value)
-      : new Date(value);
-  return format(date, "EEEE, MMM d");
+  return format(toCalendarDayDate(value), "EEEE, MMM d");
 }
 
 // Day-granular label for recent activity rows: "Today", "Yesterday", the

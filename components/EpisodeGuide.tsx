@@ -154,9 +154,13 @@ function EpisodeGuideComponent({
           availableEpisodes,
           seasonPosterPath:
             season.posterPath ?? tmdbImageUrl(season.poster_path, "w342"),
-          seasonYear: season.air_date
-            ? new Date(season.air_date).getFullYear()
-            : null,
+          // Date-only strings parse as UTC midnight; read the year straight
+          // off the text so a Jan 1 premiere doesn't read as last year west
+          // of UTC.
+          seasonYear:
+            season.air_date && /^\d{4}/.test(season.air_date)
+              ? Number(season.air_date.slice(0, 4))
+              : null,
         };
       }),
     [isEpisodeAvailable, seasonDetailsByNumber, visibleSeasons],

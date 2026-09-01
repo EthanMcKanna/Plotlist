@@ -205,6 +205,51 @@ export function addDaysToDateOnlyString(value: string, days: number) {
 }
 
 /**
+ * How many calendar days before the rebuild anchor a release-event refresh
+ * keeps. The cron anchors on UTC "today", but a user west of UTC is still on
+ * the previous evening when the 00:40Z run fires — pruning strictly before
+ * UTC-today dropped tonight's episode from Tonight/Continue/calendar for
+ * Pacific users and the 17:00-local digest for Alaska/Hawaii. Two days covers
+ * every offset (UTC-12 … UTC+14 straddles at most two calendar days) with a
+ * day to spare; readers filter on the user's own local day anyway.
+ */
+export const RELEASE_EVENT_RETENTION_DAYS = 2;
+
+export function getReleaseEventWindowStart(today: string) {
+  return addDaysToDateOnlyString(today, -RELEASE_EVENT_RETENTION_DAYS) ?? today;
+}
+
+// The easternmost timezone in use (UTC+14, Kiritimati); anywhere on Earth is
+// at most this far ahead of the UTC clock.
+const MAX_UTC_OFFSET_MINUTES = 14 * 60;
+
+/**
+ * Whether a calendar period ("YYYY-MM-DD", "YYYY-MM", or "YYYY") lies after
+ * the user's local today. With a known offset that is exact; without one
+ * (older builds) it tolerates the most eastern possible local day instead of
+ * rejecting — a user east of ~UTC+10 logging "today" at breakfast otherwise
+ * looked like a viewing in the future to the UTC worker clock.
+ */
+export function isCalendarPeriodAfterLocalToday(
+  period: string,
+  now: number,
+  utcOffsetMinutes: number | null | undefined,
+) {
+  const offsetMinutes =
+    typeof utcOffsetMinutes === "number" && Number.isFinite(utcOffsetMinutes)
+      ? Math.max(-MAX_UTC_OFFSET_MINUTES, Math.min(MAX_UTC_OFFSET_MINUTES, utcOffsetMinutes))
+      : MAX_UTC_OFFSET_MINUTES;
+  const latestLocalDate = new Date(now + offsetMinutes * 60_000).toISOString().slice(0, 10);
+  const trimmed = period.trim();
+  if (!/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(trimmed)) {
+    return false;
+  }
+  // Zero-padded ISO pieces compare lexically; truncate "today" to the
+  // period's own precision so "2026-09" is fine on any day of September.
+  return trimmed > latestLocalDate.slice(0, trimmed.length);
+}
+
+/**
  * Resolve "today" for a user from their UTC offset. Server code must use this
  * instead of its own clock/timezone: Workers run in UTC, so a Wednesday
  * evening in the US already reads as Thursday there — which made Thursday
@@ -656,12 +701,22 @@ export function buildTmdbReleaseEventsForShow(args: {
   seasonPayloads: any[];
   today: string;
   horizon: string;
+  /**
+   * Earliest air date to keep (defaults to `today`). Refreshes pass a day or
+   * two earlier so a UTC-anchored rebuild never discards an episode that is
+   * still "tonight" for users west of UTC.
+   */
+  windowStart?: string;
 }): TmdbReleaseEventRecord[] {
   if (!isDateOnlyString(args.today) || !isDateOnlyString(args.horizon)) {
     return [];
   }
 
-  const todayStart = getDateOnlyStartTimestamp(args.today);
+  const windowStart =
+    args.windowStart && isDateOnlyString(args.windowStart) && args.windowStart < args.today
+      ? args.windowStart
+      : args.today;
+  const todayStart = getDateOnlyStartTimestamp(windowStart);
   const horizonEnd = getDateOnlyEndTimestamp(args.horizon);
   const seasons = Array.isArray(args.details?.seasons) ? args.details.seasons : [];
   const maxSeasonNumber = Math.max(

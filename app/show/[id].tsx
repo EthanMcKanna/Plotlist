@@ -79,7 +79,8 @@ import { Avatar } from "../../components/Avatar";
 import { LinkPressable } from "../../components/LinkPressable";
 import { SpoilerShield } from "../../components/SpoilerShield";
 import { RatingHistogram } from "../../components/RatingHistogram";
-import { formatDate, formatRelativeTime } from "../../lib/format";
+import { formatAirDate, formatRelativeTime, toAirDateString } from "../../lib/format";
+import { getLocalDateString, isDateOnlyString } from "../../lib/releaseCalendar";
 import { resizeTmdbImageUrl } from "../../lib/tmdbImages";
 import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
@@ -675,7 +676,10 @@ export default function ShowScreen() {
       overview: overview ?? null,
       stillPath: still ?? null,
       runtime: runtimeRaw ? Number(runtimeRaw) : null,
-      airDate: Number.isFinite(airMs) ? new Date(airMs).toISOString() : null,
+      // epAir is the server's UTC-day air timestamp; hand it on as the same
+      // "YYYY-MM-DD" shape TMDB episodes carry so date/availability reads
+      // never shift by a day.
+      airDate: Number.isFinite(airMs) ? toAirDateString(airMs) : null,
       __preview: true as const,
     };
     // params objects are recreated each render; key off the primitive values.
@@ -1516,8 +1520,12 @@ export default function ShowScreen() {
         return true;
       }
 
-      const timestamp = new Date(airDate ?? "").getTime();
-      return Number.isFinite(timestamp) && timestamp <= Date.now();
+      // Air dates are calendar days: an episode is markable once the user's
+      // own local date reaches it. Comparing UTC-midnight instants against
+      // Date.now() let Pacific users mark tomorrow's episode from 5pm and
+      // locked Auckland out until 1pm.
+      const airDay = typeof airDate === "string" ? airDate.slice(0, 10) : "";
+      return isDateOnlyString(airDay) && airDay <= getLocalDateString();
     },
     [activeDetails?.status],
   );
@@ -3088,13 +3096,13 @@ export default function ShowScreen() {
             {activeDetails.firstAirDate && (
               <DetailRow
                 label="First aired"
-                value={formatDate(new Date(activeDetails.firstAirDate).getTime())}
+                value={formatAirDate(activeDetails.firstAirDate)}
               />
             )}
             {activeDetails.lastAirDate && activeDetails.status === "Ended" && (
               <DetailRow
                 label="Last aired"
-                value={formatDate(new Date(activeDetails.lastAirDate).getTime())}
+                value={formatAirDate(activeDetails.lastAirDate)}
               />
             )}
             {activeDetails.episodeRunTime && (
@@ -4064,7 +4072,7 @@ export default function ShowScreen() {
                       <>
                         <View className="h-1 w-1 rounded-full bg-white/30" />
                         <Text className="text-xs text-white/50">
-                          {formatDate(new Date(selectedEpisode.episode.airDate).getTime())}
+                          {formatAirDate(selectedEpisode.episode.airDate)}
                         </Text>
                       </>
                     ) : null}
@@ -4241,7 +4249,7 @@ export default function ShowScreen() {
                           : sheetIsAvailable
                             ? "Mark Watched"
                             : selectedEpisode.episode.airDate
-                              ? `Airs ${formatDate(new Date(selectedEpisode.episode.airDate).getTime())}`
+                              ? `Airs ${formatAirDate(selectedEpisode.episode.airDate)}`
                               : "Not yet available"}
                       </Text>
                     </GlassPressable>
@@ -4846,7 +4854,7 @@ export default function ShowScreen() {
                         {!isEpisodeAvailable(sheetNextEpisode.airDate) &&
                         sheetNextEpisode.airDate ? (
                           <Text className="mt-0.5 text-[12px] text-text-tertiary">
-                            Airs {formatDate(new Date(sheetNextEpisode.airDate).getTime())}
+                            Airs {formatAirDate(sheetNextEpisode.airDate)}
                           </Text>
                         ) : null}
                       </View>
