@@ -70,6 +70,31 @@ export function getLogDiaryTimestamp(log: WatchLogDateFields): number {
   return new Date(parts.year, (parts.month ?? 1) - 1, parts.day ?? 1, 12, 0, 0, 0).getTime();
 }
 
+const DAY_MS = 86_400_000;
+const UTC_NOON_MS = DAY_MS / 2;
+
+// Same re-anchoring for rows that carry only a bare `watchedAt` — episode
+// progress written by a backdated log inherits the log's UTC-noon sort key
+// without the precision/watchedOn pair. UTC noon is the server's day-level
+// sentinel (exact viewings are real millisecond instants), so a timestamp
+// sitting exactly on it is read by its UTC calendar day, which keeps "Today"
+// from reading "Tomorrow" east of UTC+11.
+export function getDayAnchoredWatchedAt(watchedAt: number): number {
+  if (!Number.isFinite(watchedAt) || ((watchedAt % DAY_MS) + DAY_MS) % DAY_MS !== UTC_NOON_MS) {
+    return watchedAt;
+  }
+  const date = new Date(watchedAt);
+  return new Date(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    12,
+    0,
+    0,
+    0,
+  ).getTime();
+}
+
 // Human label for a viewing's date at its own precision:
 // exact → "Mar 15, 2024", day → "Mar 15, 2024", month → "March 2024",
 // year → "2024", unknown → "Date unknown".

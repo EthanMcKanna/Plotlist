@@ -182,6 +182,7 @@ function localDayKey(now: number, utcOffsetMinutes: number): string {
 async function computeInsightsFingerprint(
   userId: string,
   utcOffsetMinutes: number,
+  now: number,
 ): Promise<string> {
   // Each table contributes count + max + sum. Count alone misses same-size
   // edits (unmark one episode, backdate-log another); max alone misses edits
@@ -221,16 +222,20 @@ async function computeInsightsFingerprint(
     `s${part(stateAgg[0])}`,
     `r${part(reviewAgg[0])}`,
     `off${utcOffsetMinutes}`,
-    localDayKey(Date.now(), utcOffsetMinutes),
+    localDayKey(now, utcOffsetMinutes),
   ].join("|");
 }
 
+// One `now` for the whole read: the fingerprint's local-day term and the
+// engine's streak/pace windows must agree on which day it is, or a request
+// straddling local midnight caches a payload computed for the wrong day.
 export async function getWatchInsightsForUser(
   userId: string,
   utcOffsetMinutes: number,
+  now = Date.now(),
 ): Promise<WatchInsights> {
   const [fingerprint, cachedRows] = await Promise.all([
-    computeInsightsFingerprint(userId, utcOffsetMinutes),
+    computeInsightsFingerprint(userId, utcOffsetMinutes, now),
     // Best-effort read: a missing table (deploy before migration) or a bad
     // row must degrade to a full recompute, never fail the RPC.
     db
@@ -251,10 +256,10 @@ export async function getWatchInsightsForUser(
   }
 
   const inputs = await loadWatchInsightsInputs(userId);
-  const insights = buildWatchInsights({ ...inputs, utcOffsetMinutes });
+  const insights = buildWatchInsights({ ...inputs, utcOffsetMinutes, now });
 
   // Best-effort write-through; a failed cache write must never fail the read.
-  const computedAt = Date.now();
+  const computedAt = now;
   await db
     .insert(watchInsightsCache)
     .values({ userId, fingerprint, payload: insights, computedAt })

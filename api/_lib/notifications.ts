@@ -1,4 +1,4 @@
-import { and, count, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import {
   comments,
@@ -686,9 +686,13 @@ export async function notifyComment(
 // additionally get premiere alerts for watchlisted/paused shows. Dedupe keys
 // make repeated runs no-ops.
 export async function runEpisodeAirNotifications(now = new Date()) {
+  // Newest-first so a user with several devices gets their digest on the
+  // timezone of the phone they actually use, not whichever row D1 returns
+  // first (an old tablet left in another timezone would shift their 17:00).
   const tokenRows = await db
     .select({ userId: pushTokens.userId, timezone: pushTokens.timezone })
-    .from(pushTokens);
+    .from(pushTokens)
+    .orderBy(desc(pushTokens.updatedAt));
 
   const tokenUserIds = Array.from(new Set(tokenRows.map((row) => row.userId)));
   // Prefs + Pro state up front: the digest hour is per-user now, so the

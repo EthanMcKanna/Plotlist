@@ -103,6 +103,7 @@ import {
   getLocalDateString,
   getReleaseCalendarShowIds,
   getUserLocalDayContext,
+  isCalendarPeriodAfterLocalToday,
   isDateOnlyString,
   RELEASE_CALENDAR_MAX_ITEMS,
   RELEASE_CALENDAR_PROVIDER_OPTIONS,
@@ -1100,7 +1101,14 @@ const WATCHED_ON_SHAPES: Record<string, WatchLogDatePrecision> = {
 // - unknown: the user can't place the viewing; watchedAt is just "now" so
 //   the entry sorts where it was logged
 function resolveWatchLogDate(
-  input: { watchedAt?: number; watchedOn?: string | null; datePrecision?: WatchLogDatePrecision },
+  input: {
+    watchedAt?: number;
+    watchedOn?: string | null;
+    datePrecision?: WatchLogDatePrecision;
+    // Client's `-new Date().getTimezoneOffset()`; decides whose "today" a
+    // backdated day is checked against. Absent on older builds.
+    utcOffsetMinutes?: number | null;
+  },
   now: number,
 ): { watchedAt: number; watchedOn: string | null; datePrecision: WatchLogDatePrecision } {
   const watchedOn = input.watchedOn?.trim() || null;
@@ -1156,7 +1164,9 @@ function resolveWatchLogDate(
       throw new ApiError(400, "invalid_watched_on", "That day doesn't exist");
     }
   }
-  if (watchedAt > now) {
+  // Compare calendar periods, not the UTC-noon sort key: "today" logged at
+  // breakfast in Auckland is already tomorrow's noon on the UTC worker clock.
+  if (isCalendarPeriodAfterLocalToday(watchedOn, now, input.utcOffsetMinutes)) {
     throw new ApiError(400, "invalid_watched_on", "A viewing can't be in the future");
   }
   return { watchedAt, watchedOn, datePrecision: precision };
@@ -6362,6 +6372,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         watchedAt: z.number().optional(),
         watchedOn: z.string().optional(),
         datePrecision: z.enum(WATCH_LOG_DATE_PRECISIONS).optional(),
+        utcOffsetMinutes: z.number().int().min(-840).max(840).optional(),
         note: z.string().max(2000).optional(),
         rating: z.number().min(0.5).max(5).optional(),
         reaction: z.string().min(1).max(16).optional(),
@@ -6479,6 +6490,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
         watchedAt: z.number().optional(),
         watchedOn: z.string().nullable().optional(),
         datePrecision: z.enum(WATCH_LOG_DATE_PRECISIONS).optional(),
+        utcOffsetMinutes: z.number().int().min(-840).max(840).optional(),
         note: z.string().max(2000).nullable().optional(),
         rating: z.number().min(0.5).max(5).nullable().optional(),
         reaction: z.string().max(16).nullable().optional(),
@@ -6511,6 +6523,7 @@ export const mutationHandlers: Record<string, RpcHandler> = {
             watchedAt: parsed.watchedAt,
             watchedOn: parsed.watchedOn ?? undefined,
             datePrecision: parsed.datePrecision,
+            utcOffsetMinutes: parsed.utcOffsetMinutes,
           },
           Date.now(),
         )

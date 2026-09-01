@@ -300,6 +300,10 @@ export function LogWatchSheet({
     try {
       const dateArgs = buildDateArgs();
       const trimmedNote = note.trim();
+      // The server checks a backdated day against *our* today, not the UTC
+      // worker clock — otherwise "today" is rejected as the future east of
+      // ~UTC+10 in the morning.
+      const utcOffsetMinutes = -new Date().getTimezoneOffset();
       if (isEdit && editLog) {
         await updateLog({
           logId: editLog._id,
@@ -310,6 +314,7 @@ export function LogWatchSheet({
             : {
                 datePrecision: dateArgs.datePrecision,
                 watchedOn: dateArgs.watchedOn ?? null,
+                utcOffsetMinutes,
               }),
           note: trimmedNote || null,
           rating: rating >= 0.5 ? rating : null,
@@ -323,7 +328,11 @@ export function LogWatchSheet({
           ...(scope.episodeNumber != null ? { episodeNumber: scope.episodeNumber } : {}),
           ...(scope.episodeTitle ? { episodeTitle: scope.episodeTitle } : {}),
           ...(dateArgs
-            ? { datePrecision: dateArgs.datePrecision, ...(dateArgs.watchedOn ? { watchedOn: dateArgs.watchedOn } : {}) }
+            ? {
+                datePrecision: dateArgs.datePrecision,
+                ...(dateArgs.watchedOn ? { watchedOn: dateArgs.watchedOn } : {}),
+                utcOffsetMinutes,
+              }
             : {}),
           ...(trimmedNote ? { note: trimmedNote } : {}),
           ...(rating >= 0.5 ? { rating } : {}),

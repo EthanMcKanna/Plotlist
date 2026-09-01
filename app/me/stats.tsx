@@ -15,6 +15,7 @@ import type { AccentTheme } from "../../lib/appearance";
 import { useAccent } from "../../lib/appearanceStore";
 import { guardedPush } from "../../lib/navigation";
 import { formatEpisodeCode, formatRelativeDay, formatWatchTimeLabel } from "../../lib/format";
+import { getDayAnchoredWatchedAt } from "../../lib/watchLogDates";
 import { queryDataUpdatedAt, useAuth, useQueryState } from "../../lib/plotlist/react";
 import { presentProPaywall } from "../../lib/purchases";
 import { queryClient } from "../../lib/queryClient";
@@ -620,7 +621,7 @@ export default function WatchStatsScreen() {
                           </Text>
                         </View>
                         <Text className="text-[11px] font-medium tabular-nums text-text-tertiary">
-                          {formatRelativeDay(episode.watchedAt)}
+                          {formatRelativeDay(getDayAnchoredWatchedAt(episode.watchedAt))}
                         </Text>
                       </LinkPressable>
                     ))}

@@ -1,11 +1,12 @@
 // Monthly recap push: a mini-wrapped notification on the 1st of each month
 // for Pro users — last month's episodes/hours/top show, deep-linking to
 // /me/stats. Rides the hourly notifications cron and follows the episode
-// digest's per-timezone pattern: enumerate push tokens, first token per user
-// wins, send when that timezone's local wall clock hits the recap hour.
-// Idempotent across reruns via dedupe key `monthly_recap:<YYYY-MM>`.
+// digest's per-timezone pattern: enumerate push tokens, the most recently
+// updated token per user wins, send when that timezone's local wall clock
+// hits the recap hour. Idempotent across reruns via dedupe key
+// `monthly_recap:<YYYY-MM>`.
 
-import { inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 
 import { pushTokens, users } from "../../db/schema";
 import {
@@ -45,7 +46,8 @@ export async function runMonthlyRecapNotifications(now = new Date()) {
 
   const tokenRows = await db
     .select({ userId: pushTokens.userId, timezone: pushTokens.timezone })
-    .from(pushTokens);
+    .from(pushTokens)
+    .orderBy(desc(pushTokens.updatedAt));
 
   const timezoneByUser = new Map<string, string>();
   for (const row of tokenRows) {
