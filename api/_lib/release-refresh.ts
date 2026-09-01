@@ -21,6 +21,7 @@ import {
 import { db } from "./db";
 import { ApiError } from "./errors";
 import { createId } from "./ids";
+import { queryInChunks } from "./sql-dialect";
 import { slimSeasonPayload, upsertSeasonCacheEntry } from "./season-cache";
 
 const RELEASE_LOOKAHEAD_DAYS = 120;
@@ -330,7 +331,11 @@ export async function refreshTrackedReleaseCalendarForUser(
       tasteRows[0]?.favoriteShowIds,
     ),
   }).slice(0, limit);
-  const showRows = showIds.length ? await db.select().from(shows).where(inArray(shows.id, showIds)) : [];
+  // `limit` can reach RELEASE_CALENDAR_MAX_ITEMS (250) from the client
+  // refresh, past D1's bound-parameter cap.
+  const showRows = await queryInChunks(showIds, (chunk) =>
+    db.select().from(shows).where(inArray(shows.id, chunk)),
+  );
   return await refreshReleaseEventsForShows(showRows, anchorToday);
 }
 
@@ -348,8 +353,10 @@ export async function refreshStaleTrackedReleases(limit = 40) {
   }
 
   const [showRows, syncRows] = await Promise.all([
-    db.select().from(shows).where(inArray(shows.id, candidateIds)),
-    db.select().from(showReleaseSyncState).where(inArray(showReleaseSyncState.showId, candidateIds)),
+    queryInChunks(candidateIds, (chunk) => db.select().from(shows).where(inArray(shows.id, chunk))),
+    queryInChunks(candidateIds, (chunk) =>
+      db.select().from(showReleaseSyncState).where(inArray(showReleaseSyncState.showId, chunk)),
+    ),
   ]);
   const syncByShowId = new Map(syncRows.map((row) => [row.showId, row]));
   const staleRows = showRows
@@ -366,10 +373,10 @@ export async function getStaleReleaseShowIds(showIds: string[], now = Date.now()
   if (showIds.length === 0) {
     return [];
   }
-  const rows = await db
-    .select()
-    .from(showReleaseSyncState)
-    .where(inArray(showReleaseSyncState.showId, showIds));
+  // Called with the full calendar show list (up to 250 ids).
+  const rows = await queryInChunks(showIds, (chunk) =>
+    db.select().from(showReleaseSyncState).where(inArray(showReleaseSyncState.showId, chunk)),
+  );
   const byShowId = new Map(rows.map((row) => [row.showId, row]));
   return showIds.filter((showId) => {
     const row = byShowId.get(showId);

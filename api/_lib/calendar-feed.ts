@@ -12,6 +12,7 @@ import { getReleaseCalendarShowIds } from "../../lib/releaseCalendar";
 import { hmacSha256, safeEqual } from "./crypto";
 import { db } from "./db";
 import { getServerEnv } from "./env";
+import { queryInChunks } from "./sql-dialect";
 import { ApiError } from "./errors";
 
 // Personal iCal feed (Plotlist Pro). The token is a long-lived HMAC over the
@@ -104,24 +105,28 @@ export async function buildIcalFeedForUser(userId: string): Promise<string> {
   let eventRows: Array<typeof releaseEvents.$inferSelect> = [];
   let showRows: Array<Pick<typeof shows.$inferSelect, "id" | "title">> = [];
   if (showIds.length > 0) {
-    eventRows = await db
-      .select()
-      .from(releaseEvents)
-      .where(
-        and(
-          inArray(releaseEvents.showId, showIds.slice(0, FEED_MAX_EVENTS)),
-          gte(releaseEvents.airDateTs, nowMs - FEED_LOOKBACK_MS),
-        ),
+    // Up to FEED_MAX_EVENTS (300) show ids is well past D1's parameter cap, so
+    // the window is read per chunk and re-trimmed to the global soonest N.
+    const fromTs = nowMs - FEED_LOOKBACK_MS;
+    eventRows = (
+      await queryInChunks(
+        showIds.slice(0, FEED_MAX_EVENTS),
+        (chunk) =>
+          db
+            .select()
+            .from(releaseEvents)
+            .where(and(inArray(releaseEvents.showId, chunk), gte(releaseEvents.airDateTs, fromTs)))
+            .orderBy(asc(releaseEvents.airDateTs))
+            .limit(FEED_MAX_EVENTS),
+        1,
       )
-      .orderBy(asc(releaseEvents.airDateTs))
-      .limit(FEED_MAX_EVENTS);
-    const eventShowIds = Array.from(new Set(eventRows.map((row) => row.showId)));
-    if (eventShowIds.length > 0) {
-      showRows = await db
-        .select({ id: shows.id, title: shows.title })
-        .from(shows)
-        .where(inArray(shows.id, eventShowIds));
-    }
+    )
+      .sort((left, right) => left.airDateTs - right.airDateTs)
+      .slice(0, FEED_MAX_EVENTS);
+    showRows = await queryInChunks(
+      eventRows.map((row) => row.showId),
+      (chunk) => db.select({ id: shows.id, title: shows.title }).from(shows).where(inArray(shows.id, chunk)),
+    );
   }
   const titleByShowId = new Map(showRows.map((row) => [row.id, row.title] as const));
 

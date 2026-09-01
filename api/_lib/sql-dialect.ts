@@ -27,3 +27,22 @@ export function chunkForSqlParams<T>(rows: T[], paramsPerRow: number, maxParams 
   }
   return chunks;
 }
+
+// Fans an `IN (...)` lookup over that cap: `run` receives one id chunk at a
+// time (all chunks in flight concurrently) and the per-chunk rows come back
+// concatenated in chunk order. `reservedParams` counts the statement's other
+// bound values (a user id, a timestamp cutoff) so chunk + extras stay under
+// the limit. Ids are de-duplicated first; an empty input never hits the db.
+export async function queryInChunks<Id, Row>(
+  ids: Iterable<Id>,
+  run: (chunk: Id[]) => Promise<Row[]>,
+  reservedParams = 0,
+): Promise<Row[]> {
+  const uniqueIds = Array.from(new Set(ids));
+  if (uniqueIds.length === 0) {
+    return [];
+  }
+  const chunks = chunkForSqlParams(uniqueIds, 1, Math.max(1, 90 - reservedParams));
+  const results = await Promise.all(chunks.map((chunk) => run(chunk)));
+  return results.flat();
+}
