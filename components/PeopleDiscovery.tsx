@@ -1,13 +1,16 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "expo-router";
 import Animated, { FadeInDown } from "react-native-reanimated";
 
 import { useAccent } from "../lib/appearanceStore";
 import { api } from "../lib/plotlist/api";
-import { useQuery } from "../lib/plotlist/react";
+import { queryDataUpdatedAt, useQuery } from "../lib/plotlist/react";
+import { queryClient } from "../lib/queryClient";
 import { useContactSync } from "../lib/useContactSync";
+import { useHeldListOrder } from "../lib/useHeldListOrder";
 import { ContactInviteRow } from "./ContactInviteRow";
 import { ContactsSyncCard } from "./ContactsSyncCard";
 import { EmptyState } from "./EmptyState";
@@ -19,6 +22,16 @@ export const PEOPLE_QUERY_MIN_LENGTH = 2;
 const CONTACT_MATCH_LIMIT = 12;
 const INVITE_CANDIDATE_LIMIT = 10;
 const SUGGESTED_LIMIT = 8;
+// Follows no longer refetch suggestions/matches (rows are patched in place
+// and held in order), so a screen focus is where the server gets to re-rank
+// — once the cached ranking is older than this.
+const PEOPLE_RERANK_STALE_MS = 30_000;
+const PEOPLE_RERANK_QUERIES = [
+  { ref: api.users.suggested, args: { limit: SUGGESTED_LIMIT } },
+  { ref: api.contacts.getMatches, args: { limit: CONTACT_MATCH_LIMIT } },
+] as const;
+
+const personKey = (item: any) => String(item?.user?._id ?? "");
 
 function SectionLine({
   label,
@@ -70,10 +83,11 @@ function PeopleLoadingRows({ count = 4 }: { count?: number }) {
   );
 }
 
-function PersonPreviewRow({ item }: { item: any }) {
+function PersonPreviewRow({ item, onFollowPress }: { item: any; onFollowPress?: () => void }) {
   return (
     <UserRow
       userId={item.user._id}
+      onFollowPress={onFollowPress}
       displayName={item.user.displayName ?? item.user.name}
       username={item.user.username}
       avatarUrl={item.avatarUrl}
@@ -128,6 +142,27 @@ export function PeopleDiscovery({
 }) {
   const isSearching = query.length >= PEOPLE_QUERY_MIN_LENGTH;
 
+  // Each focus is a natural re-rank moment: release any held order and let
+  // stale suggestion/match rankings refetch (a followed person drops out of
+  // "People you may know" here, never mid-gesture).
+  const [focusEpoch, setFocusEpoch] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setFocusEpoch((epoch) => epoch + 1);
+      if (!hasProfile) return;
+      const now = Date.now();
+      for (const { ref, args } of PEOPLE_RERANK_QUERIES) {
+        const updatedAt = queryDataUpdatedAt(ref, args);
+        if (updatedAt !== null && now - updatedAt > PEOPLE_RERANK_STALE_MS) {
+          void queryClient.invalidateQueries({
+            queryKey: ["plotlist-rpc", "query", ref.__name, args],
+            refetchType: "active",
+          });
+        }
+      }
+    }, [hasProfile]),
+  );
+
   const contactStatus =
     useQuery(api.contacts.getStatus, hasProfile ? {} : "skip") ?? null;
   const hasSynced = Boolean(contactStatus?.hasSynced);
@@ -137,16 +172,22 @@ export function PeopleDiscovery({
     hasSyncedBefore: hasSynced,
   });
 
-  const peopleResults = useQuery(
+  const peopleResultsRaw = useQuery(
     api.users.search,
     hasProfile && isSearching ? { text: query, limit: 12 } : "skip",
   );
+  const heldPeopleResults = useHeldListOrder(peopleResultsRaw, personKey, {
+    resetKey: `${focusEpoch}:${query}`,
+  });
 
-  const contactMatches =
-    useQuery(
-      api.contacts.getMatches,
-      hasProfile && !isSearching && hasSynced ? { limit: CONTACT_MATCH_LIMIT } : "skip",
-    ) ?? [];
+  const contactMatchesRaw = useQuery(
+    api.contacts.getMatches,
+    hasProfile && !isSearching && hasSynced ? { limit: CONTACT_MATCH_LIMIT } : "skip",
+  );
+  const heldContactMatches = useHeldListOrder(contactMatchesRaw, personKey, {
+    resetKey: focusEpoch,
+  });
+  const contactMatches = heldContactMatches.items;
 
   // SMS invites need the device address book and composer, so the invite
   // sections are native-only even when the server has a synced snapshot.
@@ -168,20 +209,23 @@ export function PeopleDiscovery({
         : "skip",
     ) ?? [];
 
-  const suggestedPeopleRaw =
-    useQuery(
-      api.users.suggested,
-      hasProfile && !isSearching ? { limit: SUGGESTED_LIMIT } : "skip",
-    ) ?? [];
+  const suggestedPeopleRaw = useQuery(
+    api.users.suggested,
+    hasProfile && !isSearching ? { limit: SUGGESTED_LIMIT } : "skip",
+  );
+  const heldSuggested = useHeldListOrder(suggestedPeopleRaw, personKey, {
+    resetKey: focusEpoch,
+  });
   // Suggestions deliberately boost contact matches server-side, but on this
   // screen those people already have their own section right above.
   const suggestedPeople = useMemo(() => {
     const shownIds = new Set(contactMatches.map((item: any) => item.user._id));
-    return suggestedPeopleRaw.filter((item: any) => !shownIds.has(item.user._id));
-  }, [suggestedPeopleRaw, contactMatches]);
+    return heldSuggested.items.filter((item: any) => !shownIds.has(item.user._id));
+  }, [heldSuggested.items, contactMatches]);
 
-  const isLoadingPeople = isSearching && peopleResults === undefined;
-  const visiblePeople = useMemo(() => peopleResults ?? [], [peopleResults]);
+  const isLoadingPeople =
+    isSearching && peopleResultsRaw === undefined && !heldPeopleResults.isHeld;
+  const visiblePeople = heldPeopleResults.items;
 
   if (isSearching) {
     return (
@@ -197,7 +241,11 @@ export function PeopleDiscovery({
             <Animated.View entering={FadeInDown.duration(300)}>
               <View className="gap-3">
                 {visiblePeople.map((item: any) => (
-                  <PersonPreviewRow key={item.user._id} item={item} />
+                  <PersonPreviewRow
+                    key={item.user._id}
+                    item={item}
+                    onFollowPress={heldPeopleResults.hold}
+                  />
                 ))}
               </View>
             </Animated.View>
@@ -267,7 +315,11 @@ export function PeopleDiscovery({
           />
           <View className="gap-3">
             {contactMatches.map((item: any) => (
-              <PersonPreviewRow key={item.user._id} item={item} />
+              <PersonPreviewRow
+                key={item.user._id}
+                item={item}
+                onFollowPress={heldContactMatches.hold}
+              />
             ))}
           </View>
         </View>
@@ -297,7 +349,11 @@ export function PeopleDiscovery({
         {suggestedPeople.length > 0 ? (
           <View className="gap-3">
             {suggestedPeople.map((item: any) => (
-              <PersonPreviewRow key={item.user._id} item={item} />
+              <PersonPreviewRow
+                key={item.user._id}
+                item={item}
+                onFollowPress={heldSuggested.hold}
+              />
             ))}
           </View>
         ) : (

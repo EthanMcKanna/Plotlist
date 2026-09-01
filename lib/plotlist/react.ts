@@ -60,6 +60,17 @@ function queryKeyFor<Query extends PlotlistFunctionReference<"query">>(
 // refetched every mounted query on every screen (~15-20 RPCs per tap).
 // `null` keeps the old full-cache behavior; unknown domains also fall back
 // to it so a new mutation can never silently under-invalidate.
+//
+// Entries are query namespaces; a `-ns:fn` entry carves one query out of a
+// listed namespace. Those carve-outs are the surfaces a mutation already
+// patches optimistically and that must not re-rank under the user's finger
+// (people discovery on a follow, review lists on a like).
+//
+// `feed` rides on the mutations whose server handlers fan out to feed_items
+// on the response path (reviews, watch logs, lists, follows). Episode
+// progress is deliberately left out: its fan-out is deferred past the
+// response, so a refetch right after a mark would not see the row anyway,
+// and marks are far too chatty to refetch the feed for.
 const MUTATION_INVALIDATION_DOMAINS: Record<string, readonly string[] | null> = {
   episodeProgress: [
     "episodeProgress",
@@ -87,13 +98,28 @@ const MUTATION_INVALIDATION_DOMAINS: Record<string, readonly string[] | null> = 
     "episodeProgress",
     "watchStates",
     "users",
+    "feed",
   ],
-  reviews: ["reviews", "watchStats", "users", "likes"],
-  likes: ["likes", "reviews", "comments"],
+  reviews: ["reviews", "watchStats", "users", "likes", "feed"],
+  // Like counts on review payloads and comment threads are patched in place
+  // (lib/likeCountPatch.ts, lib/comments.ts); refetching those lists here
+  // only re-sorted them under the finger.
+  likes: ["likes"],
   comments: ["comments", "reviews", "lists"],
-  lists: ["lists", "listItems", "users"],
+  lists: ["lists", "listItems", "users", "feed"],
   listItems: ["listItems", "lists"],
-  follows: ["follows", "followRequests", "users", "feed", "contacts"],
+  follows: [
+    "follows",
+    "followRequests",
+    "users",
+    "-users:search",
+    "-users:suggested",
+    "feed",
+    "contacts",
+    "-contacts:getMatches",
+    "-contacts:getInviteCandidates",
+    "-contacts:searchInviteCandidates",
+  ],
   followRequests: ["followRequests", "follows", "users", "feed"],
   users: ["users", "follows", "followRequests", "contacts"],
   notifications: ["notifications"],
@@ -107,8 +133,27 @@ const MUTATION_INVALIDATION_DOMAINS: Record<string, readonly string[] | null> = 
   catchup: ["catchup"],
   blends: ["blends"],
   people: ["people"],
-  // Blocking and Trakt imports change visibility/library state everywhere.
-  blocks: null,
+  // Blocking changes visibility everywhere authored content or people are
+  // listed (both directions, and unblock restores it all), so the list is
+  // broad — but explicit, so a settings toggle no longer refetches the
+  // whole home screen.
+  blocks: [
+    "blocks",
+    "users",
+    "follows",
+    "followRequests",
+    "feed",
+    "reviews",
+    "comments",
+    "likes",
+    "lists",
+    "listItems",
+    "notifications",
+    "contacts",
+    "people",
+    "watchLogs",
+  ],
+  // Trakt imports change library state everywhere.
   traktImport: null,
 };
 
@@ -117,13 +162,17 @@ function invalidationFilterForMutation(name: string) {
   if (affected == null) {
     return { queryKey: ["plotlist-rpc"] as const };
   }
-  const affectedSet = new Set(affected);
+  const affectedSet = new Set(affected.filter((entry) => !entry.startsWith("-")));
+  const excludedSet = new Set(
+    affected.filter((entry) => entry.startsWith("-")).map((entry) => entry.slice(1)),
+  );
   return {
     predicate: (query: { queryKey: readonly unknown[] }) => {
       const key = query.queryKey;
       if (key[0] !== "plotlist-rpc") return false;
       const fnName = key[2];
-      return typeof fnName === "string" && affectedSet.has(fnName.split(":")[0] ?? "");
+      if (typeof fnName !== "string" || excludedSet.has(fnName)) return false;
+      return affectedSet.has(fnName.split(":")[0] ?? "");
     },
   };
 }

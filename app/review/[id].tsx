@@ -248,7 +248,14 @@ export default function ReviewScreen() {
 
             {/* ── Action bar: engagement left, overflow right ── */}
             <View className="mt-4 flex-row items-center border-y border-dark-border py-2">
-              <LikeButton targetType="review" targetId={review._id} />
+              <LikeButton
+                targetType="review"
+                targetId={review._id}
+                likeCount={typeof data.likeCount === "number" ? data.likeCount : undefined}
+                likedByViewer={
+                  typeof data.likedByViewer === "boolean" ? data.likedByViewer : undefined
+                }
+              />
               <Pressable
                 onPress={handleScrollToComments}
                 hitSlop={8}

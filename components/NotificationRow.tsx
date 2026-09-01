@@ -1,12 +1,10 @@
-import { memo, useCallback, useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { memo, useCallback } from "react";
+import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import type { Href } from "expo-router";
 
-import { api } from "../lib/plotlist/api";
-import { useMutation } from "../lib/plotlist/react";
 import { useAccent } from "../lib/appearanceStore";
 import { formatCompactRelativeTime } from "../lib/format";
 import {
@@ -15,6 +13,7 @@ import {
   type NotificationItem,
 } from "../lib/notificationDisplay";
 import { resizeTmdbImageUrl } from "../lib/tmdbImages";
+import { useFollowToggle } from "../lib/useFollowToggle";
 import { Avatar } from "./Avatar";
 import { LinkPressable } from "./LinkPressable";
 import { Poster } from "./Poster";
@@ -95,8 +94,8 @@ function PosterThumb({ uri }: { uri: string }) {
 }
 
 // Follow-back pill for follow/contact_joined rows, seeded from the follow
-// state the list RPC now returns. Same flow as UserRow: private accounts
-// turn a follow tap into a pending request.
+// state the list RPC now returns. Same flow as UserRow: optimistic on every
+// platform, private accounts turn a follow tap into a pending request.
 function FollowBackButton({
   userId,
   viewerFollows,
@@ -106,58 +105,19 @@ function FollowBackButton({
   viewerFollows: boolean;
   viewerRequested: boolean;
 }) {
-  const follow = useMutation(api.follows.follow);
-  const unfollow = useMutation(api.follows.unfollow);
-  const [isFollowing, setIsFollowing] = useState(viewerFollows);
-  const [isRequested, setIsRequested] = useState(viewerRequested);
-  const [isPending, setIsPending] = useState(false);
+  const { isFollowing, isRequested, toggle } = useFollowToggle(userId, {
+    isFollowing: viewerFollows,
+    isRequested: viewerRequested,
+  });
 
-  const handleToggleFollow = useCallback(async () => {
-    if (isPending) return;
+  const handleToggleFollow = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsPending(true);
-
-    // Web flips the label optimistically (no haptic feedback there, so the
-    // click needs an instant response); native keeps its settle-after-server
-    // behavior. The catch below restores the previous state either way.
-    const optimistic = Platform.OS === "web";
-    const wasFollowing = isFollowing;
-    const wasRequested = isRequested;
-    try {
-      if (wasFollowing || wasRequested) {
-        if (optimistic) {
-          setIsFollowing(false);
-          setIsRequested(false);
-        }
-        // Unfollow also withdraws a pending follow request.
-        await unfollow({ userIdToUnfollow: userId });
-        setIsFollowing(false);
-        setIsRequested(false);
-      } else {
-        if (optimistic) setIsFollowing(true);
-        const result = (await follow({ userIdToFollow: userId })) as
-          | { status?: string }
-          | null;
-        if (result?.status === "requested") {
-          setIsFollowing(false);
-          setIsRequested(true);
-        } else {
-          setIsFollowing(true);
-        }
-      }
-    } catch (error) {
-      console.warn("Failed to update follow", error);
-      setIsFollowing(wasFollowing);
-      setIsRequested(wasRequested);
-    } finally {
-      setIsPending(false);
-    }
-  }, [follow, isFollowing, isPending, isRequested, unfollow, userId]);
+    void toggle();
+  }, [toggle]);
 
   return (
     <Pressable
       onPress={handleToggleFollow}
-      disabled={isPending}
       accessibilityRole="button"
       accessibilityLabel={
         isFollowing ? "Unfollow" : isRequested ? "Withdraw follow request" : "Follow back"
@@ -166,7 +126,7 @@ function FollowBackButton({
         isFollowing || isRequested
           ? "border border-dark-border bg-dark-card hover:bg-dark-hover"
           : "bg-brand-500 hover:opacity-90"
-      } ${isPending ? "opacity-60" : ""}`}
+      }`}
     >
       <Text
         className={`text-xs font-semibold ${

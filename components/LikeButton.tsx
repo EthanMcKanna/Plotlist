@@ -12,6 +12,8 @@ import Animated, {
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { promptSignIn } from "../lib/dialogs";
+import { applyLikeToggleToCaches } from "../lib/likeCountPatch";
+import { queryClient } from "../lib/queryClient";
 
 const LIKED_COLOR = "#F43F5E";
 const IDLE_COLOR = "#9BA1B0";
@@ -19,73 +21,33 @@ const IDLE_COLOR = "#9BA1B0";
 export function LikeButton({
   targetType,
   targetId,
+  likeCount: seededCount,
+  likedByViewer: seededLiked,
 }: {
   targetType: "review" | "log" | "list";
   targetId: string;
+  /**
+   * Seed from the parent's payload when it already carries the count
+   * (review details do) — the button then skips its own two queries and the
+   * toggle patches that payload in place, so the count never jumps a beat
+   * later. Without seeds the button fetches the like list itself.
+   */
+  likeCount?: number;
+  likedByViewer?: boolean;
 }) {
   const { isAuthenticated } = useAuth();
-  const toggle = useMutation(api.likes.toggle).withOptimisticUpdate(
-    (localStore, args) => {
-      const likedQueryArgs = { targetType: args.targetType, targetId: args.targetId };
-      const listQueryArgs = {
-        targetType: args.targetType,
-        targetId: args.targetId,
-        limit: 100,
-      };
-
-      const current = localStore.getQuery(api.likes.getForUserTarget, likedQueryArgs);
-      const optimisticId = `optimistic:${args.targetType}:${args.targetId}`;
-
-      const nextLiked = !current;
-      localStore.setQuery(
-        api.likes.getForUserTarget,
-        likedQueryArgs,
-        nextLiked
-          ? {
-              _id: optimisticId,
-              userId: "me",
-              targetType: args.targetType,
-              targetId: args.targetId,
-              createdAt: Date.now(),
-            }
-          : null,
-      );
-
-      const currentList = localStore.getQuery(api.likes.listForTarget, listQueryArgs);
-      if (!currentList) return;
-
-      if (nextLiked) {
-        const withoutOptimistic = currentList.filter(
-          (like: any) => like._id !== optimisticId,
-        );
-        localStore.setQuery(api.likes.listForTarget, listQueryArgs, [
-          {
-            _id: optimisticId,
-            userId: "me",
-            targetType: args.targetType,
-            targetId: args.targetId,
-            createdAt: Date.now(),
-          },
-          ...withoutOptimistic,
-        ]);
-      } else {
-        const toRemove = current?._id ?? optimisticId;
-        localStore.setQuery(
-          api.likes.listForTarget,
-          listQueryArgs,
-          currentList.filter((like: any) => like._id !== toRemove),
-        );
-      }
-    },
-  );
+  const me = useQuery(api.users.me);
+  const toggle = useMutation(api.likes.toggle);
   const liked = useQuery(
     api.likes.getForUserTarget,
-    isAuthenticated ? { targetType, targetId } : "skip",
+    isAuthenticated && seededLiked === undefined ? { targetType, targetId } : "skip",
   );
-  const likes =
-    useQuery(api.likes.listForTarget, { targetType, targetId, limit: 100 }) ?? [];
-  const isLiked = !!liked;
-  const count = likes.length;
+  const likes = useQuery(
+    api.likes.listForTarget,
+    seededCount === undefined ? { targetType, targetId, limit: 100 } : "skip",
+  );
+  const isLiked = seededLiked ?? Boolean(liked);
+  const count = seededCount ?? (Array.isArray(likes) ? likes.length : 0);
 
   // Instagram-style pop: a quick squeeze, overshoot, and settle in ~300ms.
   // Timings only — a spring in the middle of a withSequence blocks until it
@@ -106,6 +68,7 @@ export function LikeButton({
       return;
     }
     const willLike = !isLiked;
+    const viewerId = typeof me?._id === "string" ? me._id : null;
     if (willLike) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       scale.value = withSequence(
@@ -120,7 +83,19 @@ export function LikeButton({
         withTiming(1, { duration: 110, easing: Easing.inOut(Easing.quad) }),
       );
     }
-    toggle({ targetType, targetId });
+    void toggle
+      .withOptimisticUpdate((localStore) => {
+        applyLikeToggleToCaches(
+          localStore,
+          queryClient,
+          { targetType, targetId },
+          willLike,
+          viewerId,
+        );
+      })({ targetType, targetId })
+      .catch((error) => {
+        console.warn("Failed to toggle like", error);
+      });
   };
 
   return (

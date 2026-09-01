@@ -171,7 +171,18 @@ export default function NotificationsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setRefreshing(true);
     try {
-      await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+      // Only what this screen reads — a blanket ["plotlist-rpc"] invalidation
+      // used to refetch every mounted query in the app on a pull.
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["plotlist-rpc", "query", "notifications:getUnreadCount"],
+          refetchType: "active",
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["plotlist-rpc", "paginated", "notifications:list"],
+          refetchType: "active",
+        }),
+      ]);
     } finally {
       setRefreshing(false);
     }
