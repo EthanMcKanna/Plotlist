@@ -9,16 +9,16 @@ import { LinkPressable } from "../../components/LinkPressable";
 import { Screen } from "../../components/Screen";
 import { api } from "../../lib/plotlist/api";
 import { notifyError } from "../../lib/dialogs";
+import { removeRowsFromPaginatedCaches } from "../../lib/optimisticCache";
 import { useMutation, usePaginatedQuery } from "../../lib/plotlist/react";
+import { queryClient } from "../../lib/queryClient";
 
 function BlockedUserRow({
   item,
   onUnblock,
-  unblocking,
 }: {
   item: any;
   onUnblock: (userId: string) => void;
-  unblocking: boolean;
 }) {
   const nameLabel = item.user.displayName ?? item.user.username ?? "User";
   return (
@@ -47,10 +47,7 @@ function BlockedUserRow({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onUnblock(item.user._id);
         }}
-        disabled={unblocking}
-        className={`items-center justify-center rounded-full border border-dark-border bg-dark-card px-4 py-2 ${
-          unblocking ? "opacity-60" : "active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
-        }`}
+        className="items-center justify-center rounded-full border border-dark-border bg-dark-card px-4 py-2 active:bg-dark-hover hover:bg-dark-hover web:transition-colors"
       >
         <Text className="text-xs font-semibold text-text-primary">Unblock</Text>
       </Pressable>
@@ -65,34 +62,44 @@ export default function BlockedAccountsScreen() {
     loadMore,
   } = usePaginatedQuery(api.blocks.list, {}, { initialNumItems: 30 });
   const unblock = useMutation(api.blocks.unblock);
-  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+  // The row leaves on the tap: cache patch for the current page, local
+  // hidden set for pages frozen in usePaginatedQuery state.
+  const [unblockedIds, setUnblockedIds] = useState<Set<string>>(() => new Set());
+  const visibleBlockedUsers = useMemo(
+    () => blockedUsers.filter((item: any) => !unblockedIds.has(item.user._id)),
+    [blockedUsers, unblockedIds],
+  );
 
   const listContentStyle = useMemo(() => ({ paddingVertical: 16 }), []);
 
   const handleUnblock = useCallback(
     async (userId: string) => {
-      setUnblockingId(userId);
+      setUnblockedIds((current) => new Set(current).add(userId));
       try {
-        await unblock({ userId });
+        await unblock.withOptimisticUpdate((localStore) => {
+          removeRowsFromPaginatedCaches(
+            localStore,
+            queryClient,
+            "blocks:list",
+            (row) => row?.user?._id === userId,
+          );
+        })({ userId });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
+        setUnblockedIds((current) => {
+          const next = new Set(current);
+          next.delete(userId);
+          return next;
+        });
         notifyError("Could not unblock", String(error));
-      } finally {
-        setUnblockingId(null);
       }
     },
     [unblock],
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: any }) => (
-      <BlockedUserRow
-        item={item}
-        onUnblock={handleUnblock}
-        unblocking={unblockingId === item.user._id}
-      />
-    ),
-    [handleUnblock, unblockingId],
+    ({ item }: { item: any }) => <BlockedUserRow item={item} onUnblock={handleUnblock} />,
+    [handleUnblock],
   );
 
   return (
@@ -109,9 +116,9 @@ export default function BlockedAccountsScreen() {
             <View className="mt-16 items-center">
               <ActivityIndicator color="#5A6070" />
             </View>
-          ) : blockedUsers.length > 0 ? (
+          ) : visibleBlockedUsers.length > 0 ? (
             <FlashList
-              data={blockedUsers}
+              data={visibleBlockedUsers}
               renderItem={renderItem}
               keyExtractor={(item: any) => item.user._id}
               estimatedItemSize={72}

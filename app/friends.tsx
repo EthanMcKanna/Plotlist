@@ -106,7 +106,26 @@ export default function FriendsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setRefreshing(true);
     try {
-      await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+      // Only what this screen reads — a blanket ["plotlist-rpc"] invalidation
+      // used to refetch every mounted query in the app on a pull. A pull is
+      // also the natural moment for people suggestions to re-rank.
+      await Promise.all([
+        ...[
+          "users:me",
+          "contacts:getStatus",
+          "contacts:getMatches",
+          "users:suggested",
+        ].map((name) =>
+          queryClient.invalidateQueries({
+            queryKey: ["plotlist-rpc", "query", name],
+            refetchType: "active",
+          }),
+        ),
+        queryClient.invalidateQueries({
+          queryKey: ["plotlist-rpc", "paginated", "feed:listForUser"],
+          refetchType: "active",
+        }),
+      ]);
     } finally {
       setRefreshing(false);
     }

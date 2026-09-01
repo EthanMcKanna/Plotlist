@@ -1,10 +1,9 @@
-import { memo, useCallback, useEffect, useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { memo, useCallback } from "react";
+import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 
-import { api } from "../lib/plotlist/api";
 import type { Id } from "../lib/plotlist/types";
-import { useMutation } from "../lib/plotlist/react";
+import { useFollowToggle } from "../lib/useFollowToggle";
 import { Avatar } from "./Avatar";
 import { LinkPressable } from "./LinkPressable";
 import { TasteMatchSummary } from "./TasteMatchSummary";
@@ -32,6 +31,11 @@ type UserRowProps = {
   sharedShowCount?: number;
   showFollowButton?: boolean;
   taste?: TasteMatchData | null;
+  /**
+   * Fires on the follow tap before any state moves — lists use it to pin
+   * their visible order so the row never shifts under the finger.
+   */
+  onFollowPress?: () => void;
 };
 
 function buildRelationshipSubtitle({
@@ -87,63 +91,25 @@ export const UserRow = memo(function UserRow({
   sharedShowCount = 0,
   showFollowButton = true,
   taste = null,
+  onFollowPress,
 }: UserRowProps) {
-  const follow = useMutation(api.follows.follow);
-  const unfollow = useMutation(api.follows.unfollow);
-  const [isFollowing, setIsFollowing] = useState(Boolean(isFollowingProp));
-  // Private accounts turn a follow tap into a pending request.
-  const [isRequested, setIsRequested] = useState(false);
-  const [isPending, setIsPending] = useState(false);
-
-  useEffect(() => {
-    setIsFollowing(Boolean(isFollowingProp));
-  }, [isFollowingProp]);
+  // Optimistic on every platform; private accounts turn a follow tap into a
+  // pending request ("Requested"). Person previews carry no request flag, so
+  // that state is local until the next payload.
+  const { isFollowing, isRequested, toggle } = useFollowToggle(
+    userId,
+    { isFollowing: isFollowingProp },
+    { onPress: onFollowPress },
+  );
 
   const handlePressProfile = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
-  const handleToggleFollow = useCallback(async () => {
-    if (isPending) return;
+  const handleToggleFollow = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsPending(true);
-
-    // Web flips the label optimistically (no haptic feedback there, so the
-    // click needs an instant response); native keeps its settle-after-server
-    // behavior. The catch below restores the previous state either way.
-    const optimistic = Platform.OS === "web";
-    const wasFollowing = isFollowing;
-    const wasRequested = isRequested;
-    try {
-      if (wasFollowing || wasRequested) {
-        if (optimistic) {
-          setIsFollowing(false);
-          setIsRequested(false);
-        }
-        // Unfollow also withdraws a pending follow request.
-        await unfollow({ userIdToUnfollow: userId });
-        setIsFollowing(false);
-        setIsRequested(false);
-      } else {
-        if (optimistic) setIsFollowing(true);
-        const result = (await follow({ userIdToFollow: userId })) as
-          | { status?: string }
-          | null;
-        if (result?.status === "requested") {
-          setIsFollowing(false);
-          setIsRequested(true);
-        } else {
-          setIsFollowing(true);
-        }
-      }
-    } catch (error) {
-      console.warn("Failed to update follow", error);
-      setIsFollowing(wasFollowing);
-      setIsRequested(wasRequested);
-    } finally {
-      setIsPending(false);
-    }
-  }, [follow, isFollowing, isPending, isRequested, unfollow, userId]);
+    void toggle();
+  }, [toggle]);
 
   const nameLabel = displayName ?? username ?? "User";
   const usernameLabel = username ? `@${username}` : null;
@@ -184,12 +150,15 @@ export const UserRow = memo(function UserRow({
         {showFollowButton ? (
           <Pressable
             onPress={handleToggleFollow}
-            disabled={isPending}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isFollowing ? "Unfollow" : isRequested ? "Withdraw follow request" : "Follow"
+            }
             className={`items-center justify-center rounded-full px-4 py-2 web:transition ${
               isFollowing || isRequested
                 ? "border border-dark-border bg-dark-card hover:bg-dark-hover"
                 : "bg-brand-500 hover:opacity-90"
-            } ${isPending ? "opacity-60" : ""}`}
+            }`}
           >
             <Text
               className={`text-xs font-semibold ${

@@ -11,19 +11,19 @@ import { GlassPressable } from "../components/NativeGlass";
 import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { notifyError } from "../lib/dialogs";
+import { removeIncomingFollowRequestFromCaches } from "../lib/followOptimistic";
 import { useMutation, usePaginatedQuery } from "../lib/plotlist/react";
+import { queryClient } from "../lib/queryClient";
 import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 
 function FollowRequestRow({
   item,
   onAccept,
   onDecline,
-  busy,
 }: {
   item: any;
   onAccept: (requesterId: string) => void;
   onDecline: (requesterId: string) => void;
-  busy: boolean;
 }) {
   const nameLabel = item.user.displayName ?? item.user.username ?? "User";
   const subtitleParts: string[] = [];
@@ -69,10 +69,7 @@ function FollowRequestRow({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onAccept(item.user._id);
           }}
-          disabled={busy}
-          className={`flex-1 items-center justify-center rounded-full bg-brand-500 py-2.5 ${
-            busy ? "opacity-60" : "active:opacity-80"
-          }`}
+          className="flex-1 items-center justify-center rounded-full bg-brand-500 py-2.5 active:opacity-80"
         >
           <Text className="text-sm font-semibold text-white">Approve</Text>
         </Pressable>
@@ -81,10 +78,7 @@ function FollowRequestRow({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onDecline(item.user._id);
           }}
-          disabled={busy}
-          className={`flex-1 items-center justify-center rounded-full border border-dark-border bg-dark-card py-2.5 ${
-            busy ? "opacity-60" : "active:bg-dark-hover"
-          }`}
+          className="flex-1 items-center justify-center rounded-full border border-dark-border bg-dark-card py-2.5 active:bg-dark-hover"
         >
           <Text className="text-sm font-semibold text-text-primary">Decline</Text>
         </Pressable>
@@ -101,49 +95,68 @@ export default function FollowRequestsScreen() {
   } = usePaginatedQuery(api.followRequests.listIncoming, {}, { initialNumItems: 30 });
   const accept = useMutation(api.followRequests.accept);
   const decline = useMutation(api.followRequests.decline);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // The row leaves the list on the tap. The cache patch covers the current
+  // page and the badge count; pages already loaded are frozen in
+  // usePaginatedQuery state, so a local hidden set covers those rows.
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(() => new Set());
+  const visibleRequests = useMemo(
+    () => requests.filter((item: any) => !resolvedIds.has(item.user._id)),
+    [requests, resolvedIds],
+  );
 
   const listContentStyle = useMemo(() => ({ paddingVertical: 12 }), []);
 
-  const handleAccept = useCallback(
-    async (requesterId: string) => {
-      setBusyId(requesterId);
+  const markResolved = useCallback((requesterId: string, resolved: boolean) => {
+    setResolvedIds((current) => {
+      if (current.has(requesterId) === resolved) return current;
+      const next = new Set(current);
+      if (resolved) next.add(requesterId);
+      else next.delete(requesterId);
+      return next;
+    });
+  }, []);
+
+  const resolveRequest = useCallback(
+    async (
+      requesterId: string,
+      mutation: typeof accept,
+      args: Record<string, string>,
+      failureTitle: string,
+      celebrate: boolean,
+    ) => {
+      markResolved(requesterId, true);
       try {
-        await accept({ requesterId });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await mutation.withOptimisticUpdate((localStore) => {
+          removeIncomingFollowRequestFromCaches(localStore, queryClient, requesterId);
+        })(args);
+        if (celebrate) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
       } catch (error) {
-        notifyError("Could not approve request", String(error));
-      } finally {
-        setBusyId(null);
+        markResolved(requesterId, false);
+        notifyError(failureTitle, String(error));
       }
     },
-    [accept],
+    [markResolved],
+  );
+
+  const handleAccept = useCallback(
+    (requesterId: string) =>
+      resolveRequest(requesterId, accept, { requesterId }, "Could not approve request", true),
+    [accept, resolveRequest],
   );
 
   const handleDecline = useCallback(
-    async (requesterId: string) => {
-      setBusyId(requesterId);
-      try {
-        await decline({ requesterId });
-      } catch (error) {
-        notifyError("Could not decline request", String(error));
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [decline],
+    (requesterId: string) =>
+      resolveRequest(requesterId, decline, { requesterId }, "Could not decline request", false),
+    [decline, resolveRequest],
   );
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => (
-      <FollowRequestRow
-        item={item}
-        onAccept={handleAccept}
-        onDecline={handleDecline}
-        busy={busyId === item.user._id}
-      />
+      <FollowRequestRow item={item} onAccept={handleAccept} onDecline={handleDecline} />
     ),
-    [busyId, handleAccept, handleDecline],
+    [handleAccept, handleDecline],
   );
 
   return (
@@ -180,9 +193,9 @@ export default function FollowRequestsScreen() {
             <View className="mt-16 items-center">
               <ActivityIndicator color="#5A6070" />
             </View>
-          ) : requests.length > 0 ? (
+          ) : visibleRequests.length > 0 ? (
             <FlashList
-              data={requests}
+              data={visibleRequests}
               renderItem={renderItem}
               keyExtractor={(item: any) => item.user._id}
               estimatedItemSize={116}

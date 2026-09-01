@@ -32,6 +32,8 @@ import { formatEpisodeCode, formatRelativeTime } from "../../lib/format";
 import { guardedPush } from "../../lib/navigation";
 import { usePosterGridLayout, useWebPageStyle } from "../../lib/webLayout";
 import { getFollowButtonState } from "../../lib/profilePrivacy";
+import { applyFollowStateToCaches, followStateForTap, NOT_FOLLOWING } from "../../lib/followOptimistic";
+import { queryClient } from "../../lib/queryClient";
 import { sharePlotlistLink } from "../../lib/share";
 import type { Id } from "../../lib/plotlist/types";
 import { PrimaryButton } from "../../components/PrimaryButton";
@@ -286,7 +288,6 @@ export default function ProfileScreen() {
   const unblockUser = useMutation(api.blocks.unblock);
   const createReport = useMutation(api.reports.create);
 
-  const [followPending, setFollowPending] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
 
@@ -382,23 +383,33 @@ export default function ProfileScreen() {
     hasPendingRequest: Boolean(relationship?.hasPendingRequest),
   });
 
+  // The button reads straight from the profile cache, so the tap patches
+  // that cache (relationship flags + follower count) and every other list
+  // holding this person; the refetch only confirms. Private accounts flip
+  // to "Requested" immediately rather than flashing "Unfollow" first.
+  const isPrivateProfile = Boolean(profile?.user?.isPrivate);
   const handleToggleFollow = useCallback(async () => {
-    if (followPending) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setFollowPending(true);
     try {
       if (followState === "follow") {
-        await follow({ userIdToFollow: userIdValue });
+        await follow.withOptimisticUpdate((localStore) => {
+          applyFollowStateToCaches(
+            localStore,
+            queryClient,
+            userIdValue,
+            followStateForTap(isPrivateProfile),
+          );
+        })({ userIdToFollow: userIdValue });
       } else {
         // "following" unfollows; "requested" withdraws the pending request.
-        await unfollow({ userIdToUnfollow: userIdValue });
+        await unfollow.withOptimisticUpdate((localStore) => {
+          applyFollowStateToCaches(localStore, queryClient, userIdValue, NOT_FOLLOWING);
+        })({ userIdToUnfollow: userIdValue });
       }
     } catch (error) {
       console.warn("Failed to update follow", error);
-    } finally {
-      setFollowPending(false);
     }
-  }, [follow, followPending, followState, unfollow, userIdValue]);
+  }, [follow, followState, isPrivateProfile, unfollow, userIdValue]);
 
   const handleBlock = useCallback(() => {
     const name = profile?.user?.displayName ?? profile?.user?.username ?? "this user";
@@ -784,7 +795,6 @@ export default function ProfileScreen() {
                         : "Follow"
                 }
                 onPress={handleToggleFollow}
-                loading={followPending}
               />
             </View>
           ) : null}
