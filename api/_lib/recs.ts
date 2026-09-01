@@ -62,9 +62,14 @@ export async function fetchShowVectors(showIds: string[]): Promise<Map<string, n
   const index = getVectorizeIndex();
   const result = new Map<string, number[]>();
   if (!index || showIds.length === 0) return result;
+  const chunks: string[][] = [];
   for (let offset = 0; offset < showIds.length; offset += GET_BY_IDS_CHUNK) {
-    const chunk = showIds.slice(offset, offset + GET_BY_IDS_CHUNK);
-    const vectors = await index.getByIds(chunk);
+    chunks.push(showIds.slice(offset, offset + GET_BY_IDS_CHUNK));
+  }
+  // Chunks are independent Vectorize round trips — a 48-seed profile build
+  // was three serial hops, now one.
+  const batches = await Promise.all(chunks.map((chunk) => index.getByIds(chunk)));
+  for (const vectors of batches) {
     for (const vector of vectors ?? []) {
       if (Array.isArray(vector?.values) && vector.values.length > 0) {
         result.set(vector.id, vector.values);
@@ -137,14 +142,19 @@ async function gatherSignals(userId: string) {
 async function loadFacetsForShows(showIds: string[]) {
   const byShow = new Map<string, Array<{ key: string; score: number }>>();
   if (showIds.length === 0) return byShow;
+  const chunks: string[][] = [];
   for (let offset = 0; offset < showIds.length; offset += 90) {
-    const chunk = showIds.slice(offset, offset + 90);
-    const rows = await db.select().from(showFacets).where(inArray(showFacets.showId, chunk));
-    for (const row of rows) {
-      const list = byShow.get(row.showId) ?? [];
-      list.push({ key: row.facetKey, score: row.score });
-      byShow.set(row.showId, list);
-    }
+    chunks.push(showIds.slice(offset, offset + 90));
+  }
+  const batches = await Promise.all(
+    chunks.map((chunk) =>
+      db.select().from(showFacets).where(inArray(showFacets.showId, chunk)),
+    ),
+  );
+  for (const row of batches.flat()) {
+    const list = byShow.get(row.showId) ?? [];
+    list.push({ key: row.facetKey, score: row.score });
+    byShow.set(row.showId, list);
   }
   for (const list of byShow.values()) {
     list.sort((left, right) => right.score - left.score);
@@ -161,14 +171,18 @@ export async function getFacetsForShows(showIds: string[]) {
 export async function getTasteProfile(userId: string): Promise<TasteProfile | null> {
   if (!vectorsAvailable()) return null;
 
-  const { signals, seenShowIds, fingerprint, now } = await gatherSignals(userId);
+  // The cached profile row doesn't depend on the signal scan — read both in
+  // one wave and compare fingerprints afterwards.
+  const [{ signals, seenShowIds, fingerprint, now }, cached] = await Promise.all([
+    gatherSignals(userId),
+    db
+      .select()
+      .from(userTasteProfiles)
+      .where(eq(userTasteProfiles.userId, userId))
+      .limit(1),
+  ]);
   if (signals.length === 0) return null;
 
-  const cached = await db
-    .select()
-    .from(userTasteProfiles)
-    .where(eq(userTasteProfiles.userId, userId))
-    .limit(1);
   if (
     cached[0] &&
     cached[0].signalFingerprint === fingerprint &&
@@ -309,6 +323,32 @@ export async function computeTasteMatchPercent(viewerId: string, targetUserId: s
   ]);
   if (!viewerProfile || !targetProfile) return null;
   return tasteMatchPercent(cosineSimilarity(viewerProfile.vector, targetProfile.vector));
+}
+
+// Same percent for many targets against one viewer. The viewer's profile is
+// built once and shared; the per-target builds run together. Targets whose
+// profile can't be built (no signals, no vectors) are simply absent.
+export async function computeTasteMatchPercentsForViewer(
+  viewerId: string,
+  targetUserIds: string[],
+): Promise<Map<string, number>> {
+  const percents = new Map<string, number>();
+  const targets = Array.from(new Set(targetUserIds)).filter((id) => id !== viewerId);
+  if (targets.length === 0) return percents;
+  const [viewerProfile, targetProfiles] = await Promise.all([
+    getTasteProfile(viewerId),
+    Promise.all(targets.map((targetId) => getTasteProfile(targetId))),
+  ]);
+  if (!viewerProfile) return percents;
+  targets.forEach((targetId, index) => {
+    const targetProfile = targetProfiles[index];
+    if (!targetProfile) return;
+    percents.set(
+      targetId,
+      tasteMatchPercent(cosineSimilarity(viewerProfile.vector, targetProfile.vector)),
+    );
+  });
+  return percents;
 }
 
 // "Taste match" between the viewer and another user, for profile pages.

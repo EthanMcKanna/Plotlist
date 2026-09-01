@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@jest/globals";
 
 import {
+  SHOW_RATING_SEASON,
   averageEpisodeRating,
   parseOmdbSeasonPayload,
   parseOmdbShowPayload,
+  planImdbRatingSlots,
 } from "../api/_lib/imdb-ratings";
 
 describe("OMDb show payload parsing", () => {
@@ -65,5 +67,49 @@ describe("season average", () => {
 
   it("returns null with no rated episodes", () => {
     expect(averageEpisodeRating([])).toBeNull();
+  });
+});
+
+describe("planImdbRatingSlots", () => {
+  const now = 1_000_000;
+  const row = (seasonNumber: number, expiresAt: number) => ({
+    seasonNumber,
+    payload: { rating: 8, votes: 10 },
+    expiresAt,
+  });
+
+  it("serves fresh and stale rows from cache and only blocks on missing slots", () => {
+    const cached = new Map([
+      [SHOW_RATING_SEASON, row(SHOW_RATING_SEASON, now + 1)],
+      [1, row(1, now - 1)],
+    ]);
+    const plan = planImdbRatingSlots([SHOW_RATING_SEASON, 1, 2, 3], cached, now);
+    expect(plan.fresh).toEqual([SHOW_RATING_SEASON]);
+    expect(plan.stale).toEqual([1]);
+    expect(plan.refresh).toEqual([1]);
+    expect(plan.inline).toEqual([2, 3]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("caps inline fetches and background refreshes separately", () => {
+    const cached = new Map([
+      [1, row(1, now - 1)],
+      [2, row(2, now - 1)],
+      [3, row(3, now - 1)],
+    ]);
+    const plan = planImdbRatingSlots([1, 2, 3, 4, 5, 6], cached, now, {
+      maxInline: 2,
+      maxBackground: 2,
+    });
+    expect(plan.stale).toEqual([1, 2, 3]);
+    expect(plan.refresh).toEqual([1, 2]);
+    expect(plan.inline).toEqual([4, 5]);
+    expect(plan.skipped).toEqual([6]);
+  });
+
+  it("treats a row expiring exactly now as stale", () => {
+    const plan = planImdbRatingSlots([1], new Map([[1, row(1, now)]]), now);
+    expect(plan.fresh).toEqual([]);
+    expect(plan.stale).toEqual([1]);
   });
 });

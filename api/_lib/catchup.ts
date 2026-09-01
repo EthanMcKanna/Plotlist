@@ -172,9 +172,13 @@ async function resolveStopPoint(
 // the "pick up with…" pointer). Stale cache entries are fine — past episodes
 // don't change — so only missing seasons are fetched, capped and prioritized
 // nearest the stop point.
+//
+// With `refsOnly` (the brief is already cached) only the stop season is
+// worth fetching — the episode refs need it, the digest doesn't run.
 async function loadSeasonPayloads(
   externalId: string,
   stop: CatchupStopPoint,
+  options: { refsOnly?: boolean } = {},
 ): Promise<Map<number, CachedSeasonPayload>> {
   const wanted: number[] = [];
   for (let season = 1; season <= stop.seasonNumber + 1; season += 1) {
@@ -192,14 +196,21 @@ async function loadSeasonPayloads(
   const missing = wanted
     .filter(
       (seasonNumber) =>
-        !bySeason.has(seasonNumber) && seasonNumber <= stop.seasonNumber,
+        !bySeason.has(seasonNumber) &&
+        seasonNumber <= stop.seasonNumber &&
+        (!options.refsOnly || seasonNumber === stop.seasonNumber),
     )
     .sort((left, right) => right - left)
     .slice(0, MAX_INLINE_SEASON_FETCHES);
-  for (const seasonNumber of missing) {
-    const payload = await fetchAndCacheSeason(externalId, seasonNumber);
+  // Independent TMDB season reads — bounded by MAX_INLINE_SEASON_FETCHES
+  // above, so the whole miss set goes out as one wave.
+  const fetched = await Promise.all(
+    missing.map((seasonNumber) => fetchAndCacheSeason(externalId, seasonNumber)),
+  );
+  missing.forEach((seasonNumber, index) => {
+    const payload = fetched[index];
     if (payload) bySeason.set(seasonNumber, payload);
-  }
+  });
   return bySeason;
 }
 
@@ -314,11 +325,10 @@ export async function getCatchupBrief(
     ? input.sessionId!
     : createCatchupSessionToken(user.id, show.id);
 
-  const bySeason = await loadSeasonPayloads(show.externalId, stopPoint);
-  const refs = findEpisodeRefs(bySeason, stopPoint);
-
   // Briefs are user-independent for a given stop point, so the whole
   // userbase shares one generation per (show, episode, prompt version).
+  // The cache check comes first: a hit only needs the stop season for the
+  // episode refs, not every season back to the pilot.
   const cachedRows = await db
     .select()
     .from(catchupBriefs)
@@ -331,6 +341,10 @@ export async function getCatchupBrief(
       ),
     )
     .limit(1);
+  const bySeason = await loadSeasonPayloads(show.externalId, stopPoint, {
+    refsOnly: Boolean(cachedRows[0]),
+  });
+  const refs = findEpisodeRefs(bySeason, stopPoint);
   if (cachedRows[0]) {
     console.info(
       "[catchup] cache-hit",

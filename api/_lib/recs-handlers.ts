@@ -6,7 +6,7 @@
 // out of rpc.ts deliberately — everything here depends only on recs
 // primitives, schema, and pure ranking math. See docs/recommendations-v2.md.
 
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { showFacets, shows, tmdbDetailsCache } from "../../db/schema";
 import { db } from "./db";
@@ -22,6 +22,7 @@ import {
   type TasteProfile,
 } from "./recs";
 import {
+  dedupeRailItems,
   normalizeSemanticScores,
   qualityPrior,
   rankCandidates,
@@ -39,12 +40,47 @@ function toShowDoc(row: ShowRow | null | undefined) {
 
 async function loadShowsByIds(ids: string[]) {
   const byId = new Map<string, ShowRow>();
+  const chunks: string[][] = [];
   for (let offset = 0; offset < ids.length; offset += 90) {
-    const chunk = ids.slice(offset, offset + 90);
-    const rows = await db.select().from(shows).where(inArray(shows.id, chunk));
-    for (const row of rows) byId.set(row.id, row);
+    chunks.push(ids.slice(offset, offset + 90));
   }
+  const batches = await Promise.all(
+    chunks.map((chunk) => db.select().from(shows).where(inArray(shows.id, chunk))),
+  );
+  for (const row of batches.flat()) byId.set(row.id, row);
   return byId;
+}
+
+// Ids TMDB lists as co-watch neighbors (recommendations + similar) for a
+// show, extracted in SQL so the ~100KB cached payload stays in D1.
+async function loadCoWatchExternalIds(externalId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      recommendationsJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.recommendations.results')`,
+      similarJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.similar.results')`,
+    })
+    .from(tmdbDetailsCache)
+    .where(
+      and(
+        eq(tmdbDetailsCache.externalSource, "tmdb"),
+        eq(tmdbDetailsCache.externalId, externalId),
+      ),
+    )
+    .limit(1);
+  const parseList = (raw: string | null): unknown[] => {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+  return new Set<string>(
+    [...parseList(rows[0]?.recommendationsJson ?? null), ...parseList(rows[0]?.similarJson ?? null)]
+      .map((item: any) => (item?.id != null ? String(item.id) : ""))
+      .filter(Boolean),
+  );
 }
 
 // ── Similar shows ───────────────────────────────────────────────────────────
@@ -57,30 +93,12 @@ export async function getSimilarShowsV2(source: ShowRow, limit: number) {
   const matches = await getSimilarShowIdsByVector(source.id, 60);
   if (!matches || matches.length === 0) return null;
 
-  const cachedRows = await db
-    .select()
-    .from(tmdbDetailsCache)
-    .where(
-      and(
-        eq(tmdbDetailsCache.externalSource, "tmdb"),
-        eq(tmdbDetailsCache.externalId, source.externalId),
-      ),
-    )
-    .limit(1);
-  const cachedPayload = cachedRows[0]?.payload as any;
-  const coWatchExternalIds = new Set<string>(
-    [
-      ...(Array.isArray(cachedPayload?.recommendations?.results)
-        ? cachedPayload.recommendations.results
-        : []),
-      ...(Array.isArray(cachedPayload?.similar?.results) ? cachedPayload.similar.results : []),
-    ]
-      .map((item: any) => (item?.id != null ? String(item.id) : ""))
-      .filter(Boolean),
-  );
-
-  const showsById = await loadShowsByIds(matches.map((match) => match.showId));
-  const facetsById = await getFacetsForShows(matches.map((match) => match.showId));
+  const matchIds = matches.map((match) => match.showId);
+  const [coWatchExternalIds, showsById, facetsById] = await Promise.all([
+    loadCoWatchExternalIds(source.externalId),
+    loadShowsByIds(matchIds),
+    getFacetsForShows(matchIds),
+  ]);
 
   const candidates = matches
     .map((match) => {
@@ -297,21 +315,30 @@ export async function getHomeRecommendationRailsV2(
   const rails: Array<{ key: string; title: string; items: unknown[] }> = [];
   const usedShowIds = new Set<string>([...profile.seenShowIds, ...profile.negativeShowIds]);
 
-  const forYou = await getPersonalizedRecommendationsV2(userId, limitPerRail);
+  // The three facet rails only depend on the profile, so they run alongside
+  // the for-you rail instead of after it. Cross-rail duplicates are removed
+  // afterwards in rail order (each rail over-fetches to absorb the loss).
+  const facetDefs = profile.topFacets
+    .slice(0, 3)
+    .map((facet) => ({ key: facet.key, def: facetByKey(facet.key) }))
+    .filter((entry): entry is { key: string; def: NonNullable<typeof entry.def> } =>
+      Boolean(entry.def),
+    );
+  const [forYou, ...facetItems] = await Promise.all([
+    getPersonalizedRecommendationsV2(userId, limitPerRail),
+    ...facetDefs.map((entry) => facetRailItems(entry.key, limitPerRail * 2, usedShowIds)),
+  ]);
   if (forYou && forYou.length > 0) {
     rails.push({ key: "for_you", title: "Picked for you", items: forYou });
     forYou.forEach((item) => usedShowIds.add(item._id));
   }
 
-  for (const facet of profile.topFacets.slice(0, 3)) {
-    const def = facetByKey(facet.key);
-    if (!def) continue;
-    const items = await facetRailItems(facet.key, limitPerRail, usedShowIds);
-    if (items.length >= 4) {
-      rails.push({ key: `facet:${facet.key}`, title: def.title, items });
-      items.forEach((item) => usedShowIds.add(item._id));
-    }
+  for (const [index, entry] of facetDefs.entries()) {
     if (rails.length >= 4) break;
+    const items = dedupeRailItems(facetItems[index], usedShowIds, limitPerRail);
+    if (items.length >= 4) {
+      rails.push({ key: `facet:${entry.key}`, title: entry.def.title, items });
+    }
   }
 
   return rails.length > 0 ? rails : null;
@@ -335,15 +362,27 @@ const FEATURED_SMART_LIST_FACETS = [
 export async function getSmartListsV2(limitPerList: number) {
   const lists: Array<{ key: string; title: string; items: unknown[] }> = [];
   const used = new Set<string>();
-  for (const facetKey of FEATURED_SMART_LIST_FACETS) {
-    const def = facetByKey(facetKey);
-    if (!def) continue;
-    const items = await facetRailItems(facetKey, limitPerList, used);
-    if (items.length >= 4) {
-      lists.push({ key: `facet:${facetKey}`, title: def.title, items: items.map((item) => item.show) });
-      items.forEach((item) => used.add(item._id));
-    }
+  const featured = FEATURED_SMART_LIST_FACETS.map((facetKey) => ({
+    facetKey,
+    def: facetByKey(facetKey),
+  })).filter((entry): entry is { facetKey: string; def: NonNullable<typeof entry.def> } =>
+    Boolean(entry.def),
+  );
+  // One wave of indexed top-N reads instead of ten serial ones; the
+  // first-list-wins dedupe below preserves the old ordering semantics.
+  const railItems = await Promise.all(
+    featured.map((entry) => facetRailItems(entry.facetKey, limitPerList * 2, used)),
+  );
+  for (const [index, entry] of featured.entries()) {
     if (lists.length >= 6) break;
+    const items = dedupeRailItems(railItems[index], used, limitPerList);
+    if (items.length >= 4) {
+      lists.push({
+        key: `facet:${entry.facetKey}`,
+        title: entry.def.title,
+        items: items.map((item) => item.show),
+      });
+    }
   }
   return lists.length > 0 ? lists : null;
 }

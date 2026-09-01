@@ -23,6 +23,7 @@ import {
   validateSeasonAgainstTmdb,
   type WikiSeasonEpisodes,
 } from "../../lib/wikiEpisodes";
+import { findFirstMatchInBatches, mapWithConcurrency } from "./concurrency";
 import { db } from "./db";
 import { createId } from "./ids";
 
@@ -34,6 +35,10 @@ const WIKI_FETCH_TIMEOUT_MS = 10_000;
 // Total Wikipedia HTTP calls per brief generation, across resolution,
 // search, and season-page fetches.
 const MAX_WIKI_FETCHES = 7;
+// Parallelism while resolving: root candidates probe in pairs, season pages
+// three at a time. Wikimedia asks for modest concurrency per client.
+const ROOT_PROBE_BATCH = 2;
+const SEASON_FETCH_CONCURRENCY = 3;
 
 // Summaries for settled seasons only ever improve; refreshing every couple
 // of weeks is plenty. Negative entries retry sooner — pages appear as shows
@@ -148,12 +153,21 @@ async function resolveRootPage(
     title,
   ];
   const tried = new Set<string>();
-  for (const candidate of candidates) {
-    if (tried.has(candidate.toLowerCase())) continue;
-    tried.add(candidate.toLowerCase());
-    const page = await fetchWikiPage(candidate, budget);
-    if (page && looksLikeEpisodeSource(page)) return await hopToListPage(page, budget);
-  }
+  const uniqueCandidates = candidates.filter((candidate) => {
+    const key = candidate.toLowerCase();
+    if (tried.has(key)) return false;
+    tried.add(key);
+    return true;
+  });
+  const probe = async (pageTitle: string) => {
+    const page = await fetchWikiPage(pageTitle, budget);
+    return page && looksLikeEpisodeSource(page) ? page : null;
+  };
+  // Candidates go out in pairs: the list page is the usual hit, so a pair
+  // keeps the common case to one round trip without spending the whole
+  // fetch budget on long shots when the first one lands.
+  const direct = await findFirstMatchInBatches(uniqueCandidates, ROOT_PROBE_BATCH, probe);
+  if (direct) return await hopToListPage(direct, budget);
 
   // Year in the query nudges same-name remakes ("The Office") toward the
   // right era; validation still rejects wrong-show data either way.
@@ -168,11 +182,8 @@ async function resolveRootPage(
     )
     .filter((pageTitle) => !tried.has(pageTitle.toLowerCase()))
     .slice(0, 3);
-  for (const hit of hits) {
-    const page = await fetchWikiPage(hit, budget);
-    if (page && looksLikeEpisodeSource(page)) return await hopToListPage(page, budget);
-  }
-  return null;
+  const searched = await findFirstMatchInBatches(hits, hits.length, probe);
+  return searched ? await hopToListPage(searched, budget) : null;
 }
 
 function payloadFromSeason(
@@ -232,22 +243,21 @@ export async function resolveSeasons(
   const outstanding = neededSeasons
     .filter((seasonNumber) => !resolved.has(seasonNumber))
     .sort((left, right) => right - left);
-  for (const seasonNumber of outstanding) {
-    if (budget.remaining <= 0) break;
-    const candidates = transclusionBySeason.has(seasonNumber)
-      ? [transclusionBySeason.get(seasonNumber)!]
-      : [`${title} season ${seasonNumber}`];
-    for (const candidate of candidates) {
-      const page = await fetchWikiPage(candidate, budget);
-      if (!page) continue;
-      accept(page, groupEntriesBySeason(
-        parseWikiEpisodePage(page.wikitext, {
-          defaultSeason: seasonFromPageTitle(page.title) ?? seasonNumber,
-        }),
-      ));
-      if (resolved.has(seasonNumber)) break;
-    }
-  }
+  // One page per season; fetched a few at a time (fetchWikiPage takes its
+  // budget slot synchronously, so the cap holds under concurrency) and
+  // accepted newest-first afterwards so validation order is unchanged.
+  const seasonPages = await mapWithConcurrency(outstanding, SEASON_FETCH_CONCURRENCY, (seasonNumber) =>
+    fetchWikiPage(transclusionBySeason.get(seasonNumber) ?? `${title} season ${seasonNumber}`, budget),
+  );
+  outstanding.forEach((seasonNumber, index) => {
+    const page = seasonPages[index];
+    if (!page) return;
+    accept(page, groupEntriesBySeason(
+      parseWikiEpisodePage(page.wikitext, {
+        defaultSeason: seasonFromPageTitle(page.title) ?? seasonNumber,
+      }),
+    ));
+  });
   return resolved;
 }
 
