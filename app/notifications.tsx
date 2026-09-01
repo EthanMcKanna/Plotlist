@@ -52,49 +52,62 @@ export default function NotificationsScreen() {
     loadMore,
   } = usePaginatedQuery(api.notifications.list, {}, { initialNumItems: 30 });
 
-  // Paginated pages are frozen in local state, so cache writes can't repaint
-  // rows on older pages. Local overrides are the row-level unread truth; the
-  // optimistic cache updates below only keep the bell badge in sync.
-  const [readOverrides, setReadOverrides] = useState<Set<string>>(() => new Set());
-  const [allReadLocally, setAllReadLocally] = useState(false);
-
+  // Every loaded page is a live view of the paginated cache, so a row's
+  // unread state is the cache's `readAt` — marking read is a plain optimistic
+  // patch (rolled back on failure) and the bell badge rides along.
   const markRead = useMutation(api.notifications.markRead).withOptimisticUpdate(
-    (localStore) => {
-      const current = localStore.getQuery(api.notifications.getUnreadCount, undefined);
-      if (typeof current === "number") {
+    (localStore, args) => {
+      const readAt = Date.now();
+      localStore.setPaginatedQuery(api.notifications.list, {}, (current) => {
+        if (!current) return current;
+        const rows = ((current.results ?? current.page ?? []) as NotificationItem[]).map(
+          (row) => (row._id === args.notificationId && !row.readAt ? { ...row, readAt } : row),
+        );
+        return { ...current, results: rows, page: rows };
+      });
+      const count = localStore.getQuery(api.notifications.getUnreadCount, undefined);
+      if (typeof count === "number") {
         localStore.setQuery(
           api.notifications.getUnreadCount,
           undefined,
-          Math.max(0, current - 1),
+          Math.max(0, count - 1),
         );
       }
     },
   );
   const markAllRead = useMutation(api.notifications.markAllRead).withOptimisticUpdate(
     (localStore) => {
+      const readAt = Date.now();
+      localStore.setPaginatedQuery(api.notifications.list, {}, (current) => {
+        if (!current) return current;
+        const rows = ((current.results ?? current.page ?? []) as NotificationItem[]).map(
+          (row) => (row.readAt ? row : { ...row, readAt }),
+        );
+        return { ...current, results: rows, page: rows };
+      });
       localStore.setQuery(api.notifications.getUnreadCount, undefined, 0);
     },
   );
 
-  // Latest values behind stable refs so markNotificationRead (and everything
-  // downstream: openNotification, renderItem, every row's memo compare) keeps
-  // one identity for the life of the screen.
+  // Latest mutation behind a stable ref so markNotificationRead (and
+  // everything downstream: openNotification, renderItem, every row's memo
+  // compare) keeps one identity for the life of the screen.
   const markReadRef = useRef(markRead);
   markReadRef.current = markRead;
-  const readStateRef = useRef({ allReadLocally, readOverrides });
-  readStateRef.current = { allReadLocally, readOverrides };
+  // Ids with a mark-read call in flight: a second tap before the cache patch
+  // repaints must not fire the mutation again.
+  const pendingReadIdsRef = useRef(new Set<string>());
 
   const markNotificationRead = useCallback((item: NotificationItem) => {
-    const readState = readStateRef.current;
-    if (item.readAt || readState.allReadLocally || readState.readOverrides.has(item._id)) {
+    if (item.readAt || pendingReadIdsRef.current.has(item._id)) {
       return;
     }
-    setReadOverrides((current) => {
-      const next = new Set(current);
-      next.add(item._id);
-      return next;
-    });
-    void markReadRef.current({ notificationId: item._id }).then(() => syncAppBadgeCount());
+    pendingReadIdsRef.current.add(item._id);
+    void markReadRef
+      .current({ notificationId: item._id })
+      .then(() => syncAppBadgeCount())
+      .catch(() => undefined)
+      .finally(() => pendingReadIdsRef.current.delete(item._id));
   }, []);
 
   const openNotification = useCallback(
@@ -110,24 +123,17 @@ export default function NotificationsScreen() {
 
   const handleMarkAllRead = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAllReadLocally(true);
-    void markAllRead({}).then(() => syncAppBadgeCount());
+    void markAllRead({})
+      .then(() => syncAppBadgeCount())
+      .catch(() => undefined);
   }, [markAllRead]);
 
   const entries = useMemo<NotificationFeedEntry[]>(
     () =>
       notificationSections((items ?? []) as NotificationItem[]).map((entry) =>
-        entry.kind === "row"
-          ? {
-              ...entry,
-              unread:
-                !entry.item.readAt &&
-                !allReadLocally &&
-                !readOverrides.has(entry.item._id),
-            }
-          : entry,
+        entry.kind === "row" ? { ...entry, unread: !entry.item.readAt } : entry,
       ),
-    [allReadLocally, items, readOverrides],
+    [items],
   );
 
   const renderItem = useCallback(

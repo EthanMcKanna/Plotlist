@@ -27,7 +27,17 @@ import {
 } from "../lib/watchLogDates";
 import { formatDate } from "../lib/format";
 import { api } from "../lib/plotlist/api";
+import { cachedQueryArgs } from "../lib/plotlist/cachedQueryArgs";
 import { useMutation } from "../lib/plotlist/react";
+import {
+  buildOptimisticWatchLog,
+  insertDiaryLog,
+  insertShowLog,
+  patchDiaryLog,
+  patchShowLog,
+  resolveOptimisticWatchedAt,
+  type WatchLogPatch,
+} from "../lib/watchLogOptimistic";
 
 import { GlassSurface } from "./NativeGlass";
 import { StarRating } from "./StarRating";
@@ -154,8 +164,67 @@ export function LogWatchSheet({
   const webSheetStyle = useWebSheetStyle();
   const { height: windowHeight } = useWindowDimensions();
   const isEdit = Boolean(editLog);
-  const logWatch = useMutation(api.watchLogs.logWatch);
-  const updateLog = useMutation(api.watchLogs.updateLog);
+  // Save repaints the diary and the show's viewing history immediately with
+  // an `optimistic:` row; the watchLogs invalidation swaps in the server row
+  // (or the wrapper rolls the patch back if the save fails).
+  const logWatch = useMutation(api.watchLogs.logWatch).withOptimisticUpdate(
+    (localStore, args) => {
+      const now = Date.now();
+      const diaryArgs = cachedQueryArgs(api.watchLogs.listActivityForUser);
+      const log = buildOptimisticWatchLog(
+        { ...args, userId: diaryArgs[0]?.userId ?? null },
+        now,
+      );
+      const show =
+        localStore.getQuery(api.shows.get, { showId: args.showId }) ??
+        ({ _id: args.showId, title: showTitle, posterUrl: null } as any);
+      for (const queryArgs of diaryArgs) {
+        const current = localStore.getQuery(api.watchLogs.listActivityForUser, queryArgs);
+        const next = insertDiaryLog(current, log, show);
+        if (next !== current) {
+          localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, next);
+        }
+      }
+      for (const queryArgs of cachedQueryArgs(api.watchLogs.listForShow)) {
+        if (queryArgs?.showId !== args.showId) continue;
+        const current = localStore.getQuery(api.watchLogs.listForShow, queryArgs);
+        const next = insertShowLog(current, log);
+        if (next !== current) {
+          localStore.setQuery(api.watchLogs.listForShow, queryArgs, next);
+        }
+      }
+    },
+  );
+  const updateLog = useMutation(api.watchLogs.updateLog).withOptimisticUpdate(
+    (localStore, args) => {
+      const patch: WatchLogPatch = {
+        ...(args.note !== undefined ? { note: args.note } : {}),
+        ...(args.rating !== undefined ? { rating: args.rating } : {}),
+        ...(args.reaction !== undefined ? { reaction: args.reaction } : {}),
+        ...(args.isRewatch !== undefined ? { isRewatch: args.isRewatch } : {}),
+        ...(args.datePrecision !== undefined || args.watchedOn !== undefined
+          ? resolveOptimisticWatchedAt(
+              { datePrecision: args.datePrecision, watchedOn: args.watchedOn },
+              Date.now(),
+            )
+          : {}),
+      };
+      for (const queryArgs of cachedQueryArgs(api.watchLogs.listActivityForUser)) {
+        const current = localStore.getQuery(api.watchLogs.listActivityForUser, queryArgs);
+        const next = patchDiaryLog(current, args.logId, patch);
+        if (next !== current) {
+          localStore.setQuery(api.watchLogs.listActivityForUser, queryArgs, next);
+        }
+      }
+      for (const queryArgs of cachedQueryArgs(api.watchLogs.listForShow)) {
+        const current = localStore.getQuery(api.watchLogs.listForShow, queryArgs);
+        const next = patchShowLog(current, args.logId, patch);
+        if (next !== current) {
+          localStore.setQuery(api.watchLogs.listForShow, queryArgs, next);
+        }
+      }
+    },
+  );
 
   const now = useMemo(() => new Date(), []);
   const currentYear = now.getFullYear();

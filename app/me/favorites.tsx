@@ -22,6 +22,9 @@ import type { Id } from "../../lib/plotlist/types";
 
 const MAX_SHOWS = 4;
 const ITEM_WIDTH = 96;
+// Library statuses that mean "you've actually watched this" (legacy
+// `completed` rows are still possible until they're migrated).
+const FAVORITE_CANDIDATE_STATUSES = new Set(["watching", "caught_up", "finished", "completed"]);
 
 type ShowInfo = { _id: Id<"shows">; title: string; posterUrl: string | null };
 
@@ -135,22 +138,18 @@ export default function FavoritesScreen() {
     searchText.length >= 2 ? { text: searchText, limit: 12 } : "skip",
   );
 
-  const completedShows = useQuery(
-    api.watchStates.listForUser,
-    me ? { status: "completed", limit: 50 } : "skip",
-  );
-
-  const watchingShows = useQuery(
-    api.watchStates.listForUser,
-    me ? { status: "watching", limit: 50 } : "skip",
-  );
+  // One fetch of the whole library (the server only parses `status`, so
+  // extra args just forked the cache key), sharing the `{}` entry other
+  // screens already hold; shows the user has actually watched — watching,
+  // caught up, or finished — are the favorite candidates.
+  const libraryStates = useQuery(api.watchStates.listForUser, me ? {} : "skip");
 
   const watchedShowIds = useMemo(
-    () => [
-      ...(completedShows ?? []).map((s: { showId: Id<"shows"> }) => s.showId),
-      ...(watchingShows ?? []).map((s: { showId: Id<"shows"> }) => s.showId),
-    ],
-    [completedShows, watchingShows],
+    () =>
+      ((libraryStates ?? []) as { showId: Id<"shows">; status: string }[])
+        .filter((state) => FAVORITE_CANDIDATE_STATUSES.has(state.status))
+        .map((state) => state.showId),
+    [libraryStates],
   );
 
   const libraryShows = useQuery(

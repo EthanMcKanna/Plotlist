@@ -8,6 +8,7 @@ import { usePaginatedQuery, useQuery } from "../../../lib/plotlist/react";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageTitle } from "../../../components/PageTitle";
 import { Poster } from "../../../components/Poster";
+import { PosterGridSkeleton } from "../../../components/PosterGridSkeleton";
 import { Screen } from "../../../components/Screen";
 import { SegmentedControl } from "../../../components/SegmentedControl";
 import { api } from "../../../lib/plotlist/api";
@@ -158,7 +159,9 @@ export default function PublicWatchlistScreen() {
             </View>
 
             <View className="mt-6 flex-1">
-              {items.length > 0 ? (
+              {status === "LoadingFirstPage" ? (
+                <PosterGridSkeleton numColumns={numColumns} itemWidth={itemWidth} gap={GAP} />
+              ) : items.length > 0 ? (
                 <FlashList
                   key={`grid-${numColumns}`}
                   data={items}
