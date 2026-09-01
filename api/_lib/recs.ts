@@ -19,6 +19,7 @@ import {
   watchLogs,
   watchStates,
 } from "../../db/schema";
+import { deferBackgroundWork } from "./background";
 import { db } from "./db";
 import { createId } from "./ids";
 import { embedText } from "./gemini";
@@ -244,11 +245,14 @@ export async function getTasteProfile(userId: string): Promise<TasteProfile | nu
     topFacets,
     updatedAt: now,
   };
-  if (cached[0]) {
-    await db.update(userTasteProfiles).set(row).where(eq(userTasteProfiles.id, cached[0].id));
-  } else {
-    await db.insert(userTasteProfiles).values({ id: profileId, createdAt: now, ...row });
-  }
+  // The profile is already in hand; persisting it is a cache fill that
+  // rides past the response.
+  deferBackgroundWork(
+    cached[0]
+      ? db.update(userTasteProfiles).set(row).where(eq(userTasteProfiles.id, cached[0].id))
+      : db.insert(userTasteProfiles).values({ id: profileId, createdAt: now, ...row }),
+    "taste profile upsert",
+  );
 
   return { userId, vector: profileVector, positiveSeeds, negativeShowIds, topFacets, seenShowIds };
 }

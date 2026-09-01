@@ -18,6 +18,7 @@ import {
   type WatchInsightsMonthlyRecap,
   type WatchInsightsSeasonRuntimeInput,
 } from "../../lib/watchInsights";
+import { deferBackgroundWork } from "./background";
 import { db } from "./db";
 import { readSeasonCacheEntries, seasonCacheKey } from "./season-cache";
 import { chunkForSqlParams } from "./sql-dialect";
@@ -258,16 +259,19 @@ export async function getWatchInsightsForUser(
   const inputs = await loadWatchInsightsInputs(userId);
   const insights = buildWatchInsights({ ...inputs, utcOffsetMinutes, now });
 
-  // Best-effort write-through; a failed cache write must never fail the read.
+  // Best-effort write-through past the response; a failed cache write must
+  // never fail (or slow) the read.
   const computedAt = now;
-  await db
-    .insert(watchInsightsCache)
-    .values({ userId, fingerprint, payload: insights, computedAt })
-    .onConflictDoUpdate({
-      target: watchInsightsCache.userId,
-      set: { fingerprint, payload: insights, computedAt },
-    })
-    .catch(() => {});
+  deferBackgroundWork(
+    db
+      .insert(watchInsightsCache)
+      .values({ userId, fingerprint, payload: insights, computedAt })
+      .onConflictDoUpdate({
+        target: watchInsightsCache.userId,
+        set: { fingerprint, payload: insights, computedAt },
+      }),
+    "watch insights cache write-through",
+  );
 
   return insights;
 }

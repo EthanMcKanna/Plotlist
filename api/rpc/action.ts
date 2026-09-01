@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { deferBackgroundWork } from "../_lib/background";
 import { getRpcEdgeCacheTtl, readRpcEdgeCache, writeRpcEdgeCache } from "../_lib/edge-cache";
 import { json, withJsonRoute } from "../_lib/http";
 import { setRequestAccessToken, setRequestRefreshToken } from "../_lib/request-auth";
@@ -36,7 +37,13 @@ export default withJsonRoute(requestSchema, async ({ body, req, res }) => {
     req,
   });
   if (cacheTtl !== null && result != null) {
-    await writeRpcEdgeCache("action", body.name, body.args ?? {}, result, cacheTtl);
+    // The colo cache fills after the response goes out. writeRpcEdgeCache
+    // serializes `result` synchronously on entry, so the deferred put stores
+    // exactly what this response carried.
+    deferBackgroundWork(
+      writeRpcEdgeCache("action", body.name, body.args ?? {}, result, cacheTtl),
+      "rpc action edge cache write",
+    );
   }
   return json(res, 200, { result });
 });
