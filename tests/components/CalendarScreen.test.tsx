@@ -14,6 +14,7 @@ jest.mock("expo-router", () => ({
     back: (...args: unknown[]) => mockBack(...args),
     push: (...args: unknown[]) => mockPush(...args),
   },
+  useFocusEffect: () => undefined,
 }));
 
 jest.mock("@expo/vector-icons", () => ({

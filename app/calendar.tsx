@@ -21,11 +21,10 @@ import { Screen } from "../components/Screen";
 import { api } from "../lib/plotlist/api";
 import { useAccent } from "../lib/appearanceStore";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
-import {
-  getLocalDateString,
-  RELEASE_CALENDAR_MAX_ITEMS,
-} from "../lib/releaseCalendar";
+import { RELEASE_CALENDAR_MAX_ITEMS } from "../lib/releaseCalendar";
 import { queryClient } from "../lib/queryClient";
+import { useLocalToday } from "../lib/useLocalToday";
+import { useRefetchWhenStale } from "../lib/useRefetchWhenStale";
 import { SHOW_BACK_BUTTON } from "../lib/webLayout";
 import {
   buildReleaseDiaryRows,
@@ -39,6 +38,7 @@ import {
   type ReleaseDiaryRow,
 } from "../lib/releaseDiary";
 
+const CALENDAR_STALE_AFTER_MS = 60 * 1000;
 const DAY_RAIL_WIDTH = 44;
 const THUMB_WIDTH = 96;
 const THUMB_HEIGHT = 54;
@@ -464,13 +464,18 @@ export default function CalendarScreen() {
   const { isAuthenticated } = useAuth();
   const refreshForMe = useAction(api.releaseCalendar.refreshForMe);
   const staleRefreshKeyRef = useRef<string | null>(null);
-  const today = useMemo(() => getLocalDateString(), []);
-  const data = useQuery(
-    api.releaseCalendar.listForMe,
-    isAuthenticated
-      ? { view: "upcoming", today, limit: RELEASE_CALENDAR_MAX_ITEMS }
-      : "skip",
-  );
+  // Rolls over at midnight and on foreground; a frozen mount-time value kept
+  // asking about yesterday when the screen sat backgrounded overnight.
+  const today = useLocalToday();
+  const listArgs = isAuthenticated
+    ? { view: "upcoming", today, limit: RELEASE_CALENDAR_MAX_ITEMS }
+    : "skip";
+  const data = useQuery(api.releaseCalendar.listForMe, listArgs);
+  // Release schedules shift without any local mutation (TMDB refreshes on a
+  // cron), so refetch on focus / foreground once the cache is old enough.
+  useRefetchWhenStale(api.releaseCalendar.listForMe, listArgs, {
+    maxAgeMs: CALENDAR_STALE_AFTER_MS,
+  });
 
   // A show just added to Watching has no synced release events yet, so it
   // arrives in staleShowIds. Sync it, then refetch — actions don't invalidate

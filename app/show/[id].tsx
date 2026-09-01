@@ -65,6 +65,7 @@ import { useAccent } from "../../lib/appearanceStore";
 import { confirmAction, notify, notifyError, promptSignIn } from "../../lib/dialogs";
 import { presentProPaywall } from "../../lib/purchases";
 import { useProStatus } from "../../lib/useProStatus";
+import { useRefetchWhenStale } from "../../lib/useRefetchWhenStale";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
@@ -129,6 +130,7 @@ import {
   type SeasonLoadState,
 } from "../../lib/seasonGuide";
 
+const SHOW_PROGRESS_STALE_AFTER_MS = 30 * 1000;
 const BACKDROP_HEIGHT = SHOW_BACKDROP_HEIGHT;
 // Detail pages read best as a single centered column on desktop web. Shared
 // with the skeleton so the loading and loaded columns line up exactly.
@@ -700,10 +702,17 @@ export default function ShowScreen() {
   const show = isShowPreview ? PREVIEW_SHOW : queriedShow;
   const queriedMe = useQuery(api.users.me, isShowPreview ? "skip" : {});
   const me = isShowPreview ? PREVIEW_ME : queriedMe;
-  const queriedWatchState = useQuery(
-    api.watchStates.getForShow,
-    !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
-  );
+  const progressArgs =
+    !isShowPreview && isAuthenticated && showId ? { showId } : "skip";
+  const queriedWatchState = useQuery(api.watchStates.getForShow, progressArgs);
+  // Episodes get marked on another device or from the widget with no local
+  // mutation to invalidate these; refetch on focus / foreground when stale.
+  useRefetchWhenStale(api.watchStates.getForShow, progressArgs, {
+    maxAgeMs: SHOW_PROGRESS_STALE_AFTER_MS,
+  });
+  useRefetchWhenStale(api.episodeProgress.getProgressForShow, progressArgs, {
+    maxAgeMs: SHOW_PROGRESS_STALE_AFTER_MS,
+  });
   // Pro per-show notification mute (bell in the floating header).
   const proStatus = useProStatus();
   const isProUser = proStatus.isPro || me?.isPro === true;
@@ -1036,7 +1045,7 @@ export default function ShowScreen() {
   );
   const queriedEpisodeProgress = useQuery(
     api.episodeProgress.getProgressForShow,
-    !isShowPreview && isAuthenticated && showId ? { showId } : "skip",
+    progressArgs,
   );
   const episodeProgress = isShowPreview
     ? [{ seasonNumber: 1, episodeNumber: 1 }]

@@ -5,6 +5,7 @@ import * as Notifications from "expo-notifications";
 
 import { api } from "./plotlist/api";
 import { callMutation, callQuery } from "./plotlist/rpc";
+import { queryClient } from "./queryClient";
 
 // Token/badge plumbing lives apart from the lifecycle hook so the auth
 // module can trigger unregistration without a require cycle.
@@ -86,13 +87,46 @@ export async function unregisterPushTokenFromServer() {
   }
 }
 
+// The home bell and the web sidebar read this exact key; the inbox reads the
+// same query with no args (a second key). Both are updated below.
+export const UNREAD_COUNT_QUERY_KEY = [
+  "plotlist-rpc",
+  "query",
+  "notifications:getUnreadCount",
+  {},
+] as const;
+
+// Fetch the unread count *through* react-query so every mounted bell badge
+// repaints with the fresh value. A direct callQuery used to leave the cached
+// count behind the springboard badge until the next mutation invalidated it.
+export async function fetchUnreadCountIntoCache(): Promise<number> {
+  const unread = await queryClient.fetchQuery({
+    queryKey: UNREAD_COUNT_QUERY_KEY,
+    queryFn: ({ signal }) =>
+      callQuery<number>(api.notifications.getUnreadCount, {}, { signal }),
+    staleTime: 0,
+    // Best-effort and re-run on every foreground; a retry only delays the
+    // badge behind a flaky request.
+    retry: false,
+  });
+  const count = Number(unread) || 0;
+  for (const entry of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: ["plotlist-rpc", "query", "notifications:getUnreadCount"] })) {
+    if (entry.state.data !== count) {
+      queryClient.setQueryData(entry.queryKey, count);
+    }
+  }
+  return count;
+}
+
 export async function syncAppBadgeCount() {
   if (!isPushSupported) {
     return;
   }
   try {
-    const unread = await callQuery<number>(api.notifications.getUnreadCount);
-    await Notifications.setBadgeCountAsync(Number(unread) || 0);
+    const unread = await fetchUnreadCountIntoCache();
+    await Notifications.setBadgeCountAsync(unread);
   } catch {
     // Badge sync is cosmetic; never surface errors.
   }

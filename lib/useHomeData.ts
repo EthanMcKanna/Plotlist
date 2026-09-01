@@ -6,6 +6,7 @@ import { getApiBaseUrl } from "./api/env";
 import { useAction, useAuth, usePaginatedQuery, useQuery } from "./plotlist/react";
 import { callQuery } from "./plotlist/rpc";
 import { queryClient } from "./queryClient";
+import { isHomeSurfaceQueryKey } from "./homeRefreshScope";
 import {
   getHomeEditorialCurrentDemandSeedItems,
   getHomeEditorialDailyChartRank,
@@ -2302,7 +2303,12 @@ export function useHomeData(): HomeData {
   }, [tasteRailsRaw, forYou, editorialSeedNow]);
 
   const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["plotlist-rpc"] });
+    // Only the queries home renders; the catalog loaders below re-run off
+    // refreshKey. A blanket ["plotlist-rpc"] invalidation refetched every
+    // query any other mounted screen had ever asked for.
+    await queryClient.invalidateQueries({
+      predicate: (query) => isHomeSurfaceQueryKey(query.queryKey),
+    });
     setEditorialSeedNow(Date.now());
     setRefreshKey((current) => current + 1);
   }, []);
