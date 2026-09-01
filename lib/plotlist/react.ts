@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 
 import { getFunctionName } from "./api";
+import { cachedQueryArgs } from "./cachedQueryArgs";
 import { callAction, callMutation, callQuery } from "./rpc";
 import { useAuth as useWrappedAuth } from "./auth";
 import { queryClient } from "../queryClient";
@@ -33,6 +34,14 @@ export type LocalStore = {
     query: Query,
     args: Record<string, any>,
     updater: (current: PaginatedResult | undefined) => PaginatedResult | undefined,
+  ) => void;
+  // Patch every cached copy of one query whatever its args (the same query
+  // is mounted with several arg shapes: timezone-scoped rails, status
+  // filters). The updater sees each copy's args; returning undefined leaves
+  // that copy untouched.
+  patchQueriesByName: <Query extends PlotlistFunctionReference<"query">>(
+    query: Query,
+    updater: (current: any, args: Record<string, any> | undefined) => any,
   ) => void;
 };
 type MutationFn = ((args?: any) => Promise<any>) & {
@@ -166,6 +175,17 @@ function createLocalStore() {
         queryClient.setQueryData(queryRecord.queryKey, (current: PaginatedResult | undefined) =>
           updater(current),
         );
+      }
+    },
+    patchQueriesByName: (query, updater) => {
+      for (const args of cachedQueryArgs(query)) {
+        const key = queryKeyFor(query, args);
+        const current = queryClient.getQueryData(key as any);
+        if (current === undefined) continue;
+        const next = updater(current, args);
+        if (next === undefined || next === current) continue;
+        remember(key);
+        queryClient.setQueryData(key, next);
       }
     },
   };
@@ -338,6 +358,25 @@ export function useActionQuery<Action extends PlotlistFunctionReference<"action"
     isError: args !== "skip" && result.isError,
     refetch: result.refetch,
   };
+}
+
+// Imperative twin of useActionQuery for loaders that can't be hooks (one
+// season-details call per season, IMDb lookups keyed by which seasons are on
+// screen). Same cache key, so a hook and a fetch for the same args share one
+// entry and one in-flight request, and a mutation's invalidation still forces
+// the next fetch to go to the server.
+export function fetchActionQuery<Action extends PlotlistFunctionReference<"action">>(
+  action: Action,
+  args?: Record<string, any>,
+  options?: { staleTime?: number },
+): Promise<any> {
+  const name = getFunctionName(action as any);
+  const queryArgs = args ?? {};
+  return queryClient.fetchQuery({
+    queryKey: ["plotlist-rpc", "action", name, queryArgs],
+    queryFn: ({ signal }) => callAction(action, queryArgs, { signal }),
+    staleTime: options?.staleTime ?? 10 * 60_000,
+  });
 }
 
 type PaginatedPage = PaginatedResult | undefined;

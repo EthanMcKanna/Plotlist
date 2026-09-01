@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import {
   Platform,
   Pressable,
@@ -11,7 +11,7 @@ import { FlashList } from "../../components/FlashList";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { useAction } from "../../lib/plotlist/react";
+import { useActionQuery } from "../../lib/plotlist/react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -113,32 +113,17 @@ export default function FacetScreen() {
   });
   const pageStyle = useWebPageStyle(WEB_PAGE_MAX_WIDTH);
 
-  const getFacetShows = useAction(api.embeddings.getFacetShows);
-
-  const [items, setItems] = useState<FacetItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    if (!facet) return;
-    let cancelled = false;
-    setIsLoading(true);
-    setItems([]);
-    getFacetShows({ facetKey: facet.key, limit: 60 })
-      .then((result: any) => {
-        if (cancelled) return;
-        const nextItems = Array.isArray(result?.items) ? result.items : [];
-        setItems(nextItems.filter((item: any) => item?.show?.posterUrl));
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [facet, getFacetShows]);
+  // Cached: backing out of a show to the same facet paints from cache.
+  const facetShowsQuery = useActionQuery(
+    api.embeddings.getFacetShows,
+    facet ? { facetKey: facet.key, limit: 60 } : "skip",
+  );
+  const items = useMemo<FacetItem[]>(() => {
+    const result = facetShowsQuery.data as { items?: unknown } | undefined;
+    const nextItems = Array.isArray(result?.items) ? result.items : [];
+    return nextItems.filter((item: any) => item?.show?.posterUrl);
+  }, [facetShowsQuery.data]);
+  const isLoading = Boolean(facet) && facetShowsQuery.isLoading;
 
   const relatedFacets = useMemo(
     () =>
