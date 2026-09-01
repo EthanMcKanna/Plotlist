@@ -174,29 +174,16 @@ export default function WatchlistScreen() {
     { initialNumItems: 40 },
   );
 
-  const items = useMemo(() => {
-    const validItems = rawItems
-      .map(normalizeWatchlistItem)
-      .filter((item): item is WatchlistItem => Boolean(item));
-    if (validItems.length <= 1) return validItems;
-    const sorted = [...validItems];
-
-    if (sortBy === "title") {
-      sorted.sort((a, b) => {
-        const titleA = a.show?.title?.toLowerCase() ?? "";
-        const titleB = b.show?.title?.toLowerCase() ?? "";
-        return titleA.localeCompare(titleB);
-      });
-    } else if (sortBy === "year") {
-      sorted.sort((a, b) => {
-        const yearA = a.show?.year ?? 0;
-        const yearB = b.show?.year ?? 0;
-        return yearB - yearA;
-      });
-    }
-
-    return sorted;
-  }, [rawItems, sortBy]);
+  // The server applies `sortBy` before paginating, so pages arrive already in
+  // order; re-sorting only the loaded pages here used to restart A–Z on every
+  // page boundary.
+  const items = useMemo(
+    () =>
+      rawItems
+        .map(normalizeWatchlistItem)
+        .filter((item): item is WatchlistItem => Boolean(item)),
+    [rawItems],
+  );
 
   const renderItem = useCallback(
     ({ item, index }: { item: WatchlistItem; index: number }) => {

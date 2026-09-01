@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import { chunkForSqlParams, ilike, ilikeContains } from "./sql-dialect";
+import { chunkForSqlParams, ilike, ilikeContains, queryInChunks } from "./sql-dialect";
 import { z } from "zod";
 
 import {
@@ -129,6 +129,12 @@ import {
   type ContinueQueuedEpisode,
 } from "../../lib/continueEpisodeQueue";
 import { deferBackgroundWork } from "./background";
+import {
+  planWatchStatusReconciliation,
+  selectWatchStatesToReconcile,
+  type ReconcilableWatchState,
+} from "../../lib/watchStatusReconciliation";
+import { parseLibrarySort, sortLibraryEntries } from "../../lib/librarySort";
 import {
   fetchAndCacheSeason,
   findCachedSeasonEpisode,
@@ -1175,6 +1181,116 @@ function toShowPreview(show: typeof shows.$inferSelect) {
   };
 }
 
+// ─── Read-side watch-status reconciliation ───
+//
+// Stored `watch_states.status` drifts: a caught_up show gets a new episode, a
+// finished show is revived, a legacy "completed" row was never migrated. The
+// continue loader corrects rows as it builds candidates; without this shared
+// pass every other reader (show page, library grid, library counts,
+// notification audience) would echo the stale row and disagree with it.
+//
+// Budget: re-deriving a status needs the show's slim TMDB details plus the
+// user's progress rows for it, so a whole-library read caps the pass at the
+// WATCH_STATUS_RECONCILE_CAP most recently updated rows in the auto-managed
+// tier (watching / caught_up / finished / legacy completed). Divergence
+// concentrates in the shows a user is actively on, which is exactly that
+// slice; older rows are trusted as stored until a narrower read (the show
+// page) or the continue loader reaches them. User-intent statuses
+// (watchlist / paused / dropped) are never touched.
+const WATCH_STATUS_RECONCILE_CAP = 150;
+const WATCH_STATUS_RECONCILABLE_VALUES = ["watching", "caught_up", "finished", "completed"] as const;
+// Divergences are persisted off the response path, one bounded batch per read.
+const WATCH_STATUS_RECONCILE_WRITE_CAP = 25;
+
+type WatchStateRowLike = ReconcilableWatchState & Record<string, unknown>;
+
+// Loads slim details + progress for the reconcilable subset of `rows` in one
+// batch, returns every input row (in order) carrying its reconciled status,
+// and defers a write-back of the divergences that keeps each row's original
+// updatedAt (a corrected label is not user activity and must not float the
+// show up "recently updated" orderings).
+async function readReconciledWatchStatuses<Row extends WatchStateRowLike>(
+  userId: string,
+  rows: Row[],
+): Promise<{ rows: Row[]; changes: Array<{ id: string; from: string; to: WatchStatus }> }> {
+  const candidates = selectWatchStatesToReconcile(rows, WATCH_STATUS_RECONCILE_CAP);
+  if (candidates.length === 0) {
+    return { rows, changes: [] };
+  }
+  const showIds = Array.from(new Set(candidates.map((row) => row.showId)));
+  const showStatements = chunkForSqlParams(showIds, 1).map((chunk) =>
+    selectShowsWithSlimDetails().where(inArray(shows.id, chunk)),
+  );
+  // One parameter is the user id.
+  const progressStatements = chunkForSqlParams(showIds, 1, 88).map((chunk) =>
+    db
+      .select({
+        showId: episodeProgress.showId,
+        seasonNumber: episodeProgress.seasonNumber,
+        episodeNumber: episodeProgress.episodeNumber,
+      })
+      .from(episodeProgress)
+      .where(and(eq(episodeProgress.userId, userId), inArray(episodeProgress.showId, chunk))),
+  );
+  const statements = [...showStatements, ...progressStatements];
+  const results = (await db.batch(
+    statements as [(typeof statements)[number], ...(typeof statements)[number][]],
+  )) as unknown[][];
+  const showRows = results.slice(0, showStatements.length).flat() as Awaited<
+    ReturnType<(typeof showStatements)[number]["execute"]>
+  >[number][];
+  const progressRows = results.slice(showStatements.length).flat() as Awaited<
+    ReturnType<(typeof progressStatements)[number]["execute"]>
+  >[number][];
+
+  const contextByShowId = new Map<string, ShowMetadataContext>();
+  for (const row of showRows) {
+    contextByShowId.set(row.show.id, {
+      show: row.show,
+      detailPayload: slimDetailPayloadFromFields(row),
+    });
+  }
+  const progressByShowId = new Map<string, Array<{ seasonNumber: number; episodeNumber: number }>>();
+  for (const entry of progressRows) {
+    const existing = progressByShowId.get(entry.showId) ?? [];
+    existing.push({ seasonNumber: entry.seasonNumber, episodeNumber: entry.episodeNumber });
+    progressByShowId.set(entry.showId, existing);
+  }
+
+  const candidateIds = new Set(candidates.map((row) => row.id));
+  const plan = planWatchStatusReconciliation(rows, (row) => {
+    if (!candidateIds.has(row.id)) return null;
+    const context = contextByShowId.get(row.showId);
+    if (!context) return null;
+    return computeShowProgressFactsFromContext(context, progressByShowId.get(row.showId) ?? []);
+  });
+
+  if (plan.changes.length > 0) {
+    const writeBackStatements = plan.changes
+      .slice(0, WATCH_STATUS_RECONCILE_WRITE_CAP)
+      .map((change) =>
+        db
+          .update(watchStates)
+          .set({ status: change.to, updatedAt: change.updatedAt })
+          .where(eq(watchStates.id, change.id)),
+      );
+    deferBackgroundWork(
+      db.batch(
+        writeBackStatements as [
+          (typeof writeBackStatements)[number],
+          ...(typeof writeBackStatements)[number][],
+        ],
+      ),
+      "watch status read reconciliation",
+    );
+  }
+
+  return {
+    rows: plan.rows,
+    changes: plan.changes.map((change) => ({ id: change.id, from: change.from, to: change.to })),
+  };
+}
+
 async function getWatchStateShowPreviews(userId: string, status: "watching" | "watchlist") {
   // "Currently watching" spans the active tier: shows mid-backlog and shows
   // the user is caught up on both count as being watched.
@@ -1209,7 +1325,7 @@ async function getWatchStateShowPreviews(userId: string, status: "watching" | "w
 }
 
 async function getUserLibraryCounts(userId: string) {
-  const [watchStateRows, reviewCountRows, listCountRows] = await Promise.all([
+  const [watchStateRows, reviewCountRows, listCountRows, recentTierRows] = await Promise.all([
     db
       .select({ status: watchStates.status, value: count() })
       .from(watchStates)
@@ -1223,11 +1339,33 @@ async function getUserLibraryCounts(userId: string) {
       .select({ value: count() })
       .from(lists)
       .where(eq(lists.ownerId, userId)),
+    // The rows the library-wide reconciliation budget is spent on (see
+    // WATCH_STATUS_RECONCILE_CAP); the same slice the library grid corrects,
+    // so its filter counts and these totals agree.
+    db
+      .select()
+      .from(watchStates)
+      .where(
+        and(
+          eq(watchStates.userId, userId),
+          inArray(watchStates.status, WATCH_STATUS_RECONCILABLE_VALUES as any),
+        ),
+      )
+      .orderBy(desc(watchStates.updatedAt))
+      .limit(WATCH_STATUS_RECONCILE_CAP),
   ]);
 
   const watchCounts = new Map<string, number>(
     watchStateRows.map((row) => [row.status as string, Number(row.value ?? 0)] as const),
   );
+  // Stored statuses can lag reality (a new episode since the row was written,
+  // a show ending); move each corrected row between buckets so the counts
+  // match what the show page and library grid will actually say.
+  const { changes } = await readReconciledWatchStatuses(userId, recentTierRows);
+  for (const change of changes) {
+    watchCounts.set(change.from, Math.max(0, (watchCounts.get(change.from) ?? 0) - 1));
+    watchCounts.set(change.to, (watchCounts.get(change.to) ?? 0) + 1);
+  }
 
   const caughtUp = watchCounts.get("caught_up") ?? 0;
   // Unmigrated legacy rows count toward finished until a read reconciles them.
@@ -1694,36 +1832,50 @@ async function enrichListDocs(
   const listIds = listRows.map((list) => list.id);
   const ownerIds = Array.from(new Set(listRows.map((list) => list.ownerId)));
 
+  // A user can follow or own more lists than fit in one IN (), so every
+  // lookup fans out over the parameter cap.
   const [itemCounts, followerCounts, viewerFollowRows, ownerRows, previewRows] = await Promise.all([
-    db
-      .select({ listId: listItems.listId, total: count() })
-      .from(listItems)
-      .where(inArray(listItems.listId, listIds))
-      .groupBy(listItems.listId),
-    db
-      .select({ listId: listFollows.listId, total: count() })
-      .from(listFollows)
-      .where(inArray(listFollows.listId, listIds))
-      .groupBy(listFollows.listId),
+    queryInChunks(listIds, (chunk) =>
+      db
+        .select({ listId: listItems.listId, total: count() })
+        .from(listItems)
+        .where(inArray(listItems.listId, chunk))
+        .groupBy(listItems.listId),
+    ),
+    queryInChunks(listIds, (chunk) =>
+      db
+        .select({ listId: listFollows.listId, total: count() })
+        .from(listFollows)
+        .where(inArray(listFollows.listId, chunk))
+        .groupBy(listFollows.listId),
+    ),
     viewerId
-      ? db
-          .select({ listId: listFollows.listId })
-          .from(listFollows)
-          .where(and(eq(listFollows.userId, viewerId), inArray(listFollows.listId, listIds)))
+      ? queryInChunks(
+          listIds,
+          (chunk) =>
+            db
+              .select({ listId: listFollows.listId })
+              .from(listFollows)
+              .where(and(eq(listFollows.userId, viewerId), inArray(listFollows.listId, chunk))),
+          1,
+        )
       : Promise.resolve([] as Array<{ listId: string }>),
-    db.select().from(users).where(inArray(users.id, ownerIds)),
+    getUsersByIdsChunked(ownerIds),
     // Poster art for list preview cards: first few items per list in list
-    // order (trimmed to 3 per list below).
-    db
-      .select({
-        listId: listItems.listId,
-        position: listItems.position,
-        posterUrl: shows.posterUrl,
-      })
-      .from(listItems)
-      .innerJoin(shows, eq(shows.id, listItems.showId))
-      .where(inArray(listItems.listId, listIds))
-      .orderBy(listItems.listId, listItems.position),
+    // order (trimmed to 3 per list below). Chunk order is list-id order per
+    // chunk only, but consumers group by list id so that is enough.
+    queryInChunks(listIds, (chunk) =>
+      db
+        .select({
+          listId: listItems.listId,
+          position: listItems.position,
+          posterUrl: shows.posterUrl,
+        })
+        .from(listItems)
+        .innerJoin(shows, eq(shows.id, listItems.showId))
+        .where(inArray(listItems.listId, chunk))
+        .orderBy(listItems.listId, listItems.position),
+    ),
   ]);
 
   const itemCountByList = new Map(itemCounts.map((row) => [row.listId, Number(row.total)]));
@@ -2855,7 +3007,7 @@ async function getShowsWithCachedArtworkById(showIds: string[]) {
   if (!showIds.length) {
     return new Map<string, any>();
   }
-  const rows = await db.select().from(shows).where(inArray(shows.id, showIds));
+  const rows = await getShowRowsByIdsChunked(showIds);
   const docs = await attachCachedArtworkToShowRows(rows);
   return new Map(rows.map((show, index) => [show.id, docs[index]] as const));
 }
@@ -2893,9 +3045,7 @@ async function buildHomeTasteProfile(userId: string | null | undefined) {
       ...(prefs[0]?.favoriteShowIds ?? []),
     ]),
   );
-  const signalShows = signalIds.length
-    ? await db.select().from(shows).where(inArray(shows.id, signalIds))
-    : [];
+  const signalShows = await getShowRowsByIdsChunked(signalIds);
   const showById = new Map(signalShows.map((show) => [show.id, show]));
   const genreWeights: Record<string, number> = {};
   const seenKeys = new Set<string>();
@@ -3076,13 +3226,34 @@ function exportEpisodeCode(seasonNumber: number, episodeNumber: number) {
   return `S${pad(seasonNumber)}E${pad(episodeNumber)}`;
 }
 
+// The calendar wants the soonest `limit` events across up to
+// RELEASE_CALENDAR_MAX_ITEMS (250) tracked shows — more ids than one
+// statement may bind. Each chunk returns its own soonest `limit`, so the
+// merged list is re-sorted and trimmed to keep the global window.
+async function readUpcomingReleaseEventsForShows(
+  showIds: string[],
+  fromTs: number,
+  limit: number,
+) {
+  const rows = await queryInChunks(
+    showIds,
+    (chunk) =>
+      db
+        .select()
+        .from(releaseEvents)
+        .where(and(inArray(releaseEvents.showId, chunk), gte(releaseEvents.airDateTs, fromTs)))
+        .orderBy(asc(releaseEvents.airDateTs))
+        .limit(limit),
+    1,
+  );
+  return rows.sort((left, right) => left.airDateTs - right.airDateTs).slice(0, limit);
+}
+
+// Show rows for any number of ids, fanned out over D1's parameter cap.
 async function getShowRowsByIdsChunked(showIds: Iterable<string>) {
-  const uniqueIds = Array.from(new Set(showIds));
-  const rows: Array<typeof shows.$inferSelect> = [];
-  for (const chunk of chunkForSqlParams(uniqueIds, 1, 80)) {
-    rows.push(...(await db.select().from(shows).where(inArray(shows.id, chunk))));
-  }
-  return rows;
+  return await queryInChunks(showIds, (chunk) =>
+    db.select().from(shows).where(inArray(shows.id, chunk)),
+  );
 }
 
 async function buildExportData(userId: string) {
@@ -3679,7 +3850,7 @@ async function getShowsByIds(showIds: string[]) {
   if (showIds.length === 0) {
     return [];
   }
-  const rows = await db.select().from(shows).where(inArray(shows.id, showIds));
+  const rows = await getShowRowsByIdsChunked(showIds);
   const byId = new Map(rows.map((row) => [row.id, showToDoc(row)]));
   return showIds.map((id) => byId.get(id)).filter(Boolean);
 }
@@ -3695,29 +3866,46 @@ function watchStatusFilterValues(status: string) {
 
 async function detailedWatchStates(userId: string, args: any, publicOnly = false) {
   const status = typeof args?.status === "string" ? args.status : undefined;
-  const rows = await db
+  const sortBy = parseLibrarySort(args?.sortBy);
+  const filterValues = status ? watchStatusFilterValues(status) : null;
+  // A filter on the auto-managed tier is answered from the whole tier so the
+  // read-side reconciliation can move rows between tier statuses before the
+  // filter applies; otherwise a show stored caught_up with a fresh episode
+  // would keep showing under "Caught up" and be missing from "Watching".
+  const reconcileTier =
+    !publicOnly &&
+    (!filterValues ||
+      filterValues.some((value) =>
+        (WATCH_STATUS_RECONCILABLE_VALUES as readonly string[]).includes(value),
+      ));
+  const queryValues =
+    filterValues && reconcileTier
+      ? Array.from(new Set([...filterValues, ...WATCH_STATUS_RECONCILABLE_VALUES]))
+      : filterValues;
+  const storedRows = await db
     .select()
     .from(watchStates)
     .where(
-      status
-        ? and(
-            eq(watchStates.userId, userId),
-            inArray(watchStates.status, watchStatusFilterValues(status) as any),
-          )
+      queryValues
+        ? and(eq(watchStates.userId, userId), inArray(watchStates.status, queryValues as any))
         : eq(watchStates.userId, userId),
     )
     .orderBy(desc(watchStates.updatedAt));
-  const showRows =
-    rows.length > 0
-      ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId)))
-      : [];
+  const { rows: reconciledRows } = reconcileTier
+    ? await readReconciledWatchStatuses(userId, storedRows)
+    : { rows: storedRows };
+  const rows = reconciledRows.filter((row) => {
+    if (publicOnly) return row.status === "watchlist";
+    return !filterValues || filterValues.includes(row.status);
+  });
+  const showRows = await getShowRowsByIdsChunked(rows.map((row) => row.showId));
   const byShow = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
-  return pageRows(
-    rows
-      .filter((row) => !publicOnly || row.status === "watchlist")
-      .map((row) => ({ state: toDoc(row), show: byShow.get(row.showId) ?? null })),
-    args,
+  // Sort before paginating so title / year orders hold across page boundaries.
+  const entries = sortLibraryEntries(
+    rows.map((row) => ({ state: toDoc(row), show: byShow.get(row.showId) ?? null })),
+    sortBy,
   );
+  return pageRows(entries, args);
 }
 
 // Aggregate rating summary: count/average plus a 5-bucket distribution
@@ -3743,26 +3931,23 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
   const authorIds = Array.from(new Set(reviewRows.map((review) => review.authorId)));
   const showIds = Array.from(new Set(reviewRows.map((review) => review.showId)));
   const [authorRows, showRows] = await Promise.all([
-    authorIds.length ? db.select().from(users).where(inArray(users.id, authorIds)) : [],
-    showIds.length ? db.select().from(shows).where(inArray(shows.id, showIds)) : [],
+    getUsersByIdsChunked(authorIds),
+    getShowRowsByIdsChunked(showIds),
   ]);
   const authors = new Map(authorRows.map((user) => [user.id, toClientUser(user)] as const));
   const authorAvatars = new Map(
     authorRows.map((user) => [user.id, user.avatarUrl ?? user.image ?? null] as const),
   );
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
-  const likeRows =
-    reviewRows.length > 0
-      ? await db
-          .select()
-          .from(likes)
-          .where(
-            and(
-              eq(likes.targetType, "review"),
-              inArray(likes.targetId, reviewRows.map((review) => review.id)),
-            ),
-          )
-      : [];
+  const likeRows = await queryInChunks(
+    reviewRows.map((review) => review.id),
+    (chunk) =>
+      db
+        .select()
+        .from(likes)
+        .where(and(eq(likes.targetType, "review"), inArray(likes.targetId, chunk))),
+    1,
+  );
   const likeCount = new Map<string, number>();
   const likedByViewer = new Set<string>();
   for (const like of likeRows) {
@@ -3889,11 +4074,10 @@ async function buildWatchLogActivity(userId: string, args: any) {
     db.select().from(watchLogs).where(eq(watchLogs.userId, userId)).orderBy(desc(watchLogs.watchedAt)),
     db.select().from(reviews).where(eq(reviews.authorId, userId)).orderBy(desc(reviews.createdAt)),
   ]);
-  const showIds = Array.from(
-    new Set([...logRows.map((row) => row.showId), ...reviewRows.map((row) => row.showId)]),
-  );
-  const showRows =
-    showIds.length > 0 ? await db.select().from(shows).where(inArray(shows.id, showIds)) : [];
+  const showRows = await getShowRowsByIdsChunked([
+    ...logRows.map((row) => row.showId),
+    ...reviewRows.map((row) => row.showId),
+  ]);
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
 
   const items = [
@@ -4898,7 +5082,13 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .from(watchStates)
       .where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, showId)))
       .limit(1);
-    return toDoc(rows[0]);
+    if (!rows[0]) {
+      return null;
+    }
+    // One show: reconciling is a single small batch, and it keeps the show
+    // page's status in step with what the continue rail derives.
+    const { rows: reconciled } = await readReconciledWatchStatuses(user.id, rows);
+    return toDoc(reconciled[0]);
   },
   "watchStates:listForUser": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -5325,10 +5515,10 @@ export const queryHandlers: Record<string, RpcHandler> = {
     if (followRows.length === 0) {
       return pageRows([], args);
     }
-    const listRows = await db
-      .select()
-      .from(lists)
-      .where(inArray(lists.id, followRows.map((row) => row.listId)));
+    const listRows = await queryInChunks(
+      followRows.map((row) => row.listId),
+      (chunk) => db.select().from(lists).where(inArray(lists.id, chunk)),
+    );
     const listsById = new Map(listRows.map((list) => [list.id, list]));
     // Follows survive a list going private or a block appearing; hide those
     // rows here instead of surfacing content the viewer may no longer see.
@@ -5350,7 +5540,7 @@ export const queryHandlers: Record<string, RpcHandler> = {
       return [];
     }
     const rows = await db.select().from(listItems).where(eq(listItems.listId, parsed.listId)).orderBy(asc(listItems.position));
-    const showRows = rows.length ? await db.select().from(shows).where(inArray(shows.id, rows.map((row) => row.showId))) : [];
+    const showRows = await getShowRowsByIdsChunked(rows.map((row) => row.showId));
     const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)]));
     return rows.map((row) => ({ ...toDoc(row), show: showMap.get(row.showId) ?? null }));
   },
@@ -5556,8 +5746,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
       : getLocalDateString();
     const todayStartTs = getDateOnlyStartTimestamp(today);
     const [rows, showRows, staleShowIds] = await Promise.all([
-      db.select().from(releaseEvents).where(and(inArray(releaseEvents.showId, showIds), gte(releaseEvents.airDateTs, todayStartTs))).orderBy(asc(releaseEvents.airDateTs)).limit(RELEASE_CALENDAR_MAX_ITEMS),
-      db.select().from(shows).where(inArray(shows.id, showIds)),
+      readUpcomingReleaseEventsForShows(showIds, todayStartTs, RELEASE_CALENDAR_MAX_ITEMS),
+      getShowRowsByIdsChunked(showIds),
       getStaleReleaseShowIds(showIds),
     ]);
     const detailRows = await getTmdbDetailRowsForShows(showRows);
@@ -5626,8 +5816,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
       : getLocalDateString();
     const todayStartTs = getDateOnlyStartTimestamp(today);
     const [rows, showRows, staleShowIds] = await Promise.all([
-      db.select().from(releaseEvents).where(and(inArray(releaseEvents.showId, showIds), gte(releaseEvents.airDateTs, todayStartTs))).orderBy(asc(releaseEvents.airDateTs)).limit(RELEASE_CALENDAR_MAX_ITEMS * 4),
-      db.select().from(shows).where(inArray(shows.id, showIds)),
+      readUpcomingReleaseEventsForShows(showIds, todayStartTs, RELEASE_CALENDAR_MAX_ITEMS * 4),
+      getShowRowsByIdsChunked(showIds),
       getStaleReleaseShowIds(showIds),
     ]);
     const detailRows = await getTmdbDetailRowsForShows(showRows);
