@@ -150,5 +150,18 @@ export function createDirectCacheStore(client: QueryClient): LocalStore {
         );
       }
     },
+    patchQueriesByName: (query, updater) => {
+      const name = getFunctionName(query);
+      for (const record of client.getQueryCache().findAll({
+        queryKey: [RPC_KEY_ROOT, "query", name],
+      })) {
+        const current = record.state.data;
+        if (current === undefined) continue;
+        const args = record.queryKey[3] as Record<string, any> | undefined;
+        const next = updater(current, args);
+        if (next === undefined || next === current) continue;
+        client.setQueryData(record.queryKey, next);
+      }
+    },
   };
 }
