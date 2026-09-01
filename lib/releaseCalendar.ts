@@ -289,6 +289,27 @@ export function getDateOnlyStartTimestamp(value: string) {
   return new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0).getTime();
 }
 
+/**
+ * The real instant a date-only air date begins in the user's timezone
+ * (client offset semantics: `-new Date().getTimezoneOffset()`). Without an
+ * offset this degrades to the server's own day start. Used for ranking, so
+ * "dropped today" sorts above "watched last night" no matter where the user
+ * is relative to UTC.
+ */
+export function getDateOnlyStartTimestampForOffset(
+  value: string,
+  utcOffsetMinutes: number | null | undefined,
+) {
+  if (typeof utcOffsetMinutes !== "number" || !Number.isFinite(utcOffsetMinutes)) {
+    return getDateOnlyStartTimestamp(value);
+  }
+  const parts = parseDateOnlyParts(value);
+  if (!parts) {
+    return Number.NaN;
+  }
+  return Date.UTC(parts.year, parts.month - 1, parts.day) - utcOffsetMinutes * 60_000;
+}
+
 export function getDateOnlyEndTimestamp(value: string) {
   const parts = parseDateOnlyParts(value);
   if (!parts) {

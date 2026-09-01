@@ -1,12 +1,17 @@
 import { describe, expect, it } from "@jest/globals";
 
 import {
+  applyHeldContinueOrder,
+  CONTINUE_NEW_RELEASE_WINDOW_MS,
+  CONTINUE_RAIL_UPCOMING_HORIZON_MS,
   CONTINUE_WATCHING_TIER_CAUGHT_UP,
   CONTINUE_WATCHING_TIER_READY,
   CONTINUE_WATCHING_TIER_UPCOMING_DATED,
   CONTINUE_WATCHING_TIER_UPCOMING_UNDATED,
   getContinueWatchingOrderTier,
   getContinueWatchingRecencyScore,
+  isContinueRailEligible,
+  isContinueWatchingFreshRelease,
   rankContinueWatchingItems,
 } from "../lib/continueWatchingOrder";
 
@@ -216,5 +221,90 @@ describe("rankContinueWatchingItems", () => {
       "first",
       "second",
     ]);
+  });
+});
+
+describe("continue rail eligibility and held order", () => {
+  it("trusts the server ranking moment and only overlays fresher local activity", () => {
+    // sortTimestamp already folds in the local-day release moment; an older
+    // lastWatchedAt must not drag it back, and a fresher one must win.
+    expect(
+      getContinueWatchingRecencyScore(
+        { sortTimestamp: NOW - DAY_MS, lastWatchedAt: NOW - 5 * DAY_MS },
+        NOW,
+      ),
+    ).toBe(NOW - DAY_MS);
+    expect(
+      getContinueWatchingRecencyScore(
+        { sortTimestamp: NOW - DAY_MS, lastWatchedAt: NOW - 1000 },
+        NOW,
+      ),
+    ).toBe(NOW - 1000);
+    // Future hints clamp to now; without a hint the legacy reconstruction applies.
+    expect(
+      getContinueWatchingRecencyScore({ sortTimestamp: NOW + DAY_MS }, NOW),
+    ).toBe(NOW);
+    expect(
+      getContinueWatchingRecencyScore(
+        { lastWatchedAt: NOW - 3 * DAY_MS, nextReleaseDate: NOW - DAY_MS },
+        NOW,
+      ),
+    ).toBe(NOW - DAY_MS);
+  });
+
+  it("keeps the home rail to ready cards and upcoming ones inside the horizon", () => {
+    expect(isContinueRailEligible({ totalWatched: 2, totalEpisodes: 8 }, NOW)).toBe(true);
+    expect(
+      isContinueRailEligible({ isUpcoming: true, nextAirDate: NOW + 6 * DAY_MS }, NOW),
+    ).toBe(true);
+    expect(
+      isContinueRailEligible(
+        { isUpcoming: true, nextAirDate: NOW + CONTINUE_RAIL_UPCOMING_HORIZON_MS + DAY_MS },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(isContinueRailEligible({ isUpcoming: true, nextAirDate: null }, NOW)).toBe(false);
+    expect(isContinueRailEligible({ isCaughtUp: true }, NOW)).toBe(false);
+    expect(
+      isContinueRailEligible({ isCaughtUp: true, optimisticCaughtUp: true }, NOW),
+    ).toBe(true);
+  });
+
+  it("badges recent drops as fresh and lets old ones age out", () => {
+    expect(
+      isContinueWatchingFreshRelease({ nextReleaseDate: NOW - 3 * DAY_MS, totalEpisodes: 8 }, NOW),
+    ).toBe(true);
+    expect(
+      isContinueWatchingFreshRelease(
+        { nextReleaseDate: NOW - CONTINUE_NEW_RELEASE_WINDOW_MS - 3 * DAY_MS, totalEpisodes: 8 },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isContinueWatchingFreshRelease({ nextReleaseDate: NOW + DAY_MS, nextEpisodeReleasedToday: true }, NOW),
+    ).toBe(false);
+    expect(isContinueWatchingFreshRelease({ nextEpisodeReleasedToday: true }, NOW)).toBe(true);
+    expect(
+      isContinueWatchingFreshRelease({ isCaughtUp: true, nextEpisodeReleasedToday: true }, NOW),
+    ).toBe(false);
+  });
+
+  it("holds the acted-on order, keeps settled cards in place, and appends arrivals", () => {
+    const alpha = { showId: "alpha", lastWatchedAt: NOW };
+    const beta = { showId: "beta", lastWatchedAt: NOW - DAY_MS, isCaughtUp: true };
+    const gamma = { showId: "gamma", lastWatchedAt: NOW - 2 * DAY_MS };
+    const delta = { showId: "delta", lastWatchedAt: NOW - 3 * DAY_MS };
+    // Held: beta led before it was marked caught up, then alpha. Ranked now:
+    // alpha, gamma, delta (beta is complete). Beta stays put, gamma and delta
+    // append, alpha keeps its held slot.
+    expect(
+      applyHeldContinueOrder(["beta", "alpha"], [alpha, gamma, delta], [alpha, beta, gamma, delta]).map(
+        (item) => item.showId,
+      ),
+    ).toEqual(["beta", "alpha", "gamma", "delta"]);
+    // A held id that left the payload entirely simply drops out.
+    expect(
+      applyHeldContinueOrder(["zeta", "alpha"], [alpha], [alpha]).map((item) => item.showId),
+    ).toEqual(["alpha"]);
   });
 });

@@ -10,6 +10,16 @@
  *   2 — upcoming with no date ("Coming soon").
  *   3 — caught up (server payloads only; the client filters these out).
  *
+ * Within the ready tier, cards sort by "activity moment": the freshest of
+ * when the user last watched the show, when they last changed its status,
+ * and — for a next episode that has already dropped — the start of the day
+ * it aired (in the user's timezone). So today's drop leads yesterday's
+ * binge, but a show watched tonight leads a drop from this morning.
+ *
+ * The home rail is about what can be watched now or very soon: upcoming
+ * cards only qualify within `CONTINUE_RAIL_UPCOMING_HORIZON_MS`, undated
+ * "coming soon" cards never do. `/continue` shows the long tail.
+ *
  * Ordering is clock-aware: an entry whose `nextReleaseDate` is still in the
  * future counts as upcoming no matter what its flags claim, so stale caches
  * or timezone-skewed payloads can never float an unaired episode to the top.
@@ -25,7 +35,12 @@ export type ContinueWatchingOrderable = {
   nextReleaseDate?: number | null;
   nextEpisodeReleasedToday?: boolean;
   lastWatchedAt?: number | null;
-  /** Server-side ranking hint: max(lastWatchedAt, updatedAt, releaseAirTs). */
+  /**
+   * Server-side activity moment: max(lastWatchedAt, status updatedAt,
+   * local day-start of a released next episode). Carried on the wire so the
+   * client ranks exactly like the server; optimistic updates overlay
+   * `lastWatchedAt` on top of it.
+   */
   sortTimestamp?: number;
 };
 
@@ -33,6 +48,14 @@ export const CONTINUE_WATCHING_TIER_READY = 0;
 export const CONTINUE_WATCHING_TIER_UPCOMING_DATED = 1;
 export const CONTINUE_WATCHING_TIER_UPCOMING_UNDATED = 2;
 export const CONTINUE_WATCHING_TIER_CAUGHT_UP = 3;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Upcoming cards join the home rail only when they air within this window. */
+export const CONTINUE_RAIL_UPCOMING_HORIZON_MS = 30 * DAY_MS;
+/** A released next episode reads as "New" for this long after it drops. */
+export const CONTINUE_NEW_RELEASE_WINDOW_MS = 14 * DAY_MS;
+/** Home rail card cap; the server slices to this after ranking. */
+export const CONTINUE_RAIL_LIMIT = 10;
 
 function toFiniteNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -59,6 +82,27 @@ export function isContinueWatchingFutureRelease(
     Number.isFinite(item.nextReleaseDate) &&
     item.nextReleaseDate > now
   );
+}
+
+/**
+ * Whether the card's next episode dropped recently enough to badge as "New".
+ * Future dates never qualify (the clock wins over flags), and an old backlog
+ * episode whose release event has aged out of the window reads as plain
+ * progress again.
+ */
+export function isContinueWatchingFreshRelease(
+  item: ContinueWatchingOrderable,
+  now = Date.now(),
+) {
+  if (isOrderableComplete(item)) return false;
+  if (isContinueWatchingFutureRelease(item, now)) return false;
+  if (item.nextEpisodeReleasedToday) return true;
+  if (item.isUpcoming) return false;
+  const released = item.nextReleaseDate;
+  if (typeof released !== "number" || !Number.isFinite(released)) return false;
+  // One day of slack: release timestamps are day-granular and the "today"
+  // boundary is the user's, not the clock's.
+  return now - released <= CONTINUE_NEW_RELEASE_WINDOW_MS + DAY_MS;
 }
 
 function getUpcomingSortDate(item: ContinueWatchingOrderable, now: number) {
@@ -89,24 +133,41 @@ export function getContinueWatchingOrderTier(
 }
 
 /**
- * Recency currency for ready cards: the freshest of "you watched this
- * recently" and "an episode just dropped". Active shows and fresh drops both
- * rise; a stale show with an old backlog sinks. Future release timestamps
- * never count toward readiness.
+ * Whether an entry belongs on the home rail at all: ready cards always,
+ * dated upcoming cards only inside the horizon, nothing else. Optimistically
+ * caught-up cards count as ready so they hold their slot until confirmed.
+ */
+export function isContinueRailEligible(
+  item: ContinueWatchingOrderable,
+  now = Date.now(),
+) {
+  const tier = getContinueWatchingOrderTier(item, now);
+  if (tier === CONTINUE_WATCHING_TIER_READY) return true;
+  if (tier !== CONTINUE_WATCHING_TIER_UPCOMING_DATED) return false;
+  const airsAt = getUpcomingSortDate(item, now);
+  return airsAt !== null && airsAt - now <= CONTINUE_RAIL_UPCOMING_HORIZON_MS;
+}
+
+/**
+ * Recency currency for ready cards. With a server `sortTimestamp` the client
+ * trusts it (it already folds in status changes and the local-day release
+ * moment) and only overlays fresher local activity. Without one (older
+ * payloads, fixtures) it reconstructs the same idea from the card's fields.
+ * Future release timestamps never count toward readiness.
  */
 export function getContinueWatchingRecencyScore(
   item: ContinueWatchingOrderable,
   now = Date.now(),
 ) {
+  const lastWatchedAt = toFiniteNumber(item.lastWatchedAt);
+  if (typeof item.sortTimestamp === "number" && Number.isFinite(item.sortTimestamp)) {
+    return Math.max(lastWatchedAt, Math.min(item.sortTimestamp, now));
+  }
   const releasedEpisodeTs =
     !item.isUpcoming && !isContinueWatchingFutureRelease(item, now)
       ? toFiniteNumber(item.nextReleaseDate)
       : 0;
-  return Math.max(
-    toFiniteNumber(item.lastWatchedAt),
-    Math.min(toFiniteNumber(item.sortTimestamp), now),
-    releasedEpisodeTs,
-  );
+  return Math.max(lastWatchedAt, releasedEpisodeTs);
 }
 
 export function compareContinueWatchingOrder(
@@ -173,4 +234,36 @@ export function rankContinueWatchingItems<T extends ContinueWatchingOrderable>(
       return left.index - right.index;
     })
     .map(({ item }) => item);
+}
+
+/**
+ * Held ordering for the rail while the user is acting on it. A mark-watched
+ * tap must never reorder cards under the user's finger, so the rail
+ * snapshots its visible order at the tap and keeps it — including cards
+ * that just became caught up or upcoming, which stay put showing their new
+ * state — until the surface is next re-ranked (tab focus, pull-to-refresh,
+ * app foreground). Cards that arrive meanwhile append after the held ones.
+ */
+export function applyHeldContinueOrder<T extends { showId: string | number }>(
+  heldShowIds: ReadonlyArray<string>,
+  rankedActive: ReadonlyArray<T>,
+  allItems: ReadonlyArray<T>,
+): T[] {
+  const byId = new Map<string, T>();
+  for (const item of allItems) byId.set(String(item.showId), item);
+  const held = new Set<string>();
+  const result: T[] = [];
+  for (const showId of heldShowIds) {
+    const item = byId.get(showId);
+    if (!item || held.has(showId)) continue;
+    held.add(showId);
+    result.push(item);
+  }
+  for (const item of rankedActive) {
+    const showId = String(item.showId);
+    if (held.has(showId)) continue;
+    held.add(showId);
+    result.push(item);
+  }
+  return result;
 }

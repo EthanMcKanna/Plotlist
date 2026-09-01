@@ -17,13 +17,16 @@ import type { Id } from "../lib/plotlist/types";
 import { useMutation, useQuery } from "../lib/plotlist/react";
 import { api } from "../lib/plotlist/api";
 import { useAccent } from "../lib/appearanceStore";
-import { formatShortDate } from "../lib/format";
+import { formatAirDay } from "../lib/format";
 import { guardedPush } from "../lib/navigation";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
 import type { EpisodeSeasonSummary } from "../lib/episodeProgressState";
+import type { ContinueQueuedEpisode } from "../lib/continueEpisodeQueue";
 import {
-  isContinueWatchingFutureRelease,
+  applyHeldContinueOrder,
+  isContinueRailEligible,
+  isContinueWatchingFreshRelease,
   rankContinueWatchingItems,
 } from "../lib/continueWatchingOrder";
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
@@ -61,6 +64,10 @@ export type ContinueWatchingItem = {
   isCaughtUp?: boolean;
   optimisticCaughtUp?: boolean;
   seasons?: EpisodeSeasonSummary[];
+  /** Server ranking moment; see lib/continueWatchingOrder. */
+  sortTimestamp?: number;
+  /** The next few episodes after the pointer, for instant mark-watched repaints. */
+  nextEpisodes?: ContinueQueuedEpisode[];
 };
 
 type ContinueWatchingRailProps = {
@@ -72,6 +79,12 @@ type ContinueWatchingRailProps = {
   activeItems?: ContinueWatchingItem[];
   hideWhenEmpty?: boolean;
   index?: number;
+  /**
+   * Bumped by the screen whenever the rail may re-rank (tab focus,
+   * pull-to-refresh, app foreground). Between bumps, an order the user has
+   * acted on is held so cards never move under their finger.
+   */
+  orderEpoch?: number;
 };
 
 const CARD_GAP = 14;
@@ -100,7 +113,7 @@ export function getContinueWatchingSubtitle(item: {
   const totalEpisodes = item.totalEpisodes ?? 0;
   const watchedCount = item.totalWatched ?? 0;
   if (item.isUpcoming) {
-    return item.nextAirDate ? `Airs ${formatShortDate(item.nextAirDate)}` : "Coming soon";
+    return item.nextAirDate ? `Airs ${formatAirDay(item.nextAirDate)}` : "Coming soon";
   }
   if (isContinueWatchingComplete(item)) {
     return "All caught up";
@@ -200,13 +213,10 @@ export function getContinueWatchingFreshnessLabel(
   now = Date.now(),
 ) {
   if (isContinueWatchingComplete(item)) return null;
-  // A release date still in the future can never read "New" — stale caches
-  // and timezone-skewed payloads land here until fresh data arrives.
-  if (isContinueWatchingFutureRelease(item, now)) return null;
-  if (item.nextEpisodeReleasedToday) return "New";
-  if (item.isUpcoming) return null;
-  if (item.nextReleaseDate) return "New";
-  return null;
+  // "New" means dropped recently and still unwatched. A release date in the
+  // future never qualifies (stale caches and timezone-skewed payloads land
+  // here until fresh data arrives), and an old drop ages out of the badge.
+  return isContinueWatchingFreshRelease(item, now) ? "New" : null;
 }
 
 export function isContinueWatchingComplete(item: {
@@ -292,19 +302,29 @@ export function getContinueWatchingMarkWatchedLabel(item: ContinueWatchingItem) 
 
 export function getActiveContinueWatchingItems(
   items: ContinueWatchingItem[] | null | undefined,
+  now = Date.now(),
 ) {
   // Items an optimistic update just marked caught-up stay in the rail (shown
   // as "Complete") until the server confirms — dropping them immediately
   // makes the card vanish and flash back whenever more episodes exist.
-  // Ranking keeps watchable episodes ahead of not-yet-aired ones even when
+  // Everything else must be watchable now or return within the horizon;
+  // ranking keeps watchable episodes ahead of not-yet-aired ones even when
   // the payload came from an older server or an optimistic rewrite.
   return rankContinueWatchingItems(
     (items ?? []).filter(
       (item) =>
-        !isContinueWatchingComplete(item) || item.optimisticCaughtUp === true,
+        item.optimisticCaughtUp === true ||
+        (!isContinueWatchingComplete(item) && isContinueRailEligible(item, now)),
     ),
-    Date.now(),
+    now,
   );
+}
+
+// Held cards that fell out of a later payload keep rendering from the last
+// snapshot only while they're settled (caught up / not yet aired): a
+// snapshot of an actionable card could mark the wrong episode.
+function isHeldSnapshotRenderable(item: ContinueWatchingItem) {
+  return isContinueWatchingComplete(item) || item.isUpcoming === true;
 }
 
 export function useContinueWatchingItems(enabled = true) {
@@ -354,6 +374,7 @@ export const ContinueWatchingRail = memo(function ContinueWatchingRail({
   activeItems: providedActiveItems,
   hideWhenEmpty = false,
   index = 1,
+  orderEpoch = 0,
 }: ContinueWatchingRailProps = {}) {
   const accent = useAccent();
   const { width } = useWindowDimensions();
@@ -364,6 +385,18 @@ export const ContinueWatchingRail = memo(function ContinueWatchingRail({
     api.episodeProgress.markEpisodeWatched,
   ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
   const pendingMarkShowIds = useRef<Set<string>>(new Set());
+  // Once the user marks something, the visible order (and the cards in it)
+  // is pinned until the screen next re-ranks: a tap must never shuffle the
+  // rail or yank the card that was just tapped.
+  const heldOrderRef = useRef<{
+    epoch: number;
+    showIds: string[] | null;
+    snapshots: Map<string, ContinueWatchingItem>;
+  }>({ epoch: orderEpoch, showIds: null, snapshots: new Map() });
+  if (heldOrderRef.current.epoch !== orderEpoch) {
+    heldOrderRef.current = { epoch: orderEpoch, showIds: null, snapshots: new Map() };
+  }
+  const visibleItemsRef = useRef<ContinueWatchingItem[]>([]);
 
   const handleMarkWatched = useCallback(
     (item: ContinueWatchingItem) => {
@@ -372,6 +405,11 @@ export const ContinueWatchingRail = memo(function ContinueWatchingRail({
       // would walk the optimistic pointer past episodes that don't exist.
       if (pendingMarkShowIds.current.has(showId) || isContinueWatchingComplete(item)) {
         return;
+      }
+      if (!heldOrderRef.current.showIds) {
+        heldOrderRef.current.showIds = visibleItemsRef.current.map((entry) =>
+          String(entry.showId),
+        );
       }
       pendingMarkShowIds.current.add(showId);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -453,8 +491,28 @@ export const ContinueWatchingRail = memo(function ContinueWatchingRail({
     );
   }
 
-  const activeItems =
+  const rankedActiveItems =
     providedActiveItems ?? getActiveContinueWatchingItems(items);
+  const held = heldOrderRef.current;
+  let activeItems = rankedActiveItems;
+  if (held.showIds) {
+    const present = new Set(items.map((item) => String(item.showId)));
+    const snapshotFallbacks: ContinueWatchingItem[] = [];
+    for (const showId of held.showIds) {
+      const snapshot = held.snapshots.get(showId);
+      if (!present.has(showId) && snapshot && isHeldSnapshotRenderable(snapshot)) {
+        snapshotFallbacks.push(snapshot);
+      }
+    }
+    activeItems = applyHeldContinueOrder(held.showIds, rankedActiveItems, [
+      ...items,
+      ...snapshotFallbacks,
+    ]);
+    for (const item of activeItems) {
+      held.snapshots.set(String(item.showId), item);
+    }
+  }
+  visibleItemsRef.current = activeItems;
 
   if (activeItems.length === 0) {
     return (

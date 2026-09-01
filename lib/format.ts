@@ -16,6 +16,20 @@ export function formatShortDate(value: number) {
   return format(new Date(value), "MMM d");
 }
 
+/**
+ * "MMM d" for a day-granular air timestamp. Servers encode date-only air
+ * dates as UTC midnight, which local formatting would show as the previous
+ * evening anywhere west of UTC ("Airs Sep 7" for a Sep 8 premiere). Reading
+ * the UTC calendar day keeps the label on the right date in every timezone.
+ */
+export function formatAirDay(value: number) {
+  const date = new Date(value);
+  return format(
+    new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12),
+    "MMM d",
+  );
+}
+
 function parseDateOnlyString(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) return null;

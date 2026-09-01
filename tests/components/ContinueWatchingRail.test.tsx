@@ -669,3 +669,96 @@ describe("ContinueWatchingRail artwork", () => {
     expect(screen.queryByText("A", includeHiddenElements)).toBeNull();
   });
 });
+
+describe("ContinueWatchingRail held order", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const card = (
+    id: string,
+    title: string,
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    showId: id as any,
+    show: { title, posterUrl: "poster.jpg" },
+    totalWatched: 2,
+    totalEpisodes: 10,
+    nextSeasonNumber: 1,
+    nextEpisodeNumber: 3,
+    lastWatchedAt: Date.now() - 5 * DAY,
+    ...overrides,
+  });
+  const visibleTitles = () =>
+    screen
+      .getAllByLabelText(/^(Continue (?!watching rail).+|.+ is caught up)$/)
+      .map((node) => String(node.props.accessibilityLabel).replace(/^Continue /, "").replace(/\. .*$/, "").replace(/ is caught up$/, ""));
+
+  it("does not reorder cards under the user's finger after a mark, until the screen re-ranks", () => {
+    mockMutation.mockResolvedValue(true);
+    resetNavigationLock();
+    const alpha = card("show-alpha", "Alpha", { lastWatchedAt: Date.now() - 4 * DAY });
+    const beta = card("show-beta", "Beta", { lastWatchedAt: Date.now() - 1 * DAY });
+    const { rerender } = render(
+      <ContinueWatchingRail items={[alpha, beta]} orderEpoch={0} />,
+    );
+    expect(visibleTitles()).toEqual(["Beta", "Alpha"]);
+
+    fireEvent.press(screen.getByLabelText("Mark Alpha S01 · E03 watched"));
+    expect(mockMutation).toHaveBeenCalledWith(
+      expect.objectContaining({ showId: "show-alpha", seasonNumber: 1, episodeNumber: 3 }),
+    );
+
+    // The optimistic patch makes Alpha the freshest card and, a beat later,
+    // the server payload arrives with it caught up: it stays where it was.
+    const alphaMarked = { ...alpha, totalWatched: 3, nextEpisodeNumber: 4, lastWatchedAt: Date.now() };
+    rerender(<ContinueWatchingRail items={[alphaMarked, beta]} orderEpoch={0} />);
+    expect(visibleTitles()).toEqual(["Beta", "Alpha"]);
+
+    const alphaDone = { ...alphaMarked, isCaughtUp: true };
+    rerender(<ContinueWatchingRail items={[alphaDone, beta]} orderEpoch={0} />);
+    expect(visibleTitles()).toEqual(["Beta", "Alpha"]);
+    expect(screen.queryByLabelText("Mark Alpha S01 · E04 watched")).toBeNull();
+
+    // Even once the server drops it from the payload, the settled card holds
+    // its slot; new arrivals append after the held cards.
+    const gamma = card("show-gamma", "Gamma", { lastWatchedAt: Date.now() });
+    rerender(<ContinueWatchingRail items={[gamma, beta]} orderEpoch={0} />);
+    expect(visibleTitles()).toEqual(["Beta", "Alpha", "Gamma"]);
+
+    // A fresh look (focus / refresh / foreground) re-ranks and lets it go.
+    rerender(<ContinueWatchingRail items={[gamma, beta]} orderEpoch={1} />);
+    expect(visibleTitles()).toEqual(["Gamma", "Beta"]);
+  });
+
+  it("keeps far-off premieres and undated returns off the home rail", () => {
+    const soon = card("show-soon", "Soon", {
+      totalWatched: 0,
+      isUpcoming: true,
+      nextAirDate: Date.now() + 5 * DAY,
+    });
+    const farOut = card("show-far", "Far", {
+      totalWatched: 0,
+      isUpcoming: true,
+      nextAirDate: Date.now() + 120 * DAY,
+    });
+    const undated = card("show-undated", "Undated", {
+      totalWatched: 0,
+      isUpcoming: true,
+      nextAirDate: null,
+    });
+    const ready = card("show-ready", "Ready");
+
+    expect(
+      getActiveContinueWatchingItems([farOut, undated, soon, ready]).map(
+        (item) => item.show.title,
+      ),
+    ).toEqual(["Ready", "Soon"]);
+  });
+
+  it("labels an upcoming air date by its calendar day regardless of timezone", () => {
+    expect(
+      getContinueWatchingSubtitle({
+        isUpcoming: true,
+        nextAirDate: Date.parse("2026-09-08T00:00:00.000Z"),
+      }),
+    ).toBe("Airs Sep 8");
+  });
+});

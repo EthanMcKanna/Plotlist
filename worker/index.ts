@@ -21,6 +21,7 @@ import calendarFeedRoute from "../api/calendar/feed";
 import revenuecatWebhookRoute from "../api/webhooks/revenuecat";
 import { initDb } from "../api/_lib/db";
 import { applyLinkPreview, getLinkPreview, isPreviewablePath } from "./link-previews";
+import { runWithBackgroundScope } from "../api/_lib/background";
 import { runNodeRoute, type NodeStyleHandler } from "./shim";
 import { runScheduledTasks } from "./scheduled";
 import { initUploadsBucket, getUploadsBucket, type UploadsBucket } from "./storage";
@@ -132,9 +133,24 @@ const APPLE_APP_SITE_ASSOCIATION = {
 };
 
 const workerHandler = {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: WorkerEnv,
+    ctx?: { waitUntil(p: Promise<unknown>): void },
+  ): Promise<Response> {
     bootstrap(env);
     const url = new URL(request.url);
+    // Deferred work (cache upserts, write-backs, fan-out) outlives the
+    // response via waitUntil; local shims without a ctx just let it float.
+    const backgroundScope = {
+      waitUntil: (task: Promise<unknown>) => {
+        if (ctx && typeof ctx.waitUntil === "function") {
+          ctx.waitUntil(task);
+        } else {
+          void task;
+        }
+      },
+    };
 
     if (
       url.pathname === "/.well-known/apple-app-site-association" ||
@@ -159,7 +175,9 @@ const workerHandler = {
         return jsonResponse(404, { error: { code: "not_found", message: "Not found" } });
       }
       try {
-        return await runNodeRoute(handler, request);
+        return await runWithBackgroundScope(backgroundScope, () =>
+          runNodeRoute(handler, request),
+        );
       } catch (error) {
         console.error("[worker] Unhandled route error", url.pathname, error);
         Sentry.captureException(error);
