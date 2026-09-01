@@ -31,6 +31,7 @@ import { useAccent } from "../lib/appearanceStore";
 import { useAuth, useMutation, useQuery } from "../lib/plotlist/react";
 import { buildEpisodeDeepLinkParams } from "../lib/episodeDeepLink";
 import { optimisticMarkEpisodeWatched } from "../lib/episodeProgressOptimistic";
+import { optimisticSetWatchStatus } from "../lib/watchStatusOptimistic";
 import { formatAirDay } from "../lib/format";
 import { getUpNextQueryArgs } from "../lib/upNextQueryArgs";
 import { SHOW_BACK_BUTTON, WEB_PAGE_MAX_WIDTH } from "../lib/webLayout";
@@ -212,7 +213,11 @@ export default function ContinueScreen() {
   const markEpisodeWatched = useMutation(
     api.episodeProgress.markEpisodeWatched,
   ).withOptimisticUpdate(optimisticMarkEpisodeWatched);
-  const setStatus = useMutation(api.watchStates.setStatus);
+  // Resume repaints the card into the ready bucket (and the home rail,
+  // library and counts) before the server answers.
+  const setStatus = useMutation(api.watchStates.setStatus).withOptimisticUpdate(
+    (localStore, args) => optimisticSetWatchStatus(localStore, args),
+  );
   const pendingShowIds = useRef<Set<string>>(new Set());
 
   const handleMarkWatched = useCallback(

@@ -24,7 +24,9 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
+  fetchActionQuery,
   useAction,
+  useActionQuery,
   useAuth,
   useMutation,
   usePaginatedQuery,
@@ -83,6 +85,12 @@ import { RatingHistogram } from "../../components/RatingHistogram";
 import { formatAirDate, formatRelativeTime, toAirDateString } from "../../lib/format";
 import { getLocalDateString, isDateOnlyString } from "../../lib/releaseCalendar";
 import { resizeTmdbImageUrl } from "../../lib/tmdbImages";
+import { resolveStorageUrl } from "../../lib/storageUrl";
+import { applyRatingChangeToStats } from "../../lib/ratingStatsOptimistic";
+import {
+  optimisticRemoveWatchStatus,
+  optimisticSetWatchStatus,
+} from "../../lib/watchStatusOptimistic";
 import { sharePlotlistLink } from "../../lib/share";
 import { StatusSelector } from "../../components/StatusSelector";
 import { EpisodeGuide } from "../../components/EpisodeGuide";
@@ -160,6 +168,21 @@ type WatchStatus =
   | "paused"
   | "dropped";
 type ExtendedDetailsLoadState = "idle" | "loading" | "ready";
+const EMPTY_SIMILAR_SHOWS: any[] = [];
+
+// "Finished" lands on caught_up server-side when the show is still airing
+// (the server backfills every released episode, then resolves the tier).
+// Guess the same way so nothing flashes "Finished" on a returning series; an
+// unknown air status honors the literal choice and lets the refetch decide.
+function resolveOptimisticWatchStatus(
+  status: WatchStatus,
+  airStatus: string | null | undefined,
+): WatchStatus {
+  if (status !== "finished" || !airStatus) return status;
+  return /^(ended|canceled|cancelled)$/i.test(String(airStatus).trim())
+    ? "finished"
+    : "caught_up";
+}
 
 const PREVIEW_SHOW_ID = "show_preview_pluribus" as Id<"shows">;
 const PREVIEW_BACKDROP =
@@ -821,7 +844,7 @@ export default function ShowScreen() {
     !isShowPreview && showId ? { showId } : "skip",
   );
   const showRatingStats = isShowPreview ? PREVIEW_SHOW_STATS : queriedShowStats;
-  const { results: queriedLists } = usePaginatedQuery(
+  const { results: queriedLists, status: queriedListsStatus } = usePaginatedQuery(
     api.lists.listForUser,
     !isShowPreview && isAuthenticated && me?._id ? { userId: me._id } : "skip",
     { initialNumItems: 20 },
@@ -832,80 +855,33 @@ export default function ShowScreen() {
         { _id: "list_preview_sci_fi", title: "Smart sci-fi" },
       ]
     : queriedLists;
+  const listsLoading = !isShowPreview && queriedListsStatus === "LoadingFirstPage";
 
+  // Read by the setStatus optimistic handler; extended details (and so the
+  // show's air status) are derived further down the component.
+  const showAirStatusRef = useRef<string | null>(null);
   const setStatus = useMutation(api.watchStates.setStatus).withOptimisticUpdate(
-    (localStore, args) => {
-      const previousState = localStore.getQuery(api.watchStates.getForShow, {
-        showId: args.showId,
-      });
-      const previousStatus = previousState?.status;
-      const now = Date.now();
-      const optimisticState = {
-        _id: previousState?._id ?? `optimistic:${args.showId}`,
-        userId: previousState?.userId ?? me?._id ?? "me",
-        showId: args.showId,
-        status: args.status,
-        updatedAt: now,
-      };
-
-      localStore.setQuery(
-        api.watchStates.getForShow,
-        { showId: args.showId },
-        optimisticState,
-      );
-      const currentStates = localStore.getQuery(api.watchStates.listForUser, {}) ?? [];
-      if (Array.isArray(currentStates)) {
-        localStore.setQuery(api.watchStates.listForUser, {}, [
-          optimisticState,
-          ...currentStates.filter((state: any) => state.showId !== args.showId),
-        ]);
-      }
-      const currentCounts = localStore.getQuery(api.watchStates.getCounts, {});
-      if (currentCounts) {
-        const nextCounts = { ...currentCounts };
-        if (previousStatus && nextCounts[previousStatus] !== undefined) {
-          nextCounts[previousStatus] = Math.max(0, nextCounts[previousStatus] - 1);
-        } else {
-          nextCounts.total = (nextCounts.total ?? 0) + 1;
-        }
-        nextCounts[args.status] = (nextCounts[args.status] ?? 0) + 1;
-        localStore.setQuery(api.watchStates.getCounts, {}, nextCounts);
-      }
-    }
+    (localStore, args) =>
+      // Write the tier the server will land on (finished vs caught_up) so
+      // every surface — status button, library, counts, continue cards —
+      // repaints in step; the post-mutation refetch corrects a wrong guess.
+      optimisticSetWatchStatus(
+        localStore,
+        {
+          showId: args.showId,
+          status: resolveOptimisticWatchStatus(args.status, showAirStatusRef.current),
+        },
+        { userId: me?._id },
+      ),
   );
   const removeStatus = useMutation(api.watchStates.removeStatus).withOptimisticUpdate(
-    (localStore, args) => {
-      const previousState = localStore.getQuery(api.watchStates.getForShow, {
-        showId: args.showId,
-      });
-      localStore.setQuery(
-        api.watchStates.getForShow,
-        { showId: args.showId },
-        null
-      );
-      const currentStates = localStore.getQuery(api.watchStates.listForUser, {}) ?? [];
-      if (Array.isArray(currentStates)) {
-        localStore.setQuery(
-          api.watchStates.listForUser,
-          {},
-          currentStates.filter((state: any) => state.showId !== args.showId),
-        );
-      }
-      const currentCounts = localStore.getQuery(api.watchStates.getCounts, {});
-      if (currentCounts) {
-        const nextCounts = { ...currentCounts };
-        if (previousState?.status && nextCounts[previousState.status] !== undefined) {
-          nextCounts[previousState.status] = Math.max(0, nextCounts[previousState.status] - 1);
-        }
-        nextCounts.total = Math.max(0, (nextCounts.total ?? 0) - 1);
-        localStore.setQuery(api.watchStates.getCounts, {}, nextCounts);
-      }
-    }
+    (localStore, args) => optimisticRemoveWatchStatus(localStore, args),
   );
   const createReview = useMutation(api.reviews.create).withOptimisticUpdate(
     (localStore, args) => {
       const now = Date.now();
       const optimisticReviewId = `optimistic:review:${args.showId}:${now}`;
+      const own = { previousRating: null as number | null };
       const optimisticReview = {
         review: {
           _id: optimisticReviewId,
@@ -922,6 +898,7 @@ export default function ShowScreen() {
           updatedAt: now,
         },
         author: me,
+        authorAvatarUrl: resolveStorageUrl(me?.avatarStorageId),
         show,
         likeCount: 0,
         likedByViewer: false,
@@ -935,15 +912,18 @@ export default function ShowScreen() {
           const page = current.page ?? current.results ?? [];
           // One review per user per show: a re-submit replaces the viewer's
           // existing show-level review (the server upserts the same way).
+          const isOwnShowReview = (item: any) =>
+            Boolean(me?._id) &&
+            item.review?.authorId === me._id &&
+            item.review?.seasonNumber == null &&
+            item.review?.episodeNumber == null;
+          const previousOwn = page.find(isOwnShowReview);
+          if (typeof previousOwn?.review?.rating === "number") {
+            own.previousRating = previousOwn.review.rating;
+          }
           const withoutDuplicate = page.filter(
             (item: any) =>
-              item.review?._id !== optimisticReviewId &&
-              !(
-                me?._id &&
-                item.review?.authorId === me._id &&
-                item.review?.seasonNumber == null &&
-                item.review?.episodeNumber == null
-              ),
+              item.review?._id !== optimisticReviewId && !isOwnShowReview(item),
           );
           return {
             ...current,
@@ -952,15 +932,44 @@ export default function ShowScreen() {
           };
         },
       );
+      // The header's average/histogram and the profile's review count read
+      // their own caches; move them in step so nothing lags the new row.
+      const showStatsArgs = { showId: args.showId };
+      const showStats = localStore.getQuery(api.reviews.getShowStats, showStatsArgs);
+      if (showStats && typeof showStats === "object") {
+        localStore.setQuery(
+          api.reviews.getShowStats,
+          showStatsArgs,
+          applyRatingChangeToStats(showStats, own.previousRating, args.rating),
+        );
+      }
+      if (own.previousRating === null) {
+        localStore.patchQueriesByName(api.users.me, (current) =>
+          current && typeof current === "object"
+            ? { ...current, countsReviews: (current.countsReviews ?? 0) + 1 }
+            : undefined,
+        );
+      }
     },
   );
   const deleteReview = useMutation(api.reviews.deleteReview).withOptimisticUpdate(
     (localStore, args) => {
+      const removed = { rating: null as number | null };
       localStore.setPaginatedQuery(
         api.reviews.listForShowDetailed,
         { showId },
         (current) => {
           if (!current) return current;
+          const target = (current.page ?? current.results ?? []).find(
+            (item: any) => item.review?._id === args.reviewId,
+          );
+          if (
+            target &&
+            target.review?.seasonNumber == null &&
+            typeof target.review?.rating === "number"
+          ) {
+            removed.rating = target.review.rating;
+          }
           const keep = (item: any) => item.review?._id !== args.reviewId;
           return {
             ...current,
@@ -969,17 +978,38 @@ export default function ShowScreen() {
           };
         },
       );
+      if (removed.rating === null) return;
+      const showStatsArgs = { showId };
+      const showStats = localStore.getQuery(api.reviews.getShowStats, showStatsArgs);
+      if (showStats && typeof showStats === "object") {
+        localStore.setQuery(
+          api.reviews.getShowStats,
+          showStatsArgs,
+          applyRatingChangeToStats(showStats, removed.rating, null),
+        );
+      }
+      localStore.patchQueriesByName(api.users.me, (current) =>
+        current && typeof current === "object"
+          ? { ...current, countsReviews: Math.max(0, (current.countsReviews ?? 0) - 1) }
+          : undefined,
+      );
     },
   );
   const reportReview = useMutation(api.reports.create);
   const [reportReviewId, setReportReviewId] = useState<string | null>(null);
+  // The viewer rides along so their own row appears in the episode's
+  // community list (with avatar) the instant they tap a star.
+  const episodeRatingViewer = {
+    viewer: me,
+    viewerAvatarUrl: resolveStorageUrl(me?.avatarStorageId),
+  };
   const rateEpisode = useMutation(api.reviews.rateEpisode).withOptimisticUpdate(
-    (localStore, args) => optimisticRateEpisode(localStore, args),
+    (localStore, args) => optimisticRateEpisode(localStore, args, episodeRatingViewer),
   );
   const removeEpisodeRating = useMutation(
     api.reviews.removeEpisodeRating,
   ).withOptimisticUpdate((localStore, args) =>
-    optimisticRemoveEpisodeRating(localStore, args),
+    optimisticRemoveEpisodeRating(localStore, args, episodeRatingViewer),
   );
   const queriedEpisodeRatings = useQuery(
     api.reviews.getMyEpisodeRatings,
@@ -1021,6 +1051,10 @@ export default function ShowScreen() {
         followerCount: 0,
         viewerIsFollowing: false,
         isOwner: true,
+        commentsEnabled: true,
+        // The server seeds the list with this show, so its collage starts
+        // with this poster instead of an empty frame.
+        previewPosters: show?.posterUrl ? [show.posterUrl] : [],
       };
       localStore.setPaginatedQuery(api.lists.listForUser, { userId: me._id }, (current) => {
         if (!current) return current;
@@ -1120,19 +1154,29 @@ export default function ShowScreen() {
     () => unmarkSeasonWatchedMutation.withOptimisticUpdate(optimisticUnmarkSeasonWatched),
     [unmarkSeasonWatchedMutation],
   );
-  const getExtendedDetails = useAction(api.shows.getExtendedDetails);
-  const getSeasonDetails = useAction(api.shows.getSeasonDetails);
-  const getImdbRatings = useAction(api.shows.getImdbRatings);
-  const getSimilarShows = useAction(api.embeddings.getSimilarShows);
-
-  const [fetchedExtendedDetails, setFetchedExtendedDetails] = useState<{
-    showId: string;
-    details: any;
-  } | null>(null);
-  const [extendedDetailsLoadState, setExtendedDetailsLoadState] =
-    useState<ExtendedDetailsLoadState>(isShowPreview ? "ready" : "idle");
-  const [similarShows, setSimilarShows] = useState<any[]>([]);
-  const [loadingSimilarShows, setLoadingSimilarShows] = useState(false);
+  // Season details and IMDb ratings load imperatively (per season, keyed by
+  // which seasons are on screen) but through the react-query cache, so a
+  // revisit paints every episode list from cache instead of refetching it.
+  const getSeasonDetails = useCallback(
+    (args: { showId: string; seasonNumber: number }) =>
+      fetchActionQuery(api.shows.getSeasonDetails, args),
+    [],
+  );
+  const getImdbRatings = useCallback(
+    (args: { showId: string; seasonNumbers: number[] }) =>
+      fetchActionQuery(api.shows.getImdbRatings, args),
+    [],
+  );
+  const similarShowsQuery = useActionQuery(
+    api.embeddings.getSimilarShows,
+    !isShowPreview && showId ? { showId, limit: 10 } : "skip",
+  );
+  const similarShows = useMemo<any[]>(
+    () =>
+      Array.isArray(similarShowsQuery.data) ? similarShowsQuery.data : EMPTY_SIMILAR_SHOWS,
+    [similarShowsQuery.data],
+  );
+  const loadingSimilarShows = similarShowsQuery.isLoading;
   const [seasonDetailsByNumber, setSeasonDetailsByNumber] = useState<Record<number, any>>(
     () => (isShowPreview ? PREVIEW_SEASON_DETAILS : {})
   );
@@ -1183,6 +1227,22 @@ export default function ShowScreen() {
   const [optimisticStatus, setOptimisticStatus] = useState<WatchStatus | null | undefined>(
     undefined
   );
+  // Fingerprint of the server-backed watch state when an override was set.
+  // Any later change — the optimistic cache patch, the refetch, a rollback —
+  // clears the override, so a wrong finished/caught_up guess can never
+  // outlive the server's answer. Preview fakes its state per render and
+  // keeps the equality-only rule.
+  const serverWatchStateVersion = isShowPreview
+    ? "preview"
+    : `${queriedWatchState?.status ?? ""}:${queriedWatchState?.updatedAt ?? ""}`;
+  const optimisticStatusBaselineRef = useRef<string | null>(null);
+  const applyOptimisticStatus = useCallback(
+    (value: WatchStatus | null) => {
+      optimisticStatusBaselineRef.current = serverWatchStateVersion;
+      setOptimisticStatus(value);
+    },
+    [serverWatchStateVersion],
+  );
   const memberSet = optimisticMemberSet ?? serverMemberSet;
   const currentStatus = optimisticStatus === undefined ? watchState?.status : optimisticStatus;
   const showHasLoaded = show !== undefined;
@@ -1191,11 +1251,42 @@ export default function ShowScreen() {
     () => normalizeExtendedDetails(show?.extendedDetails),
     [show?.extendedDetails],
   );
-  const activeDetails =
-    fetchedExtendedDetails?.showId === showId
-      ? fetchedExtendedDetails.details
-      : cachedExtendedDetails;
   const hasCachedExtendedDetails = Boolean(cachedExtendedDetails);
+  // Only shows the server hasn't cached details for need the live fetch; it
+  // rides the react-query cache so back-navigation reuses the answer.
+  const shouldFetchExtendedDetails =
+    !isShowPreview &&
+    showHasLoaded &&
+    Boolean(showId) &&
+    Boolean(showExternalId) &&
+    !hasCachedExtendedDetails;
+  const extendedDetailsQuery = useActionQuery(
+    api.shows.getExtendedDetails,
+    shouldFetchExtendedDetails ? { showId } : "skip",
+  );
+  const fetchedExtendedDetails = useMemo(
+    () =>
+      shouldFetchExtendedDetails && extendedDetailsQuery.data
+        ? normalizeExtendedDetails(extendedDetailsQuery.data)
+        : null,
+    [extendedDetailsQuery.data, shouldFetchExtendedDetails],
+  );
+  const extendedDetailsLoadState: ExtendedDetailsLoadState = isShowPreview
+    ? "ready"
+    : !showHasLoaded
+      ? "idle"
+      : shouldFetchExtendedDetails && extendedDetailsQuery.isLoading
+        ? "loading"
+        : "ready";
+  useEffect(() => {
+    if (extendedDetailsQuery.isError) {
+      console.error("Failed to fetch extended details");
+    }
+  }, [extendedDetailsQuery.isError]);
+  const activeDetails = fetchedExtendedDetails ?? cachedExtendedDetails;
+  useEffect(() => {
+    showAirStatusRef.current = activeDetails?.status ?? null;
+  }, [activeDetails?.status]);
   const fallbackGenres = useMemo(
     () =>
       mapGenreIdsToNames(show?.genreIds).map((name) => ({
@@ -1224,10 +1315,13 @@ export default function ShowScreen() {
       return;
     }
     const actualStatus = watchState?.status ?? null;
-    if (actualStatus === optimisticStatus) {
+    if (
+      actualStatus === optimisticStatus ||
+      (!isShowPreview && serverWatchStateVersion !== optimisticStatusBaselineRef.current)
+    ) {
       setOptimisticStatus(undefined);
     }
-  }, [optimisticStatus, watchState?.status]);
+  }, [isShowPreview, optimisticStatus, serverWatchStateVersion, watchState?.status]);
 
   // Episode sheet gesture animation
   const sheetTranslateY = useSharedValue(SCREEN_HEIGHT);
@@ -1460,65 +1554,6 @@ export default function ShowScreen() {
   );
   const episodeFriendWatchers = isShowPreview ? null : queriedFriendWatchers;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchExtendedDetails = async () => {
-      if (isShowPreview) {
-        setFetchedExtendedDetails(null);
-        setExtendedDetailsLoadState("ready");
-        return;
-      }
-      if (!showHasLoaded) {
-        setFetchedExtendedDetails(null);
-        setExtendedDetailsLoadState("idle");
-        return;
-      }
-      if (!showId || !showExternalId) {
-        setFetchedExtendedDetails(null);
-        setExtendedDetailsLoadState("ready");
-        return;
-      }
-      if (hasCachedExtendedDetails) {
-        setFetchedExtendedDetails(null);
-        setExtendedDetailsLoadState("ready");
-        return;
-      }
-
-      setExtendedDetailsLoadState("loading");
-      try {
-        const details = await getExtendedDetails({ showId });
-        if (cancelled) {
-          return;
-        }
-        setFetchedExtendedDetails({
-          showId,
-          details: normalizeExtendedDetails(details),
-        });
-      } catch (error) {
-        if (!cancelled) {
-          console.error("Failed to fetch extended details:", error);
-        }
-      } finally {
-        if (!cancelled) {
-          setExtendedDetailsLoadState("ready");
-        }
-      }
-    };
-    void fetchExtendedDetails();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    getExtendedDetails,
-    hasCachedExtendedDetails,
-    isShowPreview,
-    showExternalId,
-    showHasLoaded,
-    showId,
-  ]);
-
   // Watching → completed promotion for fully watched ended shows happens
   // server-side (syncWatchStateAfterEpisodeChange) whenever episode progress
   // changes; the client no longer writes statuses on its own.
@@ -1539,39 +1574,6 @@ export default function ShowScreen() {
     [activeDetails?.status],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchSimilarShows = async () => {
-      if (isShowPreview) {
-        setLoadingSimilarShows(false);
-        return;
-      }
-      if (!showId) {
-        return;
-      }
-      setLoadingSimilarShows(true);
-      try {
-        const items = await getSimilarShows({ showId, limit: 10 });
-        if (!cancelled) {
-          setSimilarShows(items);
-        }
-      } catch {
-        if (!cancelled) {
-          setSimilarShows([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingSimilarShows(false);
-        }
-      }
-    };
-
-    fetchSimilarShows();
-    return () => {
-      cancelled = true;
-    };
-  }, [getSimilarShows, isShowPreview, showId]);
   const similarShowItems = useMemo(() => {
     if (similarShows.length > 0) {
       return similarShows;
@@ -2315,19 +2317,21 @@ export default function ShowScreen() {
       // lands on caught_up instead when the show is still returning. Mirror
       // that resolution optimistically so the button doesn't flash "Finished"
       // on a returning series.
-      const optimisticValue =
-        value === "finished" &&
-        activeDetails?.status &&
-        !/^(ended|canceled|cancelled)$/i.test(String(activeDetails.status).trim())
-          ? "caught_up"
-          : value;
-      setOptimisticStatus(optimisticValue);
+      applyOptimisticStatus(resolveOptimisticWatchStatus(value, activeDetails?.status));
       void setStatus({ showId, status: value }).catch((error) => {
         setOptimisticStatus(undefined);
         notifyError("Couldn't update status", String(error));
       });
     },
-    [activeDetails?.status, isAuthenticated, isShowPreview, router, setStatus, showId]
+    [
+      activeDetails?.status,
+      applyOptimisticStatus,
+      isAuthenticated,
+      isShowPreview,
+      router,
+      setStatus,
+      showId,
+    ]
   );
 
   const handleRemoveStatus = useCallback(() => {
@@ -2337,12 +2341,12 @@ export default function ShowScreen() {
       return;
     }
     if (!isAuthenticated) return;
-    setOptimisticStatus(null);
+    applyOptimisticStatus(null);
     void removeStatus({ showId }).catch((error) => {
       setOptimisticStatus(undefined);
       notifyError("Couldn't update status", String(error));
     });
-  }, [isAuthenticated, isShowPreview, removeStatus, showId]);
+  }, [applyOptimisticStatus, isAuthenticated, isShowPreview, removeStatus, showId]);
 
   const handleReview = useCallback(async () => {
     if (!isAuthenticated) {
@@ -3516,7 +3520,13 @@ export default function ShowScreen() {
               Add to list
             </Text>
             <View className="px-4">
-              {lists.length > 0 ? (
+              {listsLoading ? (
+                <View className="gap-2">
+                  {[0, 1, 2].map((index) => (
+                    <ShimmerBlock key={index} width="100%" height={52} radius={14} />
+                  ))}
+                </View>
+              ) : lists.length > 0 ? (
                 <ScrollView
                   style={{ maxHeight: 320 }}
                   keyboardShouldPersistTaps="handled"

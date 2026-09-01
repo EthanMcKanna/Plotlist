@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { FlashList } from "../../components/FlashList";
 import { Image } from "expo-image";
@@ -13,7 +13,7 @@ import { Poster } from "../../components/Poster";
 import { notifyError } from "../../lib/dialogs";
 import { guardedPush } from "../../lib/navigation";
 import { api } from "../../lib/plotlist/api";
-import { useAction } from "../../lib/plotlist/react";
+import { useAction, useActionQuery } from "../../lib/plotlist/react";
 import {
   SHOW_BACK_BUTTON,
   usePosterGridLayout,
@@ -109,41 +109,20 @@ export default function PersonScreen() {
       ? params.profilePath
       : null;
 
-  const getPersonDetails = useAction(api.people.getDetails);
   const ingestShow = useAction(api.shows.ingestFromCatalog);
+  const hasValidPersonId = Number.isFinite(personId) && personId > 0;
+  // Cached: coming back from a show to the same person paints from cache
+  // instead of refetching the full filmography.
+  const personQuery = useActionQuery(
+    api.people.getDetails,
+    hasValidPersonId ? { personId } : "skip",
+  );
+  const person = (personQuery.data ?? null) as PersonDetails | null;
+  const isLoading = hasValidPersonId && personQuery.isLoading;
+  const loadFailed = !hasValidPersonId || personQuery.isError || (!isLoading && !person);
 
-  const [person, setPerson] = useState<PersonDetails | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [bioExpanded, setBioExpanded] = useState(false);
   const [section, setSection] = useState<"cast" | "crew" | null>(null);
-
-  useEffect(() => {
-    if (!Number.isFinite(personId) || personId <= 0) {
-      setIsLoading(false);
-      setLoadFailed(true);
-      return;
-    }
-    let cancelled = false;
-    setIsLoading(true);
-    setLoadFailed(false);
-    setPerson(null);
-    getPersonDetails({ personId })
-      .then((result: any) => {
-        if (cancelled) return;
-        setPerson(result ?? null);
-        setLoadFailed(!result);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [getPersonDetails, personId]);
 
   const castCredits = person?.castCredits ?? [];
   const crewCredits = person?.crewCredits ?? [];

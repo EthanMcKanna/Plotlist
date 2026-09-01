@@ -27,6 +27,7 @@ function createLocalStore(initial: Array<{
       data.set(keyFor(query, args), value);
     },
     setPaginatedQuery: jest.fn(),
+    patchQueriesByName: jest.fn(),
   };
 
   return {
