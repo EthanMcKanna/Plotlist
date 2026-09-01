@@ -29,9 +29,11 @@ import { buildFriendActivity, type FriendActivityEntry } from "../lib/friendsAct
 import { useAuth, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { useContactSync } from "../lib/useContactSync";
+import { useRefetchWhenStale } from "../lib/useRefetchWhenStale";
 import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
 
 const PAGE_SIZE = 40;
+const FEED_STALE_AFTER_MS = 60 * 1000;
 
 function ActivityRowSkeleton() {
   return (
@@ -59,6 +61,12 @@ export default function FriendsScreen() {
     loadMore,
   } = usePaginatedQuery(api.feed.listForUser, hasProfile ? {} : "skip", {
     initialNumItems: PAGE_SIZE,
+  });
+  // Friends post without any local mutation, so a feed opened from a warm
+  // cache (or foregrounded after a while) refetches when it is old enough.
+  useRefetchWhenStale(api.feed.listForUser, hasProfile ? {} : "skip", {
+    maxAgeMs: FEED_STALE_AFTER_MS,
+    paginated: true,
   });
 
   // Same query keys as the home Friends section, so this screen opens warm.

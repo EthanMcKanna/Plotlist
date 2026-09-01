@@ -24,7 +24,10 @@ import { api } from "../lib/plotlist/api";
 import { useMutation, usePaginatedQuery, useQuery } from "../lib/plotlist/react";
 import { queryClient } from "../lib/queryClient";
 import { syncAppBadgeCount } from "../lib/pushToken";
+import { useRefetchWhenStale } from "../lib/useRefetchWhenStale";
 import { SHOW_BACK_BUTTON, useIsDesktopWeb } from "../lib/webLayout";
+
+const INBOX_STALE_AFTER_MS = 60 * 1000;
 
 // List entries carry their unread flag so renderItem (and its deps) stay
 // stable when one row is marked read — only that row's memo compare fails.
@@ -51,6 +54,16 @@ export default function NotificationsScreen() {
     status,
     loadMore,
   } = usePaginatedQuery(api.notifications.list, {}, { initialNumItems: 30 });
+  // Notifications arrive while the app is backgrounded; pushes only bump the
+  // springboard badge, so refetch the inbox and count on focus / foreground
+  // when the cached copies are old enough to have missed one.
+  useRefetchWhenStale(api.notifications.list, {}, {
+    maxAgeMs: INBOX_STALE_AFTER_MS,
+    paginated: true,
+  });
+  useRefetchWhenStale(api.notifications.getUnreadCount, undefined, {
+    maxAgeMs: INBOX_STALE_AFTER_MS,
+  });
 
   // Paginated pages are frozen in local state, so cache writes can't repaint
   // rows on older pages. Local overrides are the row-level unread truth; the

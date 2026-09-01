@@ -60,6 +60,10 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
   const sendInvite = useMutation(api.contacts.sendInvite);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  // Re-entrancy guard behind a ref so syncNow keeps one identity across a
+  // sync; depending on `isSyncing` state flipped it twice per run, which
+  // re-ran every effect and memo downstream of it.
+  const isSyncingRef = useRef(false);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   // Maps device sourceRecordIds to raw phone numbers so the invite flow can
   // open the SMS composer; the server intentionally only ever sees hashes.
@@ -78,9 +82,10 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
 
   const syncNow = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}): Promise<ContactSyncResult | null> => {
-      if (isSyncing) {
+      if (isSyncingRef.current) {
         return null;
       }
+      isSyncingRef.current = true;
       setIsSyncing(true);
       try {
         if ((await getContactsPermissionState()) === "denied") {
@@ -106,10 +111,11 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
         }
         return null;
       } finally {
+        isSyncingRef.current = false;
         setIsSyncing(false);
       }
     },
-    [isSyncing, rememberPhones, syncSnapshot],
+    [rememberPhones, syncSnapshot],
   );
 
   // Keep matches fresh without asking: once the user has synced and granted

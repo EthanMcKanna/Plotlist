@@ -36,6 +36,8 @@ import { useAuthActions } from "../../lib/plotlist/auth";
 import { callQuery } from "../../lib/plotlist/rpc";
 import { useAction, useMutation, useQuery } from "../../lib/plotlist/react";
 import { setContactsSyncDismissed } from "../../lib/preferences";
+import { reconcileNotificationOverrides } from "../../lib/notificationPrefOverrides";
+import { queryClient } from "../../lib/queryClient";
 import { resolveStorageUrl } from "../../lib/storageUrl";
 import {
   PURCHASES_SUPPORTED,
@@ -345,6 +347,14 @@ export default function SettingsScreen() {
   ) as Record<string, boolean> | undefined;
   const updateNotificationPrefs = useMutation(api.notifications.updatePreferences);
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, boolean>>({});
+  // An override only needs to live until the server agrees with it; a
+  // session-long override would shadow changes made elsewhere.
+  useEffect(() => {
+    if (!notificationPrefs) return;
+    setNotificationOverrides((current) =>
+      reconcileNotificationOverrides(current, notificationPrefs),
+    );
+  }, [notificationPrefs]);
   const resolvedNotificationPrefs = {
     episodes: true,
     follows: true,
@@ -358,9 +368,21 @@ export default function SettingsScreen() {
   };
   const toggleNotificationPref = (key: string) => (value: boolean) => {
     setNotificationOverrides((current) => ({ ...current, [key]: value }));
-    void updateNotificationPrefs({ preferences: { [key]: value } }).catch(() => {
-      setNotificationOverrides((current) => ({ ...current, [key]: !value }));
-    });
+    void updateNotificationPrefs({ preferences: { [key]: value } })
+      .then((saved) => {
+        // The mutation echoes the merged preferences; seed the cache so the
+        // reconcile effect drops the override without flashing the old value
+        // while the post-mutation refetch is still in flight.
+        if (saved && typeof saved === "object" && hasProfile) {
+          queryClient.setQueryData(
+            ["plotlist-rpc", "query", "notifications:getPreferences", {}],
+            saved,
+          );
+        }
+      })
+      .catch(() => {
+        setNotificationOverrides((current) => ({ ...current, [key]: !value }));
+      });
   };
   const avatarUrl = resolveStorageUrl(me?.avatarStorageId);
 
