@@ -37,6 +37,9 @@ async function getShowRowsChunked(showIds: string[]) {
   return results.flat();
 }
 
+// Only the runtime fields leave D1: the insights engine reads
+// episodeRunTime / episode_run_time and nothing else from a show's ~100KB
+// cached payload, and a big history can touch hundreds of shows here.
 async function getDetailPayloadsChunked(externalIds: string[]) {
   const chunks = chunkForSqlParams(Array.from(new Set(externalIds)), 1, 80);
   const results = await Promise.all(
@@ -44,7 +47,8 @@ async function getDetailPayloadsChunked(externalIds: string[]) {
       db
         .select({
           externalId: tmdbDetailsCache.externalId,
-          payload: tmdbDetailsCache.payload,
+          episodeRunTimeJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.episodeRunTime')`,
+          episodeRunTimeRawJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.episode_run_time')`,
         })
         .from(tmdbDetailsCache)
         .where(
@@ -55,7 +59,27 @@ async function getDetailPayloadsChunked(externalIds: string[]) {
         ),
     ),
   );
-  return results.flat();
+  return results.flat().map((row) => ({
+    externalId: row.externalId,
+    payload: slimRuntimePayload(row.episodeRunTimeJson, row.episodeRunTimeRawJson),
+  }));
+}
+
+// Rebuilds the runtime-relevant slice of a details payload from json_extract
+// output (scalars come back as-is, arrays as JSON text).
+export function slimRuntimePayload(episodeRunTime: unknown, episodeRunTimeRaw: unknown) {
+  const parse = (value: unknown) => {
+    if (typeof value !== "string") return value ?? undefined;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  };
+  return {
+    episodeRunTime: parse(episodeRunTime),
+    episode_run_time: parse(episodeRunTimeRaw),
+  };
 }
 
 // Shared loader for every insights consumer (full stats RPC + monthly recap

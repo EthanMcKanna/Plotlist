@@ -19,6 +19,13 @@ const CACHEABLE_RPCS: Record<RpcCacheKind, Record<string, number>> = {
     "reviews:getEpisodeStats": 120,
     "shows:get": 300,
     "embeddings:getShowFacets": 3600,
+    // Catalog search reads only the FTS index / shows table; the D1 search
+    // cache behind the remote fallback lives 24h, so a short colo TTL is safe.
+    "shows:search": 300,
+    "users:getShowsById": 300,
+    // Likers of a review/comment: no viewer input, changes rarely enough that
+    // a minute of staleness on the "liked by" sheet is invisible.
+    "likes:listForTarget": 60,
   },
   action: {
     "shows:getHomeCatalog": 300,
@@ -27,6 +34,18 @@ const CACHEABLE_RPCS: Record<RpcCacheKind, Record<string, number>> = {
     "shows:getSeasonDetails": 600,
     "shows:getImdbRatings": 3600,
     "people:getDetails": 600,
+    "shows:searchCatalog": 300,
+    // Recs v2 browse surfaces: pure functions of the catalog + facet tables
+    // (or a query embedding), never of the caller. Vector queries and the
+    // Gemini embed behind vibe search are the expensive part, so these hold
+    // longer than the D1-only entries above.
+    "embeddings:getSimilarShows": 600,
+    "embeddings:getSmartLists": 600,
+    "embeddings:searchByVibe": 600,
+    "embeddings:getFacetBrowse": 3600,
+    "embeddings:getFacetPreviews": 3600,
+    "embeddings:getFacetShows": 600,
+    "embeddings:getShowTasteSocialProof": 3600,
   },
 };
 

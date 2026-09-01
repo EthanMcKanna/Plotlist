@@ -81,7 +81,7 @@ import {
   getSmartListsV2,
   vibeSearchShows,
 } from "./recs-handlers";
-import { computeTasteMatchPercent } from "./recs";
+import { computeTasteMatchPercentsForViewer } from "./recs";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
@@ -130,6 +130,7 @@ import {
   type ContinueQueuedEpisode,
 } from "../../lib/continueEpisodeQueue";
 import { deferBackgroundWork } from "./background";
+import { mapWithConcurrency } from "./concurrency";
 import {
   planWatchStatusReconciliation,
   selectWatchStatesToReconcile,
@@ -1506,16 +1507,14 @@ async function buildUserProfile(
   const viewerId = viewer?.id ?? null;
   const isOwnProfile = viewerId === profileUser.id;
 
-  const block = await getBlockStatus(viewerId, profileUser.id);
-  // Someone who blocked the viewer simply doesn't exist for them.
-  if (block.hasBlockedViewer) {
-    return null;
-  }
-
   // Relationship facts come from point lookups and one aggregated join —
-  // never from loading either side's full follow graph.
+  // never from loading either side's full follow graph. The block check
+  // rides the same wave: its answer only decides whether the rest is
+  // returned, so the point lookups don't wait on it.
   const viewerFollowsAlias = alias(follows, "viewer_follows");
+  const hasRelationship = Boolean(viewerId) && !isOwnProfile;
   const [
+    block,
     isFollowingRows,
     followsViewerRows,
     pendingRequestRows,
@@ -1523,8 +1522,9 @@ async function buildUserProfile(
     contactRows,
     mutualPreviewEdges,
   ] =
-    viewerId && !isOwnProfile
+    viewerId && hasRelationship
       ? await Promise.all([
+          getBlockStatus(viewerId, profileUser.id),
           db
             .select({ id: follows.id })
             .from(follows)
@@ -1566,8 +1566,11 @@ async function buildUserProfile(
               ),
             )
             .limit(1),
+          // Mutuals are people the viewer follows, and blocking removes the
+          // follow edge in both directions, so the preview needs no extra
+          // block filtering — the user rows join straight in.
           db
-            .select({ userId: follows.followerId })
+            .select({ user: users })
             .from(follows)
             .innerJoin(
               viewerFollowsAlias,
@@ -1576,11 +1579,16 @@ async function buildUserProfile(
                 eq(viewerFollowsAlias.followerId, viewerId),
               ),
             )
+            .innerJoin(users, eq(users.id, follows.followerId))
             .where(eq(follows.followeeId, profileUser.id))
             .orderBy(desc(follows.createdAt))
             .limit(3),
         ])
-      : [[], [], [], [], [], []];
+      : [await getBlockStatus(viewerId, profileUser.id), [], [], [], [], [], []];
+  // Someone who blocked the viewer simply doesn't exist for them.
+  if (block.hasBlockedViewer) {
+    return null;
+  }
 
   const isFollowing = isFollowingRows.length > 0;
   const profileFollowsViewer = followsViewerRows.length > 0;
@@ -1588,22 +1596,12 @@ async function buildUserProfile(
   const mutualCount = Number(mutualRows[0]?.value ?? 0);
   const inContacts = contactRows.length > 0;
 
-  // Mutuals are people the viewer follows, and blocking removes the follow
-  // edge in both directions, so the preview needs no extra block filtering.
-  const mutualPreviewUsers =
-    mutualPreviewEdges.length > 0
-      ? await getUsersByIdsChunked(mutualPreviewEdges.map((row) => row.userId))
-      : [];
-  const mutualUserById = new Map(mutualPreviewUsers.map((row) => [row.id, row] as const));
-  const mutualPreview = mutualPreviewEdges
-    .map((edge) => mutualUserById.get(edge.userId))
-    .filter((row): row is typeof users.$inferSelect => Boolean(row))
-    .map((row) => ({
-      _id: row.id,
-      displayName: row.displayName ?? row.name ?? null,
-      username: row.username ?? null,
-      avatarUrl: row.avatarUrl ?? row.image ?? null,
-    }));
+  const mutualPreview = mutualPreviewEdges.map(({ user: row }) => ({
+    _id: row.id,
+    displayName: row.displayName ?? row.name ?? null,
+    username: row.username ?? null,
+    avatarUrl: row.avatarUrl ?? row.image ?? null,
+  }));
 
   const relationship = viewerId
     ? {
@@ -1668,7 +1666,7 @@ async function buildUserProfile(
   const [
     ratingAggRows,
     favoriteShowRows,
-    { topRatedRows, topRatedShowRows },
+    topRatedRows,
     currentlyWatching,
     watchlistPreview,
     libraryCounts,
@@ -1683,22 +1681,21 @@ async function buildUserProfile(
     favoriteShowIds.length > 0
       ? db.select().from(shows).where(inArray(shows.id, favoriteShowIds))
       : Promise.resolve([] as (typeof shows.$inferSelect)[]),
-    (async () => {
-      const topRatedRows = await db
-        .select()
-        .from(reviews)
-        .where(eq(reviews.authorId, profileUser.id))
-        .orderBy(desc(reviews.rating), desc(reviews.createdAt))
-        .limit(12);
-      const topRatedShowRows =
-        topRatedRows.length > 0
-          ? await db
-              .select()
-              .from(shows)
-              .where(inArray(shows.id, topRatedRows.map((row) => row.showId)))
-          : [];
-      return { topRatedRows, topRatedShowRows };
-    })(),
+    // Reviews whose show is gone were dropped from the tiles anyway, so the
+    // join replaces the old review-then-shows pair of round trips.
+    db
+      .select({
+        reviewId: reviews.id,
+        rating: reviews.rating,
+        showId: shows.id,
+        title: shows.title,
+        posterUrl: shows.posterUrl,
+      })
+      .from(reviews)
+      .innerJoin(shows, eq(shows.id, reviews.showId))
+      .where(eq(reviews.authorId, profileUser.id))
+      .orderBy(desc(reviews.rating), desc(reviews.createdAt))
+      .limit(12),
     permissions.currentlyWatching ? getWatchStateShowPreviews(profileUser.id, "watching") : [],
     permissions.watchlist ? getWatchStateShowPreviews(profileUser.id, "watchlist") : [],
     getUserLibraryCounts(profileUser.id),
@@ -1712,7 +1709,6 @@ async function buildUserProfile(
     .map((showId) => favoriteShowById.get(showId))
     .filter((show): show is typeof shows.$inferSelect => Boolean(show))
     .map(toShowPreview);
-  const topRatedShowById = new Map(topRatedShowRows.map((show) => [show.id, show] as const));
 
   return {
     user: toClientUser(profileUser),
@@ -1739,21 +1735,7 @@ async function buildUserProfile(
     favoriteGenres: permissions.favorites ? profileUser.favoriteGenres ?? [] : [],
     currentlyWatching,
     watchlistPreview,
-    topRated: topRatedRows
-      .map((review) => {
-        const show = topRatedShowById.get(review.showId);
-        if (!show) {
-          return null;
-        }
-        return {
-          reviewId: review.id,
-          rating: review.rating,
-          showId: show.id,
-          title: show.title,
-          posterUrl: show.posterUrl,
-        };
-      })
-      .filter(Boolean),
+    topRated: topRatedRows,
   };
 }
 
@@ -1974,21 +1956,35 @@ async function enrichListDocs(
         )
       : Promise.resolve([] as Array<{ listId: string }>),
     getUsersByIdsChunked(ownerIds),
-    // Poster art for list preview cards: first few items per list in list
-    // order (trimmed to 3 per list below). Chunk order is list-id order per
-    // chunk only, but consumers group by list id so that is enough.
-    queryInChunks(listIds, (chunk) =>
-      db
+    // Poster art for list preview cards: the first three posters per list
+    // in list order, bounded in SQL (a window rank per list) so a page of
+    // long lists doesn't pull every item row just to keep three. Chunk
+    // order is list-id order per chunk only, but consumers group by list
+    // id so that is enough.
+    queryInChunks(listIds, (chunk) => {
+      const rankedItems = db
         .select({
           listId: listItems.listId,
-          position: listItems.position,
           posterUrl: shows.posterUrl,
+          rowNumber:
+            sql<number>`row_number() over (partition by ${listItems.listId} order by ${listItems.position})`.as(
+              "row_number",
+            ),
         })
         .from(listItems)
         .innerJoin(shows, eq(shows.id, listItems.showId))
-        .where(inArray(listItems.listId, chunk))
-        .orderBy(listItems.listId, listItems.position),
-    ),
+        .where(and(inArray(listItems.listId, chunk), sql`${shows.posterUrl} is not null`))
+        .as("ranked_items");
+      return db
+        .select({
+          listId: rankedItems.listId,
+          posterUrl: rankedItems.posterUrl,
+          rowNumber: rankedItems.rowNumber,
+        })
+        .from(rankedItems)
+        .where(sql`${rankedItems.rowNumber} <= 3`)
+        .orderBy(rankedItems.listId, sql`${rankedItems.rowNumber}`);
+    }),
   ]);
 
   const itemCountByList = new Map(itemCounts.map((row) => [row.listId, Number(row.total)]));
@@ -2433,31 +2429,45 @@ async function fetchAndCacheShowDetails(
     payload?.status === "In Production";
   const expiresAt = now + (isActiveShow ? 12 : 7 * 24) * 60 * 60 * 1000;
   const fetchedImdbId = readImdbIdFromDetailsPayload(payload);
-  if (show.imdbId == null && fetchedImdbId) {
-    await db
-      .update(shows)
-      .set({ imdbId: fetchedImdbId, updatedAt: now })
-      .where(eq(shows.id, show.id));
-  }
   const storedBackdropUrl =
     typeof show.backdropUrl === "string" && show.backdropUrl.includes("/original/")
       ? null
       : show.backdropUrl;
+  const showPatch: Partial<typeof shows.$inferInsert> = {};
+  if (show.imdbId == null && fetchedImdbId) {
+    showPatch.imdbId = fetchedImdbId;
+  }
   if ((!storedBackdropUrl && payload?.backdropPath) || (!show.posterUrl && payload?.posterPath)) {
-    await db
-      .update(shows)
-      .set({
-        backdropUrl: storedBackdropUrl ?? payload.backdropPath ?? null,
-        posterUrl: show.posterUrl ?? payload.posterPath ?? null,
-        updatedAt: now,
+    showPatch.backdropUrl = storedBackdropUrl ?? payload.backdropPath ?? null;
+    showPatch.posterUrl = show.posterUrl ?? payload.posterPath ?? null;
+  }
+  // The imdb-id/artwork backfills and the cache upsert are side channels of
+  // the fetch — the caller already has the payload, so they ride the
+  // background scope in one batch. The upsert keys on the unique
+  // (source, id) index so two concurrent refreshes can't double-insert.
+  const writes = [
+    ...(Object.keys(showPatch).length > 0
+      ? [db.update(shows).set({ ...showPatch, updatedAt: now }).where(eq(shows.id, show.id))]
+      : []),
+    db
+      .insert(tmdbDetailsCache)
+      .values({
+        id: cachedRow?.id ?? createId("tmdbdetails"),
+        externalSource: show.externalSource,
+        externalId: show.externalId,
+        payload,
+        fetchedAt: now,
+        expiresAt,
       })
-      .where(eq(shows.id, show.id));
-  }
-  if (cachedRow) {
-    await db.update(tmdbDetailsCache).set({ payload, fetchedAt: now, expiresAt }).where(eq(tmdbDetailsCache.id, cachedRow.id));
-  } else {
-    await db.insert(tmdbDetailsCache).values({ id: createId("tmdbdetails"), externalSource: show.externalSource, externalId: show.externalId, payload, fetchedAt: now, expiresAt });
-  }
+      .onConflictDoUpdate({
+        target: [tmdbDetailsCache.externalSource, tmdbDetailsCache.externalId],
+        set: { payload, fetchedAt: now, expiresAt },
+      }),
+  ];
+  deferBackgroundWork(
+    db.batch(writes as [(typeof writes)[number], ...(typeof writes)[number][]]),
+    `show details cache ${show.externalId}`,
+  );
   return payload;
 }
 
@@ -2478,34 +2488,43 @@ async function fetchPersonPayload(personId: number) {
       ),
     )
     .limit(1);
-  if (cached[0] && cached[0].expiresAt > Date.now()) {
-    return cached[0].payload;
+  const cachedRow = cached[0];
+  if (cachedRow && cachedRow.expiresAt > Date.now()) {
+    return cachedRow.payload;
   }
-  let payload: unknown;
-  try {
-    payload = await tmdb(`/person/${personId}`, { append_to_response: "tv_credits" });
-  } catch (error) {
-    // A stale filmography beats an error screen.
-    if (cached[0]) return cached[0].payload;
-    throw error;
+  if (cachedRow) {
+    // Stale-while-revalidate: a week-old filmography is served now and
+    // refreshed off the response path; only a never-seen person blocks.
+    deferBackgroundWork(
+      refreshPersonPayload(personId, externalId),
+      `person cache refresh ${externalId}`,
+    );
+    return cachedRow.payload;
   }
+  return await refreshPersonPayload(personId, externalId);
+}
+
+async function refreshPersonPayload(personId: number, externalId: string) {
+  const payload = await tmdb(`/person/${personId}`, { append_to_response: "tv_credits" });
   const now = Date.now();
   const expiresAt = now + PERSON_CACHE_TTL_MS;
-  if (cached[0]) {
-    await db
-      .update(tmdbDetailsCache)
-      .set({ payload, fetchedAt: now, expiresAt })
-      .where(eq(tmdbDetailsCache.id, cached[0].id));
-  } else {
-    await db.insert(tmdbDetailsCache).values({
-      id: createId("tmdbdetails"),
-      externalSource: PERSON_CACHE_SOURCE,
-      externalId,
-      payload,
-      fetchedAt: now,
-      expiresAt,
-    });
-  }
+  deferBackgroundWork(
+    db
+      .insert(tmdbDetailsCache)
+      .values({
+        id: createId("tmdbdetails"),
+        externalSource: PERSON_CACHE_SOURCE,
+        externalId,
+        payload,
+        fetchedAt: now,
+        expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: [tmdbDetailsCache.externalSource, tmdbDetailsCache.externalId],
+        set: { payload, fetchedAt: now, expiresAt },
+      }),
+    `person cache upsert ${externalId}`,
+  );
   return payload;
 }
 
@@ -2774,18 +2793,70 @@ type HomeCatalogStaleFallbackHandler = (args: {
   page: number;
 }) => void;
 
+type TmdbListOptions = {
+  /** Cron path: always refetch (no stale-while-revalidate short-circuit). */
+  forceRefresh?: boolean;
+};
+
+// Cached TMDB list for a home category. A fresh row is served as-is; an
+// expired row inside the stale grace is served immediately while the
+// refetch rides the background scope (a user request no longer pays for
+// up to 16 TMDB round trips when the home surface expires at once). Only a
+// missing row — or one past the grace — blocks on TMDB.
 async function getTmdbList(
   category: string,
   limit: number,
   page: number,
   onStaleFallback?: HomeCatalogStaleFallbackHandler,
+  options: TmdbListOptions = {},
 ) {
   const cacheKey = `v6:${category}:${page}:${limit}`;
   const cached = await db.select().from(tmdbListCache).where(eq(tmdbListCache.category, cacheKey)).limit(1);
-  if (cached[0] && isHomeCatalogCacheFresh(cached[0].expiresAt)) {
-    return cached[0].results as any[];
+  const cachedRow = cached[0];
+  if (cachedRow && !options.forceRefresh) {
+    if (isHomeCatalogCacheFresh(cachedRow.expiresAt)) {
+      return cachedRow.results as any[];
+    }
+    if (isHomeCatalogCacheUsableAfterError(cachedRow.expiresAt)) {
+      deferBackgroundWork(
+        refreshTmdbListCache(category, limit, page, cacheKey, cachedRow, { deferSideWrites: true }),
+        `home catalog refresh ${cacheKey}`,
+      );
+      return cachedRow.results as any[];
+    }
   }
 
+  try {
+    return await refreshTmdbListCache(category, limit, page, cacheKey, cachedRow, {
+      // The cron has no request scope to hand deferred work to, so it
+      // waits for the catalog upsert itself.
+      deferSideWrites: !options.forceRefresh,
+    });
+  } catch (error) {
+    if (cachedRow && isHomeCatalogCacheUsableAfterError(cachedRow.expiresAt)) {
+      console.warn("[home-catalog] Serving stale TMDB list cache after refresh failure.", {
+        category,
+        limit,
+        page,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      onStaleFallback?.({ category, limit, page });
+      return cachedRow.results as any[];
+    }
+    throw error;
+  }
+}
+
+// Fetch + rank + persist one category list. Throws on TMDB failure; the
+// caller decides whether a stale row can stand in.
+async function refreshTmdbListCache(
+  category: string,
+  limit: number,
+  page: number,
+  cacheKey: string,
+  cachedRow: typeof tmdbListCache.$inferSelect | undefined,
+  options: { deferSideWrites: boolean },
+) {
   let payload: any;
   const today = new Date();
   const todayIso = today.toISOString().slice(0, 10);
@@ -2801,98 +2872,84 @@ async function getTmdbList(
   const fiveYearStartIso = `${today.getUTCFullYear() - 5}-01-01`;
   const recentYearStartIso = `${today.getUTCFullYear() - 2}-01-01`;
 
-  try {
-    if (category === "trending_day") {
-      payload = await tmdb("/trending/tv/day", { page });
-    } else if (category === "trending_week") {
-      payload = await tmdb("/trending/tv/week", { page });
-    } else if (category === "rising_now") {
-      payload = await tmdb("/discover/tv", {
-        page,
-        "air_date.gte": twoWeeksIso,
-        "air_date.lte": todayIso,
-        "vote_count.gte": 25,
-        "vote_average.gte": 7,
-        sort_by: "popularity.desc",
-        timezone: "America/Los_Angeles",
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (category === "airing_today") {
-      payload = await tmdb("/tv/airing_today", { page });
-    } else if (category === "on_the_air") {
-      payload = await tmdb("/tv/on_the_air", { page });
-    } else if (category === "fresh_premieres" || category === "breakout_premieres") {
-      payload = await tmdb("/discover/tv", {
-        page,
-        "first_air_date.gte": recentIso,
-        "first_air_date.lte": todayIso,
-        "vote_count.gte": category === "breakout_premieres" ? 25 : 15,
-        "vote_average.gte": category === "breakout_premieres" ? 7 : undefined,
-        sort_by: "popularity.desc",
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (category === "top_rated" || category === "critics_choice") {
-      payload = await tmdb("/discover/tv", {
-        page,
-        "first_air_date.gte": category === "critics_choice" ? recentYearStartIso : undefined,
-        "vote_count.gte": category === "critics_choice" ? 100 : 350,
-        "vote_average.gte": category === "critics_choice" ? 7.6 : 7.5,
-        sort_by: category === "critics_choice" ? "popularity.desc" : "vote_average.desc",
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (category === "quick_picks") {
-      payload = await tmdb("/discover/tv", {
-        page,
-        "first_air_date.gte": fiveYearStartIso,
-        "vote_count.gte": 50,
-        "vote_average.gte": 7.1,
-        sort_by: "popularity.desc",
-        "with_runtime.lte": 42,
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (category === "hidden_gems") {
-      payload = await tmdb("/discover/tv", {
-        page,
-        "vote_count.gte": 40,
-        "vote_count.lte": 800,
-        "vote_average.gte": 7.4,
-        sort_by: "vote_average.desc",
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (genreCategoryIds[category]) {
-      payload = await tmdb("/discover/tv", {
-        page,
-        with_genres: genreCategoryIds[category],
-        "vote_count.gte": 40,
-        sort_by: "popularity.desc",
-        without_genres: noisyTvGenreIds,
-      });
-    } else if (providerIds[category]) {
-      payload = await tmdb("/discover/tv", {
-        page,
-        watch_region: "US",
-        with_watch_providers: providerIds[category],
-        with_watch_monetization_types: "flatrate",
-        "air_date.gte": oneYearIso,
-        "vote_count.gte": 20,
-        sort_by: "popularity.desc",
-        without_genres: noisyTvGenreIds,
-      });
-    } else {
-      payload = await tmdb("/trending/tv/week", { page });
-    }
-  } catch (error) {
-    if (cached[0] && isHomeCatalogCacheUsableAfterError(cached[0].expiresAt)) {
-      console.warn("[home-catalog] Serving stale TMDB list cache after refresh failure.", {
-        category,
-        limit,
-        page,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      onStaleFallback?.({ category, limit, page });
-      return cached[0].results as any[];
-    }
-    throw error;
+  if (category === "trending_day") {
+    payload = await tmdb("/trending/tv/day", { page });
+  } else if (category === "trending_week") {
+    payload = await tmdb("/trending/tv/week", { page });
+  } else if (category === "rising_now") {
+    payload = await tmdb("/discover/tv", {
+      page,
+      "air_date.gte": twoWeeksIso,
+      "air_date.lte": todayIso,
+      "vote_count.gte": 25,
+      "vote_average.gte": 7,
+      sort_by: "popularity.desc",
+      timezone: "America/Los_Angeles",
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (category === "airing_today") {
+    payload = await tmdb("/tv/airing_today", { page });
+  } else if (category === "on_the_air") {
+    payload = await tmdb("/tv/on_the_air", { page });
+  } else if (category === "fresh_premieres" || category === "breakout_premieres") {
+    payload = await tmdb("/discover/tv", {
+      page,
+      "first_air_date.gte": recentIso,
+      "first_air_date.lte": todayIso,
+      "vote_count.gte": category === "breakout_premieres" ? 25 : 15,
+      "vote_average.gte": category === "breakout_premieres" ? 7 : undefined,
+      sort_by: "popularity.desc",
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (category === "top_rated" || category === "critics_choice") {
+    payload = await tmdb("/discover/tv", {
+      page,
+      "first_air_date.gte": category === "critics_choice" ? recentYearStartIso : undefined,
+      "vote_count.gte": category === "critics_choice" ? 100 : 350,
+      "vote_average.gte": category === "critics_choice" ? 7.6 : 7.5,
+      sort_by: category === "critics_choice" ? "popularity.desc" : "vote_average.desc",
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (category === "quick_picks") {
+    payload = await tmdb("/discover/tv", {
+      page,
+      "first_air_date.gte": fiveYearStartIso,
+      "vote_count.gte": 50,
+      "vote_average.gte": 7.1,
+      sort_by: "popularity.desc",
+      "with_runtime.lte": 42,
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (category === "hidden_gems") {
+    payload = await tmdb("/discover/tv", {
+      page,
+      "vote_count.gte": 40,
+      "vote_count.lte": 800,
+      "vote_average.gte": 7.4,
+      sort_by: "vote_average.desc",
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (genreCategoryIds[category]) {
+    payload = await tmdb("/discover/tv", {
+      page,
+      with_genres: genreCategoryIds[category],
+      "vote_count.gte": 40,
+      sort_by: "popularity.desc",
+      without_genres: noisyTvGenreIds,
+    });
+  } else if (providerIds[category]) {
+    payload = await tmdb("/discover/tv", {
+      page,
+      watch_region: "US",
+      with_watch_providers: providerIds[category],
+      with_watch_monetization_types: "flatrate",
+      "air_date.gte": oneYearIso,
+      "vote_count.gte": 20,
+      sort_by: "popularity.desc",
+      without_genres: noisyTvGenreIds,
+    });
+  } else {
+    payload = await tmdb("/trending/tv/week", { page });
   }
   const editorialSeedGroup = editorialSeedGroupsByTmdbCategory[category];
   const editorialSeeds = editorialSeedGroup
@@ -2918,18 +2975,24 @@ async function getTmdbList(
         Boolean(providerIds[category]),
     },
   ).slice(0, limit);
-  try {
-    await upsertShowsFromCatalogBatch(results);
-  } catch (error) {
+  // Catalog rows for the listed shows are a side effect of the refresh —
+  // the list itself is already ranked — so request paths hand the upsert
+  // to the background scope.
+  const catalogUpsert = upsertShowsFromCatalogBatch(results).catch((error) => {
     console.warn("[home-catalog] Failed to upsert catalog shows.", {
       category,
       error: error instanceof Error ? error.message : String(error),
     });
+  });
+  if (options.deferSideWrites) {
+    deferBackgroundWork(catalogUpsert, `home catalog show upsert ${cacheKey}`);
+  } else {
+    await catalogUpsert;
   }
   const now = Date.now();
   const expiresAt = now + 6 * 60 * 60 * 1000;
-  if (cached[0]) {
-    await db.update(tmdbListCache).set({ results, fetchedAt: now, expiresAt }).where(eq(tmdbListCache.id, cached[0].id));
+  if (cachedRow) {
+    await db.update(tmdbListCache).set({ results, fetchedAt: now, expiresAt }).where(eq(tmdbListCache.id, cachedRow.id));
   } else {
     await db.insert(tmdbListCache).values({ id: createId("tmdblist"), category: cacheKey, results, fetchedAt: now, expiresAt });
   }
@@ -2959,12 +3022,19 @@ type HomeCatalogListResult = {
 async function loadHomeCatalogList(
   category: string,
   limit: number,
+  options: TmdbListOptions = {},
 ): Promise<HomeCatalogListResult> {
   let stale = false;
   try {
-    const items = await getTmdbList(category, limit, 1, () => {
-      stale = true;
-    });
+    const items = await getTmdbList(
+      category,
+      limit,
+      1,
+      () => {
+        stale = true;
+      },
+      options,
+    );
     return {
       category,
       failed: false,
@@ -3060,6 +3130,8 @@ const homeCatalogCategoryPlan: Array<{ category: string; limit: number }> = [
   })),
 ];
 
+const HOME_CATALOG_REFRESH_CONCURRENCY = 4;
+
 // Refresh the stalest home catalog categories, stalest first, up to
 // maxCategories per invocation.
 export async function refreshStaleHomeCatalogCategories(maxCategories = 4) {
@@ -3079,10 +3151,11 @@ export async function refreshStaleHomeCatalogCategories(maxCategories = 4) {
     .sort((left, right) => left.expiresAt - right.expiresAt)
     .slice(0, maxCategories);
 
-  const results: HomeCatalogListResult[] = [];
-  for (const entry of staleEntries) {
-    results.push(await loadHomeCatalogList(entry.category, entry.limit));
-  }
+  // Independent TMDB list fetches; four in flight keeps a 16-category tick
+  // well inside the subrequest budget while cutting the wall time ~4x.
+  const results = await mapWithConcurrency(staleEntries, HOME_CATALOG_REFRESH_CONCURRENCY, (entry) =>
+    loadHomeCatalogList(entry.category, entry.limit, { forceRefresh: true }),
+  );
 
   return {
     checkedCategories: homeCatalogCategoryPlan.length,
@@ -3783,12 +3856,14 @@ async function getSimilarTasteUserPreviews(userId: string, limit: number) {
   }
 
   const candidateIds = candidateRows.map((candidate) => candidate.id);
-  const candidateWatchRows: Array<typeof watchStates.$inferSelect> = [];
-  for (const chunk of chunkForSqlParams(candidateIds, 1, 80)) {
-    candidateWatchRows.push(
-      ...(await db.select().from(watchStates).where(inArray(watchStates.userId, chunk))),
-    );
-  }
+  // Up to ~200 candidates → three chunks; independent, so one wave.
+  const candidateWatchRows = (
+    await Promise.all(
+      chunkForSqlParams(candidateIds, 1, 80).map((chunk) =>
+        db.select().from(watchStates).where(inArray(watchStates.userId, chunk)),
+      ),
+    )
+  ).flat();
   const watchedShowIdsByUser = new Map<string, Set<string>>();
   for (const row of candidateWatchRows) {
     const showIds = watchedShowIdsByUser.get(row.userId) ?? new Set<string>();
@@ -4058,6 +4133,8 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
   }));
 }
 
+const FEED_FALLBACK_MAX_ROWS = 1000;
+
 async function buildFeed(userId: string, args: any) {
   const feedPagination = paginationArgs.parse(args ?? {});
   const feedStart = Number(feedPagination.paginationOpts?.cursor ?? 0) || 0;
@@ -4096,12 +4173,18 @@ async function buildFeed(userId: string, args: any) {
   let tableExhausted = windowRows.length < fetchLimit;
   let feedRows = await filterByBlocks(windowRows);
   if (!tableExhausted && feedRows.length < feedStart + feedNumItems + 1) {
+    // Blocking ate the buffer: widen the window rather than reading the
+    // whole history (a heavy follower's feed_items runs to tens of
+    // thousands of rows). If even the wide window can't fill the page the
+    // cursor just reports "more available" and the next request re-reads.
+    const fallbackLimit = Math.min(FEED_FALLBACK_MAX_ROWS, Math.max(fetchLimit * 5, 400));
     windowRows = await db
       .select()
       .from(feedItems)
       .where(eq(feedItems.ownerId, userId))
-      .orderBy(desc(feedItems.timestamp));
-    tableExhausted = true;
+      .orderBy(desc(feedItems.timestamp))
+      .limit(fallbackLimit);
+    tableExhausted = windowRows.length < fallbackLimit;
     feedRows = await filterByBlocks(windowRows);
   }
   // Resolve entities only for the requested page — offsets still come from
@@ -4147,8 +4230,10 @@ async function buildFeed(userId: string, args: any) {
     page,
     continueCursor: String(feedNext),
     // With a bounded window, unread rows past the buffer mean there is
-    // always more to load; only an exhausted read can prove the end.
-    isDone: tableExhausted ? feedNext >= feedRows.length : false,
+    // always more to load; only an exhausted read can prove the end. The
+    // one exception is an empty page from the widened fallback window —
+    // the cursor can't advance, so that has to read as the end too.
+    isDone: tableExhausted ? feedNext >= feedRows.length : pageFeedRows.length === 0,
   };
 }
 
@@ -7819,13 +7904,23 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const show = showRows[0];
     if (!show) return null;
     const cached = await db.select().from(tmdbDetailsCache).where(and(eq(tmdbDetailsCache.externalSource, show.externalSource), eq(tmdbDetailsCache.externalId, show.externalId))).limit(1);
-    if (cached[0] && cached[0].expiresAt > Date.now()) {
-      return projectExtendedDetailsForClient(normalizeTmdbShowDetails(cached[0].payload));
+    const cachedRow = cached[0];
+    if (cachedRow) {
+      // Stale-while-revalidate: an expired payload is still the show page;
+      // the TMDB refetch (and its cache/backfill writes) ride the
+      // background scope instead of gating the response.
+      if (cachedRow.expiresAt <= Date.now() && show.externalSource === "tmdb") {
+        deferBackgroundWork(
+          fetchAndCacheShowDetails(show, cachedRow),
+          `show details refresh ${show.externalId}`,
+        );
+      }
+      return projectExtendedDetailsForClient(normalizeTmdbShowDetails(cachedRow.payload));
     }
     if (show.externalSource !== "tmdb") {
       return null;
     }
-    return projectExtendedDetailsForClient(await fetchAndCacheShowDetails(show, cached[0]));
+    return projectExtendedDetailsForClient(await fetchAndCacheShowDetails(show));
   },
   "people:getDetails": async ({ args }) => {
     const parsed = z.object({ personId: z.number().int().positive() }).parse(args ?? {});
@@ -8018,24 +8113,41 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const previews = await getSimilarTasteUserPreviews(user.id, Math.min(parsed.limit ?? 10, 30));
     // Attach a calibrated taste-match percent per person (recs v2). Capped so
     // a long list can't trigger a pile of profile builds in one request;
-    // failures leave the heuristic previews intact.
+    // the viewer's own profile is built once for all of them. Failures
+    // leave the heuristic previews intact.
     try {
-      await Promise.all(
-        previews.slice(0, 8).map(async (preview: any) => {
-          const targetId = preview?.user?._id ?? preview?.user?.id;
-          if (!targetId || targetId === user.id) return;
-          const percent = await computeTasteMatchPercent(user.id, targetId);
-          if (percent !== null) preview.tasteMatchPercent = percent;
-        }),
+      const targets = previews.slice(0, 8) as any[];
+      const percents = await computeTasteMatchPercentsForViewer(
+        user.id,
+        targets
+          .map((preview) => preview?.user?._id ?? preview?.user?.id)
+          .filter((targetId): targetId is string => typeof targetId === "string"),
       );
+      for (const preview of targets) {
+        const percent = percents.get(preview?.user?._id ?? preview?.user?.id);
+        if (percent !== undefined) preview.tasteMatchPercent = percent;
+      }
     } catch (error) {
       console.warn("[recs] similar-taste percent enrichment failed", error);
     }
     return previews;
   },
-  "embeddings:getListsFromSimilarTasteUsers": async ({ args }) => {
+  "embeddings:getListsFromSimilarTasteUsers": async ({ args, req }) => {
+    const viewer = await getOptionalAuthUser(req);
     const parsed = optionalLimitArgs.parse(args ?? {});
-    const rows = await db.select().from(lists).where(eq(lists.isPublic, true)).orderBy(desc(lists.updatedAt)).limit(Math.min(parsed.limit ?? 10, 30));
+    const limit = Math.min(parsed.limit ?? 10, 30);
+    // Authored content: lists by anyone with a block in either direction
+    // relative to the viewer never surface. Over-fetch so the block filter
+    // doesn't shorten the page for everyone else.
+    const candidateRows = await db
+      .select()
+      .from(lists)
+      .where(eq(lists.isPublic, true))
+      .orderBy(desc(lists.updatedAt))
+      .limit(limit + 20);
+    const rows = (
+      await filterRowsByBlockedAuthors(viewer?.id ?? null, candidateRows, (row) => row.ownerId)
+    ).slice(0, limit);
     const ownerIds = Array.from(new Set(rows.map((list) => list.ownerId)));
     const ownerRows = ownerIds.length
       ? await db.select().from(users).where(inArray(users.id, ownerIds))

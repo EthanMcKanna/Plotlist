@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { imdbRatingsCache } from "../../db/schema";
+import { deferBackgroundWork } from "./background";
 import { db } from "./db";
 import { createId } from "./ids";
 
@@ -16,7 +17,11 @@ const SETTLED_SEASON_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const EMPTY_RESULT_TTL_MS = 6 * 60 * 60 * 1000;
 // Bound on inline OMDb calls per request: show rating plus up to ten seasons
 // warm fully on a cold request now that the account is on Workers Paid.
+// Inline calls run concurrently, so this is also the per-request burst cap.
 const MAX_INLINE_FETCHES = 11;
+// Expired slots refresh off the response path, bounded the same way so a
+// request never fans out to more than ~2x this many OMDb calls in total.
+const MAX_BACKGROUND_REFRESHES = 11;
 
 export type ImdbShowRatingPayload = {
   rating: number | null;
@@ -116,34 +121,11 @@ async function fetchOmdb(params: Record<string, string>) {
   return await response.json();
 }
 
-type CacheRow = {
+export type CacheRow = {
   seasonNumber: number;
   payload: unknown;
   expiresAt: number;
 };
-
-async function upsertRatingsCacheEntry(
-  imdbId: string,
-  seasonNumber: number,
-  payload: ImdbShowRatingPayload | ImdbSeasonRatingsPayload,
-  expiresAt: number,
-  now: number,
-) {
-  await db
-    .insert(imdbRatingsCache)
-    .values({
-      id: createId("imdbratings"),
-      imdbId,
-      seasonNumber,
-      payload,
-      fetchedAt: now,
-      expiresAt,
-    })
-    .onConflictDoUpdate({
-      target: [imdbRatingsCache.imdbId, imdbRatingsCache.seasonNumber],
-      set: { payload, fetchedAt: now, expiresAt },
-    });
-}
 
 // Ratings are best-effort everywhere: OMDb being down, unconfigured, or
 // missing a title must never break the queries that embed them, so this
@@ -175,53 +157,42 @@ export async function getImdbRatings(
     );
   const cachedByNumber = new Map(rows.map((row) => [row.seasonNumber, row]));
 
-  let inlineFetches = 0;
-  const resolveSlot = async <Payload>(
-    seasonNumber: number,
-    fetchFresh: () => Promise<Payload | null>,
-    ttlFor: (payload: Payload) => number,
-  ): Promise<Payload | null> => {
+  // Stale-while-revalidate: anything cached is served as-is right now (an
+  // expired rating is still a rating), and refreshes ride the background
+  // scope. Only slots with no row at all block the response, and those
+  // fetch together instead of one after another.
+  const plan = planImdbRatingSlots([SHOW_RATING_SEASON, ...wantedSeasons], cachedByNumber, now);
+  const inlineFetched = await Promise.all(
+    plan.inline.map((seasonNumber) => fetchRatingSlot(imdbId, seasonNumber, now)),
+  );
+  const inlineByNumber = new Map<number, FetchedRatingSlot>();
+  for (const fetched of inlineFetched) {
+    if (fetched) inlineByNumber.set(fetched.seasonNumber, fetched);
+  }
+  if (inlineByNumber.size > 0) {
+    deferBackgroundWork(
+      persistRatingSlots(imdbId, Array.from(inlineByNumber.values()), now),
+      `imdb ratings cache write ${imdbId}`,
+    );
+  }
+  if (plan.refresh.length > 0) {
+    deferBackgroundWork(
+      refreshRatingSlots(imdbId, plan.refresh, now),
+      `imdb ratings refresh ${imdbId}`,
+    );
+  }
+
+  const payloadFor = (seasonNumber: number): unknown => {
     const cached = cachedByNumber.get(seasonNumber);
-    if (cached && cached.expiresAt > now) {
-      return cached.payload as Payload;
-    }
-    if (inlineFetches >= MAX_INLINE_FETCHES) {
-      return (cached?.payload as Payload) ?? null;
-    }
-    inlineFetches += 1;
-    try {
-      const fresh = await fetchFresh();
-      if (fresh === null) {
-        return (cached?.payload as Payload) ?? null;
-      }
-      await upsertRatingsCacheEntry(
-        imdbId,
-        seasonNumber,
-        fresh as ImdbShowRatingPayload | ImdbSeasonRatingsPayload,
-        now + ttlFor(fresh),
-        now,
-      );
-      return fresh;
-    } catch {
-      return (cached?.payload as Payload) ?? null;
-    }
+    if (cached) return cached.payload;
+    return inlineByNumber.get(seasonNumber)?.payload ?? null;
   };
 
-  const show = await resolveSlot<ImdbShowRatingPayload>(
-    SHOW_RATING_SEASON,
-    async () => parseOmdbShowPayload(await fetchOmdb({ i: imdbId })),
-    (payload) => (payload.rating === null ? EMPTY_RESULT_TTL_MS : SHOW_RATING_TTL_MS),
-  );
-
+  const show = payloadFor(SHOW_RATING_SEASON) as ImdbShowRatingPayload | null;
   const seasons: Record<number, ImdbSeasonRatings> = {};
   for (const seasonNumber of wantedSeasons) {
-    const payload = await resolveSlot<ImdbSeasonRatingsPayload>(
-      seasonNumber,
-      async () =>
-        parseOmdbSeasonPayload(await fetchOmdb({ i: imdbId, Season: String(seasonNumber) })),
-      (fresh) => seasonTtl(fresh, now),
-    );
-    if (payload && payload.episodes.length > 0) {
+    const payload = payloadFor(seasonNumber) as ImdbSeasonRatingsPayload | null;
+    if (payload && Array.isArray(payload.episodes) && payload.episodes.length > 0) {
       seasons[seasonNumber] = {
         averageRating: averageEpisodeRating(payload.episodes),
         episodes: payload.episodes,
@@ -230,4 +201,109 @@ export async function getImdbRatings(
   }
 
   return { imdbId, show: show && show.rating !== null ? show : null, seasons };
+}
+
+export type ImdbRatingSlotPlan = {
+  /** Cached and unexpired: served as-is. */
+  fresh: number[];
+  /** Cached but expired: served as-is (every stale slot). */
+  stale: number[];
+  /** The subset of `stale` that gets refetched in the background. */
+  refresh: number[];
+  /** No cache row: fetched inline before responding. */
+  inline: number[];
+  /** No cache row and past the inline bound: served as unknown. */
+  skipped: number[];
+};
+
+// Pure slot triage for getImdbRatings, exported for tests. Slot order is the
+// caller's priority order (show rating first, then seasons), so the bounds
+// always favor the earlier slots.
+export function planImdbRatingSlots(
+  slotNumbers: number[],
+  cachedByNumber: Map<number, CacheRow>,
+  now: number,
+  limits: { maxInline?: number; maxBackground?: number } = {},
+): ImdbRatingSlotPlan {
+  const maxInline = limits.maxInline ?? MAX_INLINE_FETCHES;
+  const maxBackground = limits.maxBackground ?? MAX_BACKGROUND_REFRESHES;
+  const plan: ImdbRatingSlotPlan = { fresh: [], stale: [], refresh: [], inline: [], skipped: [] };
+  for (const seasonNumber of slotNumbers) {
+    const cached = cachedByNumber.get(seasonNumber);
+    if (cached && cached.expiresAt > now) {
+      plan.fresh.push(seasonNumber);
+    } else if (cached) {
+      plan.stale.push(seasonNumber);
+      if (plan.refresh.length < maxBackground) plan.refresh.push(seasonNumber);
+    } else if (plan.inline.length < maxInline) {
+      plan.inline.push(seasonNumber);
+    } else {
+      plan.skipped.push(seasonNumber);
+    }
+  }
+  return plan;
+}
+
+type FetchedRatingSlot = {
+  seasonNumber: number;
+  payload: ImdbShowRatingPayload | ImdbSeasonRatingsPayload;
+  expiresAt: number;
+};
+
+// One OMDb call for a slot; null on any failure so a flaky slot degrades to
+// "unknown" (or the stale row) instead of failing the whole ratings read.
+async function fetchRatingSlot(
+  imdbId: string,
+  seasonNumber: number,
+  now: number,
+): Promise<FetchedRatingSlot | null> {
+  try {
+    if (seasonNumber === SHOW_RATING_SEASON) {
+      const payload = parseOmdbShowPayload(await fetchOmdb({ i: imdbId }));
+      return {
+        seasonNumber,
+        payload,
+        expiresAt: now + (payload.rating === null ? EMPTY_RESULT_TTL_MS : SHOW_RATING_TTL_MS),
+      };
+    }
+    const payload = parseOmdbSeasonPayload(
+      await fetchOmdb({ i: imdbId, Season: String(seasonNumber) }),
+    );
+    return { seasonNumber, payload, expiresAt: now + seasonTtl(payload, now) };
+  } catch {
+    return null;
+  }
+}
+
+// All fetched slots land in one D1 batch (one round trip, atomic).
+async function persistRatingSlots(imdbId: string, fetched: FetchedRatingSlot[], now: number) {
+  if (fetched.length === 0) return;
+  const statements = fetched.map((slot) =>
+    db
+      .insert(imdbRatingsCache)
+      .values({
+        id: createId("imdbratings"),
+        imdbId,
+        seasonNumber: slot.seasonNumber,
+        payload: slot.payload,
+        fetchedAt: now,
+        expiresAt: slot.expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: [imdbRatingsCache.imdbId, imdbRatingsCache.seasonNumber],
+        set: { payload: slot.payload, fetchedAt: now, expiresAt: slot.expiresAt },
+      }),
+  );
+  await db.batch(statements as [(typeof statements)[number], ...(typeof statements)[number][]]);
+}
+
+async function refreshRatingSlots(imdbId: string, seasonNumbers: number[], now: number) {
+  const fetched = await Promise.all(
+    seasonNumbers.map((seasonNumber) => fetchRatingSlot(imdbId, seasonNumber, now)),
+  );
+  await persistRatingSlots(
+    imdbId,
+    fetched.filter((slot): slot is FetchedRatingSlot => slot !== null),
+    now,
+  );
 }

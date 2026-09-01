@@ -299,3 +299,22 @@ export function tasteMatchTier(percent: number): TasteMatchTier {
     blurb: "Almost no overlap — their shelf is uncharted territory.",
   };
 }
+
+// Cross-rail dedupe for rails that were fetched in parallel against the same
+// exclusion set: drop anything an earlier rail already claimed, trim to the
+// rail's limit, renumber ranks, and register the survivors so the next rail
+// skips them. Mutates `used` on purpose — it is the running claim set.
+export function dedupeRailItems<T extends { _id: string; rank?: number }>(
+  items: readonly T[],
+  used: Set<string>,
+  limit: number,
+): T[] {
+  const kept: T[] = [];
+  for (const item of items) {
+    if (kept.length >= limit) break;
+    if (used.has(item._id)) continue;
+    used.add(item._id);
+    kept.push({ ...item, rank: kept.length + 1 });
+  }
+  return kept;
+}
