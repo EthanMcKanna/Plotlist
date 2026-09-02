@@ -9,7 +9,9 @@ type RpcCacheKind = "query" | "action";
 // Bump when a cached handler's response shape changes so stale shapes can't
 // outlive a deploy beyond their TTL.
 // v2: extendedDetails projected to the client field set (2026-08-02).
-const CACHE_EPOCH = "v2";
+// v3: home catalog + trending lists deepened and projected to the slim rail
+//     shape (lib/plotlist/homeRailPayload.ts).
+const CACHE_EPOCH = "v3";
 
 const CACHEABLE_RPCS: Record<RpcCacheKind, Record<string, number>> = {
   query: {

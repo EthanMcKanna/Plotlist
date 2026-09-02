@@ -1,4 +1,11 @@
-import { memo, useMemo, useState, type ComponentProps } from "react";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import {
   Platform,
   Pressable,
@@ -17,6 +24,11 @@ import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
 import { LinkPressable } from "./LinkPressable";
 import { getHomeDisplayMetaLine, getHomeDisplayMetaLabels } from "../lib/homeDisplayMeta";
+import {
+  RAIL_INITIAL_WINDOW,
+  getInitialRailWindow,
+  getNextRailWindow,
+} from "../lib/railWindow";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -36,6 +48,13 @@ export type SignatureRailItem = {
 };
 
 type LayoutKind = "feature" | "poster";
+
+// Render caps per layout. Poster rails carry the deep discovery pools; the
+// rail mounts RAIL_INITIAL_WINDOW cards up front and reveals the rest as
+// the user scrolls toward the end, so the cap bounds scroll depth rather
+// than first-frame work.
+export const SIGNATURE_RAIL_POSTER_LIMIT = 30;
+export const SIGNATURE_RAIL_FEATURE_LIMIT = 12;
 
 type SignatureRailProps = {
   /** Two-digit kicker number ("01", "02"…). */
@@ -64,8 +83,10 @@ type SignatureRailProps = {
   actionLabel?: string;
   /** Tap handler for the action affordance. */
   onAction?: () => void;
-  /** Max items to render. */
+  /** Max items to render (defaults per layout, see SIGNATURE_RAIL_*_LIMIT). */
   limit?: number;
+  /** Items mounted before the user scrolls; the rest reveal on demand. */
+  initialWindow?: number;
 };
 
 export function getSignatureRailItemAccessibilityLabel(
@@ -102,11 +123,39 @@ export const SignatureRail = memo(function SignatureRail({
   actionLabel,
   onAction,
   limit,
+  initialWindow = RAIL_INITIAL_WINDOW,
 }: SignatureRailProps) {
-  if (items.length === 0) return null;
+  const cap =
+    limit ??
+    (layout === "feature"
+      ? SIGNATURE_RAIL_FEATURE_LIMIT
+      : SIGNATURE_RAIL_POSTER_LIMIT);
+  const capped = useMemo(() => items.slice(0, cap), [items, cap]);
+  // Progressive reveal: only the leading window mounts (and requests
+  // artwork) on first paint. The count only grows; if the items array is
+  // replaced by a longer one (warm cache → network), the window still shows
+  // at least the initial slice of the new list.
+  const [revealed, setRevealed] = useState(() =>
+    getInitialRailWindow(capped.length, initialWindow),
+  );
+  const cappedLengthRef = useRef(capped.length);
+  cappedLengthRef.current = capped.length;
+  const visibleCount = Math.min(
+    capped.length,
+    Math.max(revealed, getInitialRailWindow(capped.length, initialWindow)),
+  );
+  const hasMore = visibleCount < capped.length;
+  const revealMore = useCallback(() => {
+    setRevealed((current) =>
+      getNextRailWindow(
+        Math.max(current, initialWindow),
+        cappedLengthRef.current,
+      ),
+    );
+  }, [initialWindow]);
+  const visible = hasMore ? capped.slice(0, visibleCount) : capped;
 
-  const cap = limit ?? (layout === "feature" ? 8 : 14);
-  const visible = items.slice(0, cap);
+  if (items.length === 0) return null;
 
   return (
     <View className="mt-8">
@@ -129,6 +178,7 @@ export const SignatureRail = memo(function SignatureRail({
         snapToInterval={
           layout === "feature" ? featureCardWidth + 14 : POSTER_WIDTH + 14
         }
+        onEndReached={hasMore ? revealMore : undefined}
       >
         {visible.map((item, idx) =>
           layout === "feature" ? (
@@ -139,6 +189,7 @@ export const SignatureRail = memo(function SignatureRail({
               width={featureCardWidth}
               fallbackMetaLabel={fallbackMetaLabel}
               index={idx}
+              animateEntry={idx < initialWindow}
               onPress={onPressItem}
             />
           ) : (
@@ -162,6 +213,7 @@ const FeatureCard = memo(function FeatureCard({
   width,
   fallbackMetaLabel,
   index,
+  animateEntry = true,
   onPress,
 }: {
   item: SignatureRailItem;
@@ -169,6 +221,8 @@ const FeatureCard = memo(function FeatureCard({
   width: number;
   fallbackMetaLabel?: string;
   index: number;
+  /** Cards revealed after the initial window mount off-screen: no entry animation. */
+  animateEntry?: boolean;
   onPress: (item: SignatureRailItem) => void;
 }) {
   const imageUrl = item.backdropUrl?.trim() || item.posterUrl?.trim() || null;
@@ -246,7 +300,7 @@ const FeatureCard = memo(function FeatureCard({
   return (
     <Animated.View
       entering={
-        ENABLE_ENTRY_ANIMATIONS
+        ENABLE_ENTRY_ANIMATIONS && animateEntry
           ? FadeInRight.delay(index * 40).duration(320)
           : undefined
       }

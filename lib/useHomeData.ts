@@ -50,7 +50,10 @@ import {
   normalizeStreamingProviderKeys,
 } from "./streamingProviders";
 import { buildFriendActivity, type FriendActivityEntry } from "./friendsActivity";
-import { getHomeRailIdentityKeys } from "./homeRailIdentity";
+import {
+  getHomeRailIdentityKeys,
+  removeOrDemotePreviewedHomeRailItems,
+} from "./homeRailIdentity";
 import { shouldLoadEditorialSeedRail } from "./homeRailHealth";
 import type { HeroSlide } from "../components/HeroCarousel";
 import type { ProviderRoom } from "./providerRoom";
@@ -86,6 +89,16 @@ const SUPPRESSED_HOME_TITLE_KEYS = new Set([
   "berlin and the lady with an ermine",
 ]);
 const MIN_POSTER_RAIL_ITEMS = 4;
+// Depth each rail carries into the surface. The visible rail mounts a leading
+// window and reveals the rest as the user scrolls (components/SignatureRail),
+// so a deep pool costs nothing on the first frame; the server ships the
+// lists in a slim projection so the deeper payload stays small.
+export const HOME_RAIL_POOL_LIMIT = 30;
+// Cross-rail dedupe keeps a rail distinct from the rails above it while it
+// still has this many distinct items; below the floor, repeats fill in
+// behind the distinct ones rather than leaving the rail short.
+export const HOME_RAIL_DISTINCT_FLOOR = 12;
+const TASTE_RAIL_LIMIT_PER_RAIL = 20;
 const MIN_PROVIDER_ROOM_ITEMS = 4;
 const MIN_EDITORIAL_PROVIDER_ROOM_ITEMS = 3;
 const FRESH_FEED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -102,7 +115,7 @@ const LIVE_HEAT_SIGNAL_PATTERN =
 // object per render would churn query keys and poison every downstream memo.
 const EMPTY_ITEMS: any[] = [];
 const EMPTY_QUERY_ARGS = {};
-const TRENDING_SHOWS_QUERY_ARGS = { windowHours: 96, limit: 10 };
+const TRENDING_SHOWS_QUERY_ARGS = { windowHours: 96, limit: HOME_RAIL_POOL_LIMIT };
 const PEOPLE_PREVIEW_QUERY_ARGS = { limit: 4 };
 const FEED_PAGINATION_OPTIONS = { initialNumItems: 6 };
 
@@ -334,13 +347,13 @@ async function loadHomeCatalogFallback(
     trendingDay,
     trendingWeek,
   ] = await Promise.all([
-    load("rising_now", 16),
-    load("breakout_premieres", 16),
-    load("critics_choice", 16),
-    load("quick_picks", 16),
-    load("airing_today", 10),
-    load("trending_day", 20),
-    load("trending_week", 10),
+    load("rising_now", HOME_RAIL_POOL_LIMIT),
+    load("breakout_premieres", HOME_RAIL_POOL_LIMIT),
+    load("critics_choice", HOME_RAIL_POOL_LIMIT),
+    load("quick_picks", HOME_RAIL_POOL_LIMIT),
+    load("airing_today", 20),
+    load("trending_day", HOME_RAIL_POOL_LIMIT),
+    load("trending_week", HOME_RAIL_POOL_LIMIT),
   ]);
 
   return {
@@ -937,11 +950,17 @@ export function buildDistinctRailCandidates<T extends CatalogItem>(
   return picked.length >= minimum ? picked : [];
 }
 
+// Soft dedupe inside a rail's own pool: candidates already shown by an
+// earlier rail are kept behind the distinct ones instead of dropped, so the
+// surface (app/(tabs)/home.tsx) can decide whether a repeat is needed to
+// keep the rail at its distinct floor. Below `distinctFloor` distinct picks
+// the repeats stay in the pool; at or above it they are dropped.
 export function buildDistinctOrDemotedRailCandidates<T extends CatalogItem>(
   primaryItems: T[],
   seen: Set<string>,
   fallbackItems: T[] = [],
   minimum = MIN_POSTER_RAIL_ITEMS,
+  distinctFloor = minimum,
 ) {
   const picked: T[] = [];
   const repeats: T[] = [];
@@ -960,7 +979,7 @@ export function buildDistinctOrDemotedRailCandidates<T extends CatalogItem>(
   primaryItems.forEach(tryBucket);
   fallbackItems.forEach(tryBucket);
 
-  if (picked.length >= minimum) {
+  if (picked.length >= Math.max(minimum, distinctFloor)) {
     return picked;
   }
   return [...picked, ...repeats].length >= minimum
@@ -1060,11 +1079,13 @@ export function buildHeatRailCandidates(args: {
     ...quieterDemand.slice(0, 1),
     ...candidates.slice(2),
   ];
-  return buildDistinctRailCandidates(
+  return buildDistinctOrDemotedRailCandidates(
     wovenCandidates,
     softSeen,
     quieterDemand.slice(1),
-  ).slice(0, 10);
+    MIN_POSTER_RAIL_ITEMS,
+    HOME_RAIL_DISTINCT_FLOOR,
+  ).slice(0, HOME_RAIL_POOL_LIMIT);
 }
 
 export function buildFreshRailCandidates(args: {
@@ -1113,12 +1134,15 @@ export function buildFreshRailCandidates(args: {
         getCatalogDiversityKeys(item).every((key) => !heroSeen.has(key)),
       );
       return sortFreshRailItemsByReleaseProximity(
-        buildDistinctRailCandidates(
+        buildDistinctOrDemotedRailCandidates(
           distinctFromHero.length >= MIN_POSTER_RAIL_ITEMS ? distinctFromHero : ranked,
           softSeen,
+          [],
+          MIN_POSTER_RAIL_ITEMS,
+          HOME_RAIL_DISTINCT_FLOOR,
         ),
         args.now,
-      ).slice(0, 12);
+      ).slice(0, HOME_RAIL_POOL_LIMIT);
     };
   const primaryItems = buildItems(primary);
   const useFallback = shouldLoadEditorialSeedRail({
@@ -1166,15 +1190,15 @@ export function buildForYouRailCandidates(args: {
 
   const personal = rankSource(args.forYou, { excludeChartOnly: true });
   if (personal.length >= MIN_POSTER_RAIL_ITEMS) {
-    return personal.slice(0, 10);
+    return personal.slice(0, HOME_RAIL_POOL_LIMIT);
   }
   const preferred = rankSource([...args.forYou, ...args.fallback], {
     excludeChartOnly: true,
   });
   if (preferred.length >= MIN_POSTER_RAIL_ITEMS) {
-    return preferred.slice(0, 10);
+    return preferred.slice(0, HOME_RAIL_POOL_LIMIT);
   }
-  return rankSource([...args.forYou, ...args.fallback]).slice(0, 10);
+  return rankSource([...args.forYou, ...args.fallback]).slice(0, HOME_RAIL_POOL_LIMIT);
 }
 
 export function buildQualityRailCandidates(args: {
@@ -1208,7 +1232,9 @@ export function buildQualityRailCandidates(args: {
         preferFresh: true,
         now: rankingNow,
       }).filter((item) => getCatalogDiversityKeys(item).every((key) => !heroSeen.has(key))),
-    ).slice(0, 12);
+      MIN_POSTER_RAIL_ITEMS,
+      HOME_RAIL_DISTINCT_FLOOR,
+    ).slice(0, HOME_RAIL_POOL_LIMIT);
 
   const primary = toCatalogCandidates(
     [
@@ -1319,10 +1345,13 @@ export function buildQuickRailItems(args: {
       })
         .filter((item) => getCatalogDiversityKeys(item).every((key) => !heroSeen.has(key))),
       softSeen,
+      [],
+      MIN_POSTER_RAIL_ITEMS,
+      HOME_RAIL_DISTINCT_FLOOR,
     )
       .map((catalog) => toRailItem(catalog as AnyShowItem, args.now))
       .filter((item): item is SignatureRailItem => Boolean(item))
-      .slice(0, 12);
+      .slice(0, HOME_RAIL_POOL_LIMIT);
   const primaryItems = buildItems(primary);
   const useFallback = shouldLoadEditorialSeedRail({
     primaryCount: primary.length,
@@ -1864,7 +1893,7 @@ export function useHomeData(): HomeData {
 
     const jobs: Array<Promise<() => void>> = [
       load(
-        () => getPersonalized({ limit: 12 }),
+        () => getPersonalized({ limit: HOME_RAIL_POOL_LIMIT }),
         (value) => {
           setForYouRaw(value);
           if (Array.isArray(value)) {
@@ -1874,7 +1903,7 @@ export function useHomeData(): HomeData {
         () => setForYouLoading(false),
       ),
       load(
-        () => getRecommendationRails({ limitPerRail: 10 }),
+        () => getRecommendationRails({ limitPerRail: TASTE_RAIL_LIMIT_PER_RAIL }),
         (value) => {
           // The "for_you" rail duplicates the For You section above; only the
           // facet rails ("Because you're into X") are new information here.
@@ -2077,7 +2106,7 @@ export function useHomeData(): HomeData {
     )
       .map((catalog) => toRailItem(catalog, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
-      .slice(0, 10);
+      .slice(0, HOME_RAIL_POOL_LIMIT);
     // Keep the strongest personal pick leading; rotate the rest per epoch.
     return rotateHomeRailForEpoch(items, "for-you", {
       now: editorialSeedNow,
@@ -2107,7 +2136,7 @@ export function useHomeData(): HomeData {
     })
       .map((catalog) => toRailItem(catalog, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
-      .slice(0, 10);
+      .slice(0, HOME_RAIL_POOL_LIMIT);
     // Heat reads like a chart, so its top three stay anchored; only the tail
     // rotates through the day.
     return rotateHomeRailForEpoch(items, "heat", {
@@ -2139,12 +2168,12 @@ export function useHomeData(): HomeData {
     })
       .map((catalog) => toRailItem(catalog as AnyShowItem, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
-      .slice(0, 12);
+      .slice(0, HOME_RAIL_POOL_LIMIT);
     const items = appendFreshEditorialTopUpRailItems(
       primary,
       newOrBackSeedRaw as AnyShowItem[],
       editorialSeedNow,
-    ).slice(0, 12);
+    ).slice(0, HOME_RAIL_POOL_LIMIT);
     // The nearest releases stay up front; the longer tail rotates per epoch.
     return rotateHomeRailForEpoch(items, "fresh", {
       now: editorialSeedNow,
@@ -2177,7 +2206,7 @@ export function useHomeData(): HomeData {
     })
       .map((catalog) => toRailItem(catalog as AnyShowItem, editorialSeedNow))
       .filter((item): item is SignatureRailItem => Boolean(item))
-      .slice(0, 12);
+      .slice(0, HOME_RAIL_POOL_LIMIT);
     return rotateHomeRailForEpoch(items, "critics", {
       now: editorialSeedNow,
       keepTop: 1,
@@ -2279,19 +2308,22 @@ export function useHomeData(): HomeData {
     [catalogIndex],
   );
 
-  // Facet rails render below For You, so anything already shown there is
-  // dropped; rails that thin out below 4 items disappear entirely.
+  // Facet rails render below For You, so anything already shown there (or
+  // in an earlier facet rail) moves behind the distinct picks — and is
+  // dropped outright while the rail still clears the distinct floor. Rails
+  // that thin out below 4 items disappear entirely.
   const tasteRails = useMemo(() => {
     const seen = createRailSeenSet(forYou);
     return tasteRailsRaw
       .map((rail) => {
-        const items = rail.items
-          .map((item) => toRailItem(item, editorialSeedNow))
-          .filter((item): item is SignatureRailItem => item !== null)
-          .filter((item) => {
-            const titleKey = getHomeTitleDiversityKey(item.title);
-            return !seen.has(item.key) && (!titleKey || !seen.has(titleKey));
-          });
+        const items = removeOrDemotePreviewedHomeRailItems(
+          rail.items
+            .map((item) => toRailItem(item, editorialSeedNow))
+            .filter((item): item is SignatureRailItem => item !== null),
+          seen,
+          MIN_POSTER_RAIL_ITEMS,
+          HOME_RAIL_DISTINCT_FLOOR,
+        ).slice(0, HOME_RAIL_POOL_LIMIT);
         items.forEach((item) => {
           seen.add(item.key);
           const titleKey = getHomeTitleDiversityKey(item.title);
@@ -2299,7 +2331,7 @@ export function useHomeData(): HomeData {
         });
         return { key: rail.key, title: rail.title, items };
       })
-      .filter((rail) => rail.items.length >= 4);
+      .filter((rail) => rail.items.length >= MIN_POSTER_RAIL_ITEMS);
   }, [tasteRailsRaw, forYou, editorialSeedNow]);
 
   const refresh = useCallback(async () => {

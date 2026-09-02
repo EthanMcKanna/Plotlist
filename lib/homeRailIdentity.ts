@@ -151,16 +151,23 @@ export function topUpHomeRailItemsPreservingSources<T extends HomeRailIdentityIt
   return selected.length >= minimumRemaining ? selected : [];
 }
 
+// Soft cross-rail dedupe. Previewed titles are dropped while the rail still
+// has `distinctFloor` distinct items without them; below that floor they are
+// kept but moved behind the distinct ones (a show may then appear in two
+// discovery rails rather than leaving the later rail short). `distinctFloor`
+// defaults to `minimumRemaining` for callers that only need the old
+// "hide-or-demote" behaviour.
 export function removeOrDemotePreviewedHomeRailItems<T extends HomeRailIdentityItem>(
   items: T[],
   previewKeys: Set<string>,
   minimumRemaining: number,
+  distinctFloor = minimumRemaining,
 ) {
   const filtered = items.filter((item) =>
     getHomeRailIdentityKeys(item).every((key) => !previewKeys.has(key)),
   );
   if (filtered.length === items.length) return items;
-  return filtered.length >= minimumRemaining
+  return filtered.length >= Math.max(minimumRemaining, distinctFloor)
     ? filtered
     : prioritizeUnpreviewedHomeRailItems(items, previewKeys);
 }
@@ -190,6 +197,22 @@ function getHomeRailTitleAppearanceCounts(items: HomeRailIdentityItem[]) {
   return counts;
 }
 
+export type HomeRailTitleAppearanceOptions = {
+  /**
+   * Prefer titles unseen on the surface while at least this many remain;
+   * below it, already-seen titles fill in behind them (so a discovery rail
+   * may repeat a show from an earlier rail instead of running short).
+   * Defaults to `minimumRemaining`.
+   */
+  distinctFloor?: number;
+  /**
+   * Hard ceiling on how many times a title may appear across the surface
+   * (preceding items plus this rail): titles already at the ceiling never
+   * fill in, even below the floor. Unlimited when omitted.
+   */
+  maxTotalAppearances?: number;
+};
+
 export function limitHomeRailItemsByTitleAppearances<
   T extends HomeRailIdentityItem,
 >(
@@ -198,7 +221,13 @@ export function limitHomeRailItemsByTitleAppearances<
   maxAppearances: number,
   minimumRemaining: number,
   limit = items.length,
+  options: HomeRailTitleAppearanceOptions = {},
 ) {
+  const distinctFloor = Math.max(
+    minimumRemaining,
+    options.distinctFloor ?? minimumRemaining,
+  );
+  const maxTotalAppearances = options.maxTotalAppearances ?? Number.POSITIVE_INFINITY;
   const titleCounts = getHomeRailTitleAppearanceCounts(precedingItems);
   const maxTitleAppearances = Math.max(1, Math.floor(maxAppearances));
   const selectedKeys = new Set<string>();
@@ -215,13 +244,13 @@ export function limitHomeRailItemsByTitleAppearances<
     if (!titleKey || titleCount < maxTitleAppearances) {
       preferred.push(item);
       if (titleKey) titleCounts.set(titleKey, titleCount + 1);
-    } else {
+    } else if (titleCount < maxTotalAppearances) {
       fallback.push(item);
     }
   });
 
   const preferredLimited = preferred.slice(0, limit);
-  if (preferredLimited.length >= minimumRemaining) return preferredLimited;
+  if (preferredLimited.length >= distinctFloor) return preferredLimited;
 
   const combined = [...preferredLimited, ...fallback].slice(0, limit);
   return combined.length >= minimumRemaining ? combined : [];

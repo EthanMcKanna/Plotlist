@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 
 import {
   HOME_WARM_CACHE_MAX_AGE_MS,
+  WARM_CATALOG_PROVIDER_ITEM_LIMIT,
+  WARM_LIST_ITEM_LIMIT,
   clearHomeWarmCache,
   ensureHomeWarmCacheLoaded,
   getHomeWarmCatalog,
@@ -301,5 +303,53 @@ describe("hydrateHomeQueryClientFromWarmCache", () => {
       }),
     ).toBe(0);
     expect(client.__set).not.toHaveBeenCalled();
+  });
+});
+
+describe("warm cache list trimming", () => {
+  const rankedList = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      _id: `show_${index}`,
+      rank: index + 1,
+      show: { _id: `show_${index}`, title: `Show ${index}`, overview: "long text" },
+    }));
+
+  it("persists only the leading slice of the personalized and trending lists", () => {
+    recordHomeWarmForYou(rankedList(30), NOW);
+    recordHomeWarmTrending(rankedList(30), NOW);
+
+    const forYou = getHomeWarmForYou(NOW) as any[];
+    const trending = getHomeWarmTrending(NOW) as any[];
+    expect(forYou).toHaveLength(WARM_LIST_ITEM_LIMIT);
+    expect(trending).toHaveLength(WARM_LIST_ITEM_LIMIT);
+    expect(forYou[0]).toEqual({
+      _id: "show_0",
+      rank: 1,
+      show: { _id: "show_0", title: "Show 0" },
+    });
+  });
+
+  it("persists only the leading slice of every catalog list", () => {
+    const list = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        title: `Show ${index}`,
+        overview: "long text",
+      }));
+    recordHomeWarmCatalog(
+      {
+        risingNow: list(30),
+        trendingDay: list(30),
+        providers: { netflix: list(18) },
+        diagnostics: { failedCategories: [], staleCategories: [] },
+      },
+      NOW,
+    );
+
+    const catalog = getHomeWarmCatalog(NOW) as any;
+    expect(catalog.risingNow).toHaveLength(WARM_LIST_ITEM_LIMIT);
+    expect(catalog.trendingDay).toHaveLength(WARM_LIST_ITEM_LIMIT);
+    expect(catalog.providers.netflix).toHaveLength(WARM_CATALOG_PROVIDER_ITEM_LIMIT);
+    expect(catalog.risingNow[0]).toEqual({ title: "Show 0" });
+    expect(catalog.diagnostics).toEqual({ failedCategories: [], staleCategories: [] });
   });
 });

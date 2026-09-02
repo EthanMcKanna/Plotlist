@@ -11,10 +11,14 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type ScrollViewProps,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { RAIL_REVEAL_THRESHOLD_PX, isRailNearEnd } from "../lib/railWindow";
 import { useIsDesktopWeb } from "../lib/webLayout";
 
 type HorizontalRailProps = {
@@ -24,6 +28,15 @@ type HorizontalRailProps = {
   decelerationRate?: ScrollViewProps["decelerationRate"];
   accessibilityLabel?: string;
   testID?: string;
+  /**
+   * Called when the trailing edge of the viewport comes within
+   * `endReachedThresholdPx` of the end of the content — on scroll, and also
+   * when the content does not overflow the viewport at all (a rail whose
+   * mounted items fit on screen can never scroll to its end). Rails use it
+   * to reveal their next batch of items.
+   */
+  onEndReached?: () => void;
+  endReachedThresholdPx?: number;
 };
 
 // Horizontal ScrollView that shows hover scroll-arrows on desktop web, where
@@ -37,6 +50,8 @@ export function HorizontalRail({
   decelerationRate,
   accessibilityLabel,
   testID,
+  onEndReached,
+  endReachedThresholdPx = RAIL_REVEAL_THRESHOLD_PX,
 }: HorizontalRailProps) {
   const isDesktopWeb = useIsDesktopWeb();
   const scrollRef = useRef<ScrollView>(null);
@@ -48,6 +63,14 @@ export function HorizontalRail({
   // entirely when nothing changed instead of re-rendering the rail.
   const canScrollLeftRef = useRef(canScrollLeft);
   const canScrollRightRef = useRef(canScrollRight);
+  // Last known viewport/content widths so end-reached can be evaluated when
+  // either changes (content growing after a reveal, or first layout), not
+  // only on scroll events.
+  const layoutWidthRef = useRef(0);
+  const contentWidthRef = useRef(0);
+  const offsetXRef = useRef(0);
+  const onEndReachedRef = useRef(onEndReached);
+  onEndReachedRef.current = onEndReached;
 
   const getScrollNode = useCallback((): HTMLElement | null => {
     const ref = scrollRef.current as unknown as {
@@ -55,6 +78,23 @@ export function HorizontalRail({
     } | null;
     return ref?.getScrollableNode?.() ?? null;
   }, []);
+
+  const checkEndReached = useCallback(() => {
+    const handler = onEndReachedRef.current;
+    if (!handler) return;
+    if (
+      isRailNearEnd(
+        {
+          offsetX: offsetXRef.current,
+          layoutWidth: layoutWidthRef.current,
+          contentWidth: contentWidthRef.current,
+        },
+        endReachedThresholdPx,
+      )
+    ) {
+      handler();
+    }
+  }, [endReachedThresholdPx]);
 
   const recomputeArrows = useCallback(() => {
     const node = getScrollNode();
@@ -90,6 +130,36 @@ export function HorizontalRail({
     [getScrollNode],
   );
 
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (isDesktopWeb) recomputeArrows();
+      if (!onEndReachedRef.current) return;
+      const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+      offsetXRef.current = contentOffset?.x ?? 0;
+      if (layoutMeasurement?.width) layoutWidthRef.current = layoutMeasurement.width;
+      if (contentSize?.width) contentWidthRef.current = contentSize.width;
+      checkEndReached();
+    },
+    [checkEndReached, isDesktopWeb, recomputeArrows],
+  );
+  const handleLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      layoutWidthRef.current = event.nativeEvent.layout.width;
+      checkEndReached();
+    },
+    [checkEndReached],
+  );
+  const handleContentSizeChange = useCallback(
+    (contentWidth: number) => {
+      contentWidthRef.current = contentWidth;
+      checkEndReached();
+      // Content grew (a reveal): the right arrow may have come back.
+      if (isDesktopWeb) recomputeArrows();
+    },
+    [checkEndReached, isDesktopWeb, recomputeArrows],
+  );
+  const wantsScrollEvents = isDesktopWeb || Boolean(onEndReached);
+
   const rail = (
     <ScrollView
       ref={scrollRef}
@@ -101,7 +171,9 @@ export function HorizontalRail({
       decelerationRate={decelerationRate}
       snapToInterval={isDesktopWeb ? undefined : snapToInterval}
       snapToAlignment={snapToInterval ? "start" : undefined}
-      onScroll={isDesktopWeb ? recomputeArrows : undefined}
+      onScroll={wantsScrollEvents ? handleScroll : undefined}
+      onLayout={onEndReached ? handleLayout : undefined}
+      onContentSizeChange={onEndReached ? handleContentSizeChange : undefined}
       scrollEventThrottle={64}
     >
       {children}

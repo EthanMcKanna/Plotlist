@@ -159,7 +159,7 @@ describe("home rail diversity", () => {
     ]);
   });
 
-  it("uses daily trending to keep heat alive without repeating earlier shelves", () => {
+  it("uses daily trending to keep heat alive, with earlier-shelf repeats only behind the distinct picks", () => {
     const picked = buildHeatRailCandidates({
       trending: [],
       dailyTrending: [
@@ -178,12 +178,38 @@ describe("home rail diversity", () => {
       forYou: [railItem("FROM"), railItem("Severance")],
     });
 
+    // Below the distinct floor the For You repeats stay in the pool, demoted
+    // behind the distinct picks; the surface decides whether to show them.
     expect(picked.map((show) => show.externalId)).toEqual([
       "daily-1",
       "daily-2",
       "daily-3",
       "daily-4",
+      "seen-1",
+      "seen-2",
     ]);
+  });
+
+  it("drops earlier-shelf repeats once heat clears the distinct floor on its own", () => {
+    const picked = buildHeatRailCandidates({
+      trending: [],
+      dailyTrending: Array.from({ length: 14 }, (_, index) =>
+        catalogItem(`daily-${index + 1}`, { tmdbPopularity: 200 - index }),
+      ),
+      rising: [
+        catalogItem("seen-1", { title: "FROM", tmdbPopularity: 500 }),
+        catalogItem("seen-2", { title: "Severance", tmdbPopularity: 490 }),
+      ],
+      weeklyTrending: [],
+      curatedDemand: [],
+      heroSlides: [],
+      forYou: [railItem("FROM"), railItem("Severance")],
+    });
+
+    expect(picked.length).toBeGreaterThanOrEqual(12);
+    expect(picked.map((show) => show.externalId)).not.toEqual(
+      expect.arrayContaining(["seen-1", "seen-2"]),
+    );
   });
 
   it("keeps heat hidden when live sources only repeat earlier shelves", () => {
@@ -221,6 +247,8 @@ describe("home rail diversity", () => {
       "demand-2",
       "demand-3",
       "demand-4",
+      "seen-1",
+      "seen-2",
     ]);
   });
 

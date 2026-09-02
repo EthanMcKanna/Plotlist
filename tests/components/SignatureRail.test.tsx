@@ -558,3 +558,124 @@ describe("SignatureRail", () => {
     ).toBeTruthy();
   });
 });
+
+describe("SignatureRail progressive reveal", () => {
+  const posterItems = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      key: `show-${index}`,
+      title: `Show ${index}`,
+      posterUrl: `https://example.com/poster-${index}.jpg`,
+      year: 2026,
+    }));
+  const mountedPosterKeys = () =>
+    screen
+      .queryAllByTestId(/^poster-image-/)
+      .map((node) => String(node.props.testID).replace("poster-image-", ""));
+  const renderRail = (items: ReturnType<typeof posterItems>) =>
+    render(
+      <SignatureRail
+        index={2}
+        kicker="Today"
+        title="Trending"
+        accent="#F59E0B"
+        layout="poster"
+        featureCardWidth={320}
+        items={items}
+        onPressItem={jest.fn()}
+      />,
+    );
+
+  it("mounts only the initial window of a deep rail on first render", () => {
+    renderRail(posterItems(30));
+
+    expect(mountedPosterKeys()).toHaveLength(12);
+    expect(mountedPosterKeys()[0]).toBe("show-0");
+    expect(screen.queryByTestId("poster-image-show-12")).toBeNull();
+  });
+
+  it("reveals the next batch when the rail scrolls near its end, then the rest", () => {
+    renderRail(posterItems(30));
+    const rail = screen.getByLabelText("Trending rail");
+    const scrollTo = (x: number) =>
+      fireEvent.scroll(rail, {
+        nativeEvent: {
+          contentOffset: { x },
+          layoutMeasurement: { width: 390 },
+          contentSize: { width: 12 * 130 },
+        },
+      });
+
+    // Early in the rail: nothing new mounts (no extra image requests).
+    scrollTo(100);
+    expect(mountedPosterKeys()).toHaveLength(12);
+
+    scrollTo(12 * 130 - 390 - 100);
+    expect(mountedPosterKeys()).toHaveLength(20);
+    expect(screen.getByTestId("poster-image-show-19")).toBeTruthy();
+
+    fireEvent.scroll(rail, {
+      nativeEvent: {
+        contentOffset: { x: 20 * 130 - 390 },
+        layoutMeasurement: { width: 390 },
+        contentSize: { width: 20 * 130 },
+      },
+    });
+    expect(mountedPosterKeys()).toHaveLength(28);
+    fireEvent.scroll(rail, {
+      nativeEvent: {
+        contentOffset: { x: 28 * 130 - 390 },
+        layoutMeasurement: { width: 390 },
+        contentSize: { width: 28 * 130 },
+      },
+    });
+    expect(mountedPosterKeys()).toHaveLength(30);
+  });
+
+  it("keeps revealing while the mounted window does not overflow a wide viewport", () => {
+    renderRail(posterItems(30));
+    const rail = screen.getByLabelText("Trending rail");
+
+    // A desktop-width rail fits the whole initial window without scrolling,
+    // so layout + content size alone must trigger the next batch.
+    fireEvent(rail, "layout", { nativeEvent: { layout: { width: 2400, height: 190 } } });
+    fireEvent(rail, "contentSizeChange", 12 * 130, 190);
+    expect(mountedPosterKeys()).toHaveLength(20);
+
+    // 20 cards (2600px) still end within the reveal threshold of a 2400px
+    // viewport, so the next batch follows on its own.
+    fireEvent(rail, "contentSizeChange", 20 * 130, 190);
+    expect(mountedPosterKeys()).toHaveLength(28);
+
+    // Once the content clearly overflows the viewport, revealing waits for
+    // scroll.
+    fireEvent(rail, "contentSizeChange", 28 * 130, 190);
+    expect(mountedPosterKeys()).toHaveLength(28);
+  });
+
+  it("never mounts past the poster cap and shows short rails whole", () => {
+    renderRail(posterItems(8));
+    expect(mountedPosterKeys()).toHaveLength(8);
+    expect(
+      screen.getByLabelText("Trending rail").props.onEndReached,
+    ).toBeUndefined();
+  });
+
+  it("shows at least the initial window when a longer list replaces a short one", () => {
+    const { rerender } = renderRail(posterItems(5));
+    expect(mountedPosterKeys()).toHaveLength(5);
+
+    rerender(
+      <SignatureRail
+        index={2}
+        kicker="Today"
+        title="Trending"
+        accent="#F59E0B"
+        layout="poster"
+        featureCardWidth={320}
+        items={posterItems(30)}
+        onPressItem={jest.fn()}
+      />,
+    );
+    expect(mountedPosterKeys()).toHaveLength(12);
+  });
+});
