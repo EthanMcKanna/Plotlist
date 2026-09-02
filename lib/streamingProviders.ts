@@ -1,9 +1,9 @@
-// Canonical registry of the streaming services Plotlist knows about, plus
-// pure helpers for the "my streaming services" preference. The keys match
-// the TMDB watch-provider categories used by the home catalog and the
-// release calendar.
+// The "my streaming services" preference: which canonical services a user
+// can pick, plus pure helpers for filtering/leaning surfaces by that pick.
+// The canonical registry itself (keys, names, TMDB ids, resolution rules)
+// lives in lib/watchProviders.ts.
 
-const TMDB_LOGO = (path: string) => `https://image.tmdb.org/t/p/w92${path}`;
+import { getWatchService, getWatchServiceLogoUrl } from "./watchProviders";
 
 export type StreamingProviderOption = {
   key: string;
@@ -12,17 +12,34 @@ export type StreamingProviderOption = {
   tint: string;
 };
 
-export const STREAMING_PROVIDER_OPTIONS: StreamingProviderOption[] = [
-  { key: "netflix", label: "Netflix", logoUrl: TMDB_LOGO("/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg"), tint: "#E50914" },
-  { key: "apple_tv", label: "Apple TV+", logoUrl: TMDB_LOGO("/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg"), tint: "#A8A8A8" },
-  { key: "max", label: "Max", logoUrl: TMDB_LOGO("/jbe4gVSfRlbPTdESXhEKpornsfu.jpg"), tint: "#7B2CBF" },
-  { key: "disney_plus", label: "Disney+", logoUrl: TMDB_LOGO("/97yvRBw1GzX7fXprcF80er19ot.jpg"), tint: "#1F80E0" },
-  { key: "hulu", label: "Hulu", logoUrl: TMDB_LOGO("/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg"), tint: "#1CE783" },
-  { key: "peacock", label: "Peacock", logoUrl: TMDB_LOGO("/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg"), tint: "#8AC926" },
-  { key: "prime_video", label: "Prime Video", logoUrl: TMDB_LOGO("/pvske1MyAoymrs5bguRfVqYiM9a.jpg"), tint: "#00A8E1" },
-  { key: "paramount_plus", label: "Paramount+", logoUrl: TMDB_LOGO("/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg"), tint: "#0064FF" },
-  { key: "mgm_plus", label: "MGM+", logoUrl: TMDB_LOGO("/ctiRpS16dlaTXQBSsiFncMrgWmh.jpg"), tint: "#D6B35A" },
+// The services a user can pick in Settings → Streaming. Keys, names and
+// logos come from the canonical registry in lib/watchProviders so the
+// preference matches what the resolver emits for every show.
+const STREAMING_PROVIDER_PREFERENCE_KEYS = [
+  "netflix",
+  "apple_tv",
+  "max",
+  "disney_plus",
+  "hulu",
+  "peacock",
+  "prime_video",
+  "paramount_plus",
+  "mgm_plus",
 ];
+
+export const STREAMING_PROVIDER_OPTIONS: StreamingProviderOption[] =
+  STREAMING_PROVIDER_PREFERENCE_KEYS.map((key) => {
+    const service = getWatchService(key);
+    if (!service) {
+      throw new Error(`Unknown streaming provider preference key: ${key}`);
+    }
+    return {
+      key,
+      label: service.name,
+      logoUrl: getWatchServiceLogoUrl(key) ?? "",
+      tint: service.tint ?? "#9BA1B0",
+    };
+  });
 
 export const STREAMING_PROVIDER_KEYS = STREAMING_PROVIDER_OPTIONS.map(
   (option) => option.key,

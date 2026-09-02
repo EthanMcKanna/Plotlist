@@ -1,42 +1,35 @@
+import {
+  getWatchService,
+  getWatchServiceLogoUrl,
+  normalizeWatchProviderToken,
+  resolveWatchProviders,
+  type WatchProviderSource,
+} from "./watchProviders";
+
 export const RELEASE_CALENDAR_MAX_ITEMS = 250;
 
-export const RELEASE_CALENDAR_PROVIDER_OPTIONS = [
-  {
-    key: "netflix",
-    name: "Netflix",
-    logoUrl: "https://image.tmdb.org/t/p/w92/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
-  },
-  {
-    key: "apple_tv",
-    name: "Apple TV",
-    logoUrl: "https://image.tmdb.org/t/p/w92/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
-  },
-  {
-    key: "max",
-    name: "Max",
-    logoUrl: "https://image.tmdb.org/t/p/w92/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
-  },
-  {
-    key: "disney_plus",
-    name: "Disney+",
-    logoUrl: "https://image.tmdb.org/t/p/w92/97yvRBw1GzX7fXprcF80er19ot.jpg",
-  },
-  {
-    key: "hulu",
-    name: "Hulu",
-    logoUrl: "https://image.tmdb.org/t/p/w92/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
-  },
-  {
-    key: "prime_video",
-    name: "Prime Video",
-    logoUrl: "https://image.tmdb.org/t/p/w92/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
-  },
-  {
-    key: "peacock",
-    name: "Peacock",
-    logoUrl: "https://image.tmdb.org/t/p/w92/h5DcR0J2EESLitnhR8xLG1QymTE.jpg",
-  },
-] as const;
+// Services offered by the calendar's provider filter. Names/logos come from
+// the canonical registry so the chips match what rows are labelled with.
+const RELEASE_CALENDAR_PROVIDER_KEYS = [
+  "netflix",
+  "apple_tv",
+  "max",
+  "disney_plus",
+  "hulu",
+  "prime_video",
+  "peacock",
+  "paramount_plus",
+];
+
+export const RELEASE_CALENDAR_PROVIDER_OPTIONS: Array<{
+  key: string;
+  name: string;
+  logoUrl: string;
+}> = RELEASE_CALENDAR_PROVIDER_KEYS.map((key) => ({
+  key,
+  name: getWatchService(key)?.name ?? key,
+  logoUrl: getWatchServiceLogoUrl(key) ?? "",
+}));
 
 export const RELEASE_CALENDAR_VIEWS = [
   { value: "tonight", label: "Tonight" },
@@ -52,29 +45,16 @@ const RELEASE_CALENDAR_VIEW_VALUES = new Set<string>(
   RELEASE_CALENDAR_VIEWS.map((view) => view.value),
 );
 
-const PROVIDER_ALIAS_BY_LOOKUP = new Map<string, string>(
-  RELEASE_CALENDAR_PROVIDER_OPTIONS.flatMap((provider) => [
-    [provider.key.toLowerCase(), provider.name],
-    [provider.name.toLowerCase(), provider.name],
-  ]),
-);
-
-[
-  ["apple tv+", "Apple TV"],
-  ["apple tv plus", "Apple TV"],
-  ["appletv", "Apple TV"],
-  ["disney plus", "Disney+"],
-  ["prime", "Prime Video"],
-  ["amazon prime", "Prime Video"],
-  ["amazon prime video", "Prime Video"],
-  ["hbo max", "Max"],
-].forEach(([alias, name]) => PROVIDER_ALIAS_BY_LOOKUP.set(alias, name));
-
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+// Resolved by lib/watchProviders: canonical key + display name, ordered
+// original-first. `key`/`source` are optional so older cached payloads and
+// hand-built fixtures (name only) keep working.
 export type ReleaseCalendarProvider = {
+  key?: string;
   name: string;
   logoUrl?: string | null;
+  source?: WatchProviderSource;
 };
 
 export type ReleaseEventRecord = {
@@ -123,8 +103,6 @@ export type ReleaseCalendarTrackedState = {
 
 export type TmdbReleaseEventRecord = ReleaseEventRecord;
 
-const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
-
 export function getReleaseCalendarProviderNames() {
   return RELEASE_CALENDAR_PROVIDER_OPTIONS.map((provider) => provider.name);
 }
@@ -167,11 +145,10 @@ export function getReleaseCalendarShowIds(args: {
   );
 }
 
-function normalizeProviderName(value: string) {
-  const normalized = value.trim().replace(/\s+/g, " ").toLowerCase();
-  return PROVIDER_ALIAS_BY_LOOKUP.get(normalized) ?? null;
-}
-
+/**
+ * Selected-provider tokens (canonical keys, display names, or older stored
+ * aliases like "HBO Max") → canonical keys, deduped in first-mention order.
+ */
 export function normalizeSelectedProviders(selectedProviders?: string[] | null) {
   if (!selectedProviders || selectedProviders.length === 0) {
     return [];
@@ -180,7 +157,7 @@ export function normalizeSelectedProviders(selectedProviders?: string[] | null) 
   return Array.from(
     new Set(
       selectedProviders
-        .map((provider) => normalizeProviderName(provider))
+        .map((provider) => normalizeWatchProviderToken(provider))
         .filter((provider): provider is string => Boolean(provider)),
     ),
   );
@@ -428,7 +405,7 @@ export function matchesSelectedProviders(
 
   const providerSet = new Set(
     providers
-      .map((provider) => normalizeProviderName(provider.name))
+      .map((provider) => provider.key ?? normalizeWatchProviderToken(provider.name))
       .filter((provider): provider is string => Boolean(provider)),
   );
   return selectedProviders.some((provider) => providerSet.has(provider));
@@ -460,75 +437,22 @@ export function isReleaseSyncStateStale(
   return syncState.expiresAt <= now;
 }
 
-function tmdbLogoUrl(value: unknown) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return null;
-  }
-
-  const path = value.trim();
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-  return `${TMDB_IMAGE_BASE_URL}/w92${path}`;
-}
-
-function readTmdbProviderName(provider: any) {
-  const rawName =
-    provider?.name ??
-    provider?.providerName ??
-    provider?.provider_name ??
-    provider?.displayName;
-  return typeof rawName === "string" ? normalizeProviderName(rawName) : null;
-}
-
-function readTmdbProviderLogo(provider: any) {
-  return (
-    tmdbLogoUrl(provider?.logoUrl) ??
-    tmdbLogoUrl(provider?.logoPath) ??
-    tmdbLogoUrl(provider?.logo_path)
-  );
-}
-
-function readRegionalWatchProviders(details: any, region: string) {
-  const results =
-    details?.watchProviders?.results ??
-    details?.watch_providers?.results ??
-    details?.["watch/providers"]?.results ??
-    details?.["watchProviders"]?.results ??
-    {};
-  return results?.[region] ?? null;
-}
-
+/**
+ * US "where to watch" for a cached TMDB detail payload (raw or the slim
+ * `{ networks, watchProviders }` projection), resolved through the shared
+ * lib/watchProviders rules and ordered original-first so the first entry is
+ * the right label for a release row.
+ */
 export function extractTmdbReleaseProviders(
   details: any,
   region = "US",
 ): ReleaseCalendarProvider[] {
-  const regionalProviders = readRegionalWatchProviders(details, region);
-  const buckets = ["flatrate", "ads", "free"];
-  const seen = new Set<string>();
-  const providers: ReleaseCalendarProvider[] = [];
-
-  for (const bucket of buckets) {
-    const items = Array.isArray(regionalProviders?.[bucket])
-      ? regionalProviders[bucket]
-      : [];
-    for (const item of items) {
-      const name = readTmdbProviderName(item);
-      if (!name || seen.has(name)) {
-        continue;
-      }
-      seen.add(name);
-      providers.push({
-        name,
-        logoUrl:
-          readTmdbProviderLogo(item) ??
-          RELEASE_CALENDAR_PROVIDER_OPTIONS.find((provider) => provider.name === name)?.logoUrl ??
-          null,
-      });
-    }
-  }
-
-  return providers;
+  return resolveWatchProviders(details, { region }).map((provider) => ({
+    key: provider.key,
+    name: provider.name,
+    logoUrl: provider.logoUrl,
+    source: provider.source,
+  }));
 }
 
 function parseOffsetCursor(cursor?: string | null) {

@@ -116,19 +116,24 @@ describe("release calendar robustness matrix", () => {
     expect(addDaysToDateOnlyString(value, days)).toBe(expected);
   });
 
+  // Tokens normalize to canonical keys (lib/watchProviders) so a stored
+  // preference like "HBO Max" and a client sending "max" filter the same.
   const providerInputs: Array<[string, string[]]> = [
-    ["Netflix", ["Netflix"]],
-    [" netflix ", ["Netflix"]],
-    ["NETFLIX", ["Netflix"]],
-    ["apple_tv", ["Apple TV"]],
-    ["Apple TV+", ["Apple TV"]],
-    ["Apple TV Plus", ["Apple TV"]],
-    ["disney_plus", ["Disney+"]],
-    ["Disney Plus", ["Disney+"]],
-    ["prime_video", ["Prime Video"]],
-    ["Amazon Prime Video", ["Prime Video"]],
-    ["HBO Max", ["Max"]],
-    ["max", ["Max"]],
+    ["Netflix", ["netflix"]],
+    [" netflix ", ["netflix"]],
+    ["NETFLIX", ["netflix"]],
+    ["apple_tv", ["apple_tv"]],
+    ["Apple TV+", ["apple_tv"]],
+    ["Apple TV Plus", ["apple_tv"]],
+    ["Apple TV", ["apple_tv"]],
+    ["disney_plus", ["disney_plus"]],
+    ["Disney Plus", ["disney_plus"]],
+    ["prime_video", ["prime_video"]],
+    ["Amazon Prime Video", ["prime_video"]],
+    ["HBO Max", ["max"]],
+    ["max", ["max"]],
+    ["Peacock Premium", ["peacock"]],
+    ["paramount_plus", ["paramount_plus"]],
     ["unknown", []],
     ["", []],
   ];
@@ -146,28 +151,48 @@ describe("release calendar robustness matrix", () => {
         "apple_tv",
         "Disney Plus",
       ]),
-    ).toEqual(["Netflix", "Apple TV", "Disney+"]);
+    ).toEqual(["netflix", "apple_tv", "disney_plus"]);
   });
 
   it("extracts canonical US streaming providers from raw TMDB watch-provider payloads", () => {
     expect(
       extractTmdbReleaseProviders({
+        networks: [{ id: 2552, name: "Apple TV" }],
         "watch/providers": {
           results: {
             US: {
               flatrate: [
                 {
-                  provider_name: "Apple TV Plus",
-                  logo_path: "/apple.png",
+                  provider_id: 9,
+                  provider_name: "Amazon Prime Video",
+                  logo_path: "/prime.png",
+                  display_priority: 3,
                 },
                 {
+                  provider_id: 350,
+                  provider_name: "Apple TV",
+                  logo_path: "/apple.png",
+                  display_priority: 4,
+                },
+                {
+                  provider_id: 1899,
                   provider_name: "HBO Max",
                   logo_path: "/max.png",
+                  display_priority: 152,
+                },
+                {
+                  provider_id: 2243,
+                  provider_name: "Apple TV Amazon Channel",
+                  logo_path: "/apple-amazon.png",
+                  display_priority: 215,
                 },
               ],
+              // Paid services under ads/free are not free to watch; unknown
+              // free-bucket entries are dropped.
               ads: [
                 {
-                  provider_name: "Peacock",
+                  provider_id: 386,
+                  provider_name: "Peacock Premium",
                   logo_path: "/peacock.png",
                 },
               ],
@@ -177,22 +202,23 @@ describe("release calendar robustness matrix", () => {
                   logo_path: "/unknown.png",
                 },
               ],
+              buy: [{ provider_id: 2, provider_name: "Apple TV Store" }],
             },
           },
         },
       }),
     ).toEqual([
       {
-        name: "Apple TV",
+        key: "apple_tv",
+        name: "Apple TV+",
         logoUrl: "https://image.tmdb.org/t/p/w92/apple.png",
+        source: "original",
       },
       {
+        key: "max",
         name: "Max",
         logoUrl: "https://image.tmdb.org/t/p/w92/max.png",
-      },
-      {
-        name: "Peacock",
-        logoUrl: "https://image.tmdb.org/t/p/w92/peacock.png",
+        source: "subscription",
       },
     ]);
   });
@@ -211,7 +237,14 @@ describe("release calendar robustness matrix", () => {
           },
         },
       }),
-    ).toEqual([{ name: "Disney+", logoUrl: "https://cdn.test/disney.png" }]);
+    ).toEqual([
+      {
+        key: "disney_plus",
+        name: "Disney+",
+        logoUrl: "https://cdn.test/disney.png",
+        source: "subscription",
+      },
+    ]);
   });
 
   const providerMatchCases: Array<[string[], string[], boolean]> = [
@@ -223,6 +256,8 @@ describe("release calendar robustness matrix", () => {
     [["Hulu"], ["Netflix"], false],
     [[], ["Netflix"], false],
     [["Peacock"], [], true],
+    [["Peacock Premium"], ["peacock"], true],
+    [["Paramount Plus Apple TV channel"], ["Paramount+"], true],
   ];
 
   it.each(providerMatchCases)(

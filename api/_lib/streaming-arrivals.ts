@@ -14,8 +14,12 @@ import {
   buildStreamingArrivalNotificationContent,
   resolveNotificationPreferences,
 } from "../../lib/notificationContent";
-import { extractTmdbReleaseProviders } from "../../lib/releaseCalendar";
 import { STREAMING_PROVIDER_OPTIONS } from "../../lib/streamingProviders";
+import {
+  decodeWatchProviderSnapshot,
+  encodeWatchProviderSnapshot,
+  getWatchProviderKeys,
+} from "../../lib/watchProviders";
 import { db } from "./db";
 import { createNotificationsAndPush, type NotificationInput } from "./notifications";
 import { userHasPro } from "./pro";
@@ -25,35 +29,11 @@ const PROVIDER_LABEL_BY_KEY = new Map(
   STREAMING_PROVIDER_OPTIONS.map((option) => [option.key, option.label] as const),
 );
 
-// TMDB provider display names → Plotlist provider keys. Contains-matching
-// absorbs TMDB naming churn ("Netflix Standard with Ads", "Paramount Plus",
-// "Peacock Premium", channel bundles, …); anything unmapped is ignored.
-export function providerKeyForTmdbName(name: string): string | null {
-  const lower = name.toLowerCase();
-  if (lower.includes("cinemax")) return null;
-  if (lower.includes("netflix")) return "netflix";
-  if (lower.includes("apple tv")) return "apple_tv";
-  if (lower.includes("disney")) return "disney_plus";
-  if (lower.includes("hulu")) return "hulu";
-  if (lower.includes("peacock")) return "peacock";
-  if (lower.includes("prime video")) return "prime_video";
-  if (lower.includes("paramount")) return "paramount_plus";
-  if (lower.includes("mgm")) return "mgm_plus";
-  if (lower === "max" || lower.startsWith("max ") || lower.includes("hbo max")) {
-    return "max";
-  }
-  return null;
-}
-
+// Canonical service keys for a cached TMDB detail payload, resolved by the
+// shared lib/watchProviders rules (tiers and storefront channels collapse,
+// spurious storefront hosts drop). Sorted so snapshots compare stably.
 export function extractProviderKeys(details: unknown): string[] {
-  const keys = new Set<string>();
-  for (const provider of extractTmdbReleaseProviders(details)) {
-    const key = providerKeyForTmdbName(provider.name);
-    if (key) {
-      keys.add(key);
-    }
-  }
-  return [...keys].sort();
+  return getWatchProviderKeys(details);
 }
 
 // Cron pass: diff each watchlisted show's US streaming providers against the
@@ -188,19 +168,30 @@ export async function runStreamingArrivalNotifications(
       const keys = extractProviderKeys(row.payload);
       const snapshot = snapshotByShowId.get(show.id);
       if (snapshot) {
-        const previous = new Set(snapshot.providerKeys);
-        const newKeys = keys.filter((key) => !previous.has(key));
+        // A snapshot written by an older resolver version is re-baselined
+        // without notifying: its keys differ from today's output for rule
+        // reasons (v1 never recognised Peacock/Paramount+ tiers or channel
+        // variants), not because the show landed anywhere new.
+        const { keys: previousKeys, isCurrentVersion } = decodeWatchProviderSnapshot(
+          snapshot.providerKeys,
+        );
+        const previous = new Set(previousKeys);
+        const newKeys = isCurrentVersion ? keys.filter((key) => !previous.has(key)) : [];
         if (newKeys.length > 0) {
           arrivals.push({ showId: show.id, title: show.title, newKeys });
         }
         await db
           .update(showProviderAvailability)
-          .set({ providerKeys: keys, updatedAt: now })
+          .set({ providerKeys: encodeWatchProviderSnapshot(keys), updatedAt: now })
           .where(eq(showProviderAvailability.showId, show.id));
       } else {
         await db
           .insert(showProviderAvailability)
-          .values({ showId: show.id, providerKeys: keys, updatedAt: now })
+          .values({
+            showId: show.id,
+            providerKeys: encodeWatchProviderSnapshot(keys),
+            updatedAt: now,
+          })
           .onConflictDoNothing();
       }
     }

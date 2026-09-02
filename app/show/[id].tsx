@@ -42,7 +42,7 @@ import {
   WEB_READING_MAX_WIDTH,
 } from "../../lib/webLayout";
 import { FlashList } from "../../components/FlashList";
-import { HorizontalRail, RailArrowsBox } from "../../components/HorizontalRail";
+import { RailArrowsBox } from "../../components/HorizontalRail";
 import { PageTitle } from "../../components/PageTitle";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -71,6 +71,7 @@ import { useRefetchWhenStale } from "../../lib/useRefetchWhenStale";
 import type { Id } from "../../lib/plotlist/types";
 import { EmptyState } from "../../components/EmptyState";
 import { GlassPressable, GlassSurface } from "../../components/NativeGlass";
+import { WhereToWatchSection } from "../../components/WhereToWatchSection";
 import { ReviewRowCompact } from "../../components/ReviewRow";
 import { CommentContextMenu } from "../../components/CommentContextMenu";
 import { ReportModal } from "../../components/ReportModal";
@@ -225,9 +226,11 @@ const PREVIEW_SHOW = {
     createdBy: [{ id: 1, name: "Vince Gilligan" }],
     watchProviders: [
       {
-        id: "apple-tv",
-        name: "Apple TV",
-        logoUrl: "https://image.tmdb.org/t/p/w92/2E03IAZsX4ZaUqM7tXlctEPMGWS.jpg",
+        id: "apple_tv",
+        key: "apple_tv",
+        name: "Apple TV+",
+        logoUrl: "https://image.tmdb.org/t/p/w92/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+        source: "original",
         deepLinkUrl: null,
       },
     ],
@@ -3139,62 +3142,11 @@ export default function ShowScreen() {
           </View>
         )}
 
-        {activeDetails?.watchProviders &&
-          activeDetails.watchProviders.length > 0 && (
-            <View className="mt-8 px-6">
-              <View className="mb-3">
-                <View>
-                  <Text
-                    className="text-xs font-bold uppercase text-text-tertiary"
-                    style={{ letterSpacing: 1.5 }}
-                  >
-                    Where to Watch
-                  </Text>
-                  <Text className="mt-2 text-sm text-text-secondary">
-                    Streaming availability in the US.
-                  </Text>
-                </View>
-              </View>
-
-              <HorizontalRail contentContainerStyle={{ paddingRight: 8 }}>
-                {activeDetails.watchProviders.map((provider: any) => (
-                  <GlassPressable
-                    key={provider.id}
-                    disabled={!provider.deepLinkUrl}
-                    onPress={() => handleProviderPress(provider)}
-                    radius={999}
-                    variant="tinted"
-                    fallbackColor="rgba(22,26,34,0.70)"
-                    style={{ marginRight: 10 }}
-                    surfaceStyle={{ opacity: provider.deepLinkUrl ? 1 : 0.55 }}
-                    contentStyle={{
-                      alignItems: "center",
-                      flexDirection: "row",
-                      gap: 8,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                    }}
-                  >
-                    {provider.logoUrl ? (
-                      <Image
-                        source={{ uri: provider.logoUrl }}
-                        style={{ width: 24, height: 24, borderRadius: 6 }}
-                        contentFit="cover"
-                        transition={200}
-                      />
-                    ) : (
-                      <View className="h-6 w-6 items-center justify-center rounded-md bg-dark-elevated">
-                        <Ionicons name="play-circle-outline" size={14} color="#9BA1B0" />
-                      </View>
-                    )}
-                    <Text className="text-sm font-medium text-text-primary">
-                      {provider.name}
-                    </Text>
-                  </GlassPressable>
-                ))}
-              </HorizontalRail>
-            </View>
-          )}
+        <WhereToWatchSection
+          providers={activeDetails?.watchProviders}
+          loaded={Boolean(activeDetails)}
+          onPressProvider={handleProviderPress}
+        />
 
         {/* ─── Genres ─── */}
         {displayGenres.length > 0 && (

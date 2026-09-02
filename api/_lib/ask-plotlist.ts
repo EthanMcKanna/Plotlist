@@ -172,9 +172,11 @@ export async function loadDetailsByShowId(
   const byShowId = new Map<string, ShowDetails>();
   const tmdbRows = showRows.filter((row) => row.externalSource === "tmdb");
   const showByExternalId = new Map(tmdbRows.map((row) => [row.externalId, row]));
-  // Runtime, status, and US providers are the only fields the concierge
-  // reads; extracting them in SQL turns ~4MB of payloads for a 40-show
-  // candidate set into a few KB, and the chunks run as one wave.
+  // Runtime, status, networks and US providers are the only fields the
+  // concierge reads; extracting them in SQL turns ~4MB of payloads for a
+  // 40-show candidate set into a few KB, and the chunks run as one wave.
+  // Networks ride along so the provider resolver can apply its
+  // originals-live-on-their-network rule.
   const parseJson = (raw: string | null) => {
     if (!raw) return undefined;
     try {
@@ -191,6 +193,7 @@ export async function loadDetailsByShowId(
           status: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.status')`,
           episodeRunTime: sql<number | string | null>`json_extract(${tmdbDetailsCache.payload}, '$.episodeRunTime')`,
           episodeRunTimeRawJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.episode_run_time')`,
+          networksJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.networks')`,
           usProvidersJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$."watch/providers".results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watchProviders.results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watch_providers.results.US'))`,
         })
         .from(tmdbDetailsCache)
@@ -209,6 +212,7 @@ export async function loadDetailsByShowId(
       status: row.status ?? undefined,
       episodeRunTime: row.episodeRunTime ?? undefined,
       episode_run_time: parseJson(row.episodeRunTimeRawJson),
+      networks: parseJson(row.networksJson),
       watchProviders: { results: { US: parseJson(row.usProvidersJson) } },
     };
     byShowId.set(show.id, {

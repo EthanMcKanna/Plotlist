@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
+import { getPrimaryWatchProvider } from "../lib/watchProviders";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -74,18 +75,16 @@ export function getReleaseRowProvider(item: any): {
   name: string | null;
   logoUrl: string | null;
 } {
-  const providers = Array.isArray(item.providers) ? item.providers : [];
-  const named = providers.find(
-    (provider: any) =>
-      typeof provider?.name === "string" && provider.name.trim().length > 0,
-  );
-  const withLogo = providers.find(
-    (provider: any) =>
-      typeof provider?.logoUrl === "string" && provider.logoUrl.trim().length > 0,
-  );
+  // Providers are resolved and ordered original-first by lib/watchProviders;
+  // name and logo come from the same entry so they never disagree.
+  const primary = getPrimaryWatchProvider(item?.providers);
+  const logoUrl =
+    typeof primary?.logoUrl === "string" && primary.logoUrl.trim().length > 0
+      ? primary.logoUrl
+      : null;
   return {
-    name: named?.name?.trim() ?? null,
-    logoUrl: withLogo?.logoUrl ?? null,
+    name: primary?.name?.trim() ?? null,
+    logoUrl,
   };
 }
 
