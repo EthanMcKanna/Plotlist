@@ -85,6 +85,11 @@ import { computeTasteMatchPercentsForViewer } from "./recs";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
+  getWatchProviderKeys,
+  getWatchServiceTmdbProviderIds,
+  resolveWatchProviders,
+} from "../../lib/watchProviders";
+import {
   isHomeCatalogCacheFresh,
   isHomeCatalogCacheUsableAfterError,
 } from "../../lib/homeCatalogCache";
@@ -1841,6 +1846,11 @@ async function getSlimTmdbDetailRowsByExternalIds(
             status: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.status')`,
             seasonsJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.seasons')`,
             lastEpisodeJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$.last_episode_to_air'), json_extract(${tmdbDetailsCache.payload}, '$.lastEpisodeToAir'))`,
+            networksJson: sql<string | null>`json_extract(${tmdbDetailsCache.payload}, '$.networks')`,
+            // The provider resolver needs the networks (originals live on
+            // their network) and needs to tell "no US providers" apart from
+            // "payload fetched without watch/providers" (cold ingest).
+            providerResultsJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$."watch/providers".results'), json_extract(${tmdbDetailsCache.payload}, '$.watchProviders.results'), json_extract(${tmdbDetailsCache.payload}, '$.watch_providers.results'))`,
             usProvidersJson: sql<string | null>`coalesce(json_extract(${tmdbDetailsCache.payload}, '$."watch/providers".results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watchProviders.results.US'), json_extract(${tmdbDetailsCache.payload}, '$.watch_providers.results.US'))`,
           })
           .from(tmdbDetailsCache)
@@ -1867,9 +1877,51 @@ async function getSlimTmdbDetailRowsByExternalIds(
       status: row.status ?? undefined,
       seasons: parseJson(row.seasonsJson),
       last_episode_to_air: parseJson(row.lastEpisodeJson),
-      watchProviders: { results: { US: parseJson(row.usProvidersJson) } },
+      networks: parseJson(row.networksJson),
+      watchProviders: row.providerResultsJson
+        ? { results: { US: parseJson(row.usProvidersJson) } }
+        : undefined,
     },
   }));
+}
+
+// Home provider rooms come from TMDB discover, whose `with_watch_providers`
+// filter carries the same storefront noise as the raw provider data (an
+// Apple TV+ show sold as an Amazon channel matches Prime Video's id). Re-check
+// membership with the resolver against cached details. Shows with no cached
+// provider data are kept — we can't tell either way, and dropping them would
+// empty rooms after a cold ingest.
+async function filterCatalogItemsToResolvedProvider<
+  T extends { externalSource?: string | null; externalId?: string | null },
+>(providerKey: string, items: T[]): Promise<T[]> {
+  const tmdbIds = items
+    .filter((item) => (item.externalSource ?? "tmdb") === "tmdb" && item.externalId)
+    .map((item) => String(item.externalId));
+  if (tmdbIds.length === 0) return items;
+  let detailRows: SlimTmdbDetailRow[];
+  try {
+    detailRows = await getSlimTmdbDetailRowsByExternalIds(tmdbIds);
+  } catch (error) {
+    console.warn("[home-catalog] Provider membership check skipped.", {
+      providerKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return items;
+  }
+  const keysByExternalId = new Map<string, string[] | null>();
+  for (const row of detailRows) {
+    const payload = row.payload as { watchProviders?: unknown } | null;
+    const hasProviderData = Boolean(payload?.watchProviders);
+    keysByExternalId.set(
+      row.externalId,
+      hasProviderData ? getWatchProviderKeys(row.payload) : null,
+    );
+  }
+  return items.filter((item) => {
+    if ((item.externalSource ?? "tmdb") !== "tmdb" || !item.externalId) return true;
+    const keys = keysByExternalId.get(String(item.externalId));
+    return !keys || keys.includes(providerKey);
+  });
 }
 
 async function getTmdbDetailRowsForShows(showRows: Array<typeof shows.$inferSelect>) {
@@ -2276,10 +2328,14 @@ function projectExtendedDetailsForClient(details: any) {
       })),
     voteAverage: details.vote_average ?? details.voteAverage ?? null,
     voteCount: details.vote_count ?? details.voteCount ?? null,
-    watchProviders: extractTmdbReleaseProviders(details, "US").map((provider) => ({
-      id: provider.name,
+    // Resolved through lib/watchProviders at read time, so cached payloads
+    // get the current rules without a re-ingest. Ordered original-first.
+    watchProviders: resolveWatchProviders(details, { region: "US" }).map((provider) => ({
+      id: provider.key,
+      key: provider.key,
       name: provider.name,
-      logoUrl: provider.logoUrl ?? null,
+      logoUrl: provider.logoUrl,
+      source: provider.source,
       deepLinkUrl: null,
     })),
   };
@@ -2651,17 +2707,23 @@ async function ensureShowImdbId(context: ShowMetadataContext): Promise<string | 
   return imdbId;
 }
 
-const providerIds: Record<string, number | string> = {
-  netflix: 8,
-  apple_tv: 350,
-  max: 1899,
-  disney_plus: 337,
-  hulu: 15,
-  peacock: "386|387",
-  prime_video: 9,
-  paramount_plus: "2303|2616",
-  mgm_plus: "34|583|636",
-};
+// TMDB discover ids per home provider room, from the same registry the
+// resolver uses (direct + tier + storefront-channel ids), so a show sold only
+// as "<service> Amazon Channel" still lands in its service's room. Membership
+// is then re-checked against resolved providers in loadHomeCatalogList.
+const providerIds: Record<string, number | string> = Object.fromEntries(
+  [
+    "netflix",
+    "apple_tv",
+    "max",
+    "disney_plus",
+    "hulu",
+    "peacock",
+    "prime_video",
+    "paramount_plus",
+    "mgm_plus",
+  ].map((key) => [key, getWatchServiceTmdbProviderIds(key).join("|")]),
+);
 
 const genreCategoryIds: Record<string, number> = {
   genre_animation: 16,
@@ -2958,7 +3020,7 @@ async function refreshTmdbListCache(
   const providerEditorialSeeds = providerIds[category]
     ? getHomeEditorialProviderSeedItems(category as HomeEditorialProviderKey)
     : [];
-  const results = rankHomeShows(
+  const rankedResults = rankHomeShows(
     [
       ...editorialSeeds,
       ...providerEditorialSeeds,
@@ -2974,6 +3036,11 @@ async function refreshTmdbListCache(
         category === "breakout_premieres" ||
         Boolean(providerIds[category]),
     },
+  );
+  const results = (
+    providerIds[category]
+      ? await filterCatalogItemsToResolvedProvider(category, rankedResults)
+      : rankedResults
   ).slice(0, limit);
   // Catalog rows for the listed shows are a side effect of the refresh —
   // the list itself is already ranked — so request paths hand the upsert

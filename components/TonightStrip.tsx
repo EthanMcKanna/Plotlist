@@ -7,6 +7,7 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeInRight } from "react-native-reanimated";
 
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
+import { getPrimaryWatchProvider } from "../lib/watchProviders";
 import { api } from "../lib/plotlist/api";
 import { useAccent } from "../lib/appearanceStore";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
@@ -246,9 +247,10 @@ export function useHomeSchedulePreview(enabled = true): HomeSchedulePreviewState
   };
 }
 
+// Providers arrive resolved and ordered original-first (lib/watchProviders),
+// so the first named entry is the service to label the row with.
 function getScheduleProviderName(item: any) {
-  const providers = Array.isArray(item.providers) ? item.providers : [];
-  return providers.find((provider: any) => provider?.name?.trim())?.name?.trim() ?? null;
+  return getPrimaryWatchProvider(item?.providers)?.name?.trim() ?? null;
 }
 
 export function getScheduleCardSubline(item: any) {

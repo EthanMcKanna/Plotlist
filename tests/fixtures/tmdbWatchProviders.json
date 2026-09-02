@@ -1,0 +1,3370 @@
+{
+  "ted_lasso": {
+    "id": 97546,
+    "name": "Ted Lasso",
+    "networks": [
+      {
+        "id": 2552,
+        "name": "Apple TV",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        },
+        {
+          "provider_id": 2243,
+          "provider_name": "Apple TV Amazon Channel",
+          "logo_path": "/mHrYMgnZIp6lgW2aXg7ix9zGOnA.jpg",
+          "display_priority": 215
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "severance": {
+    "id": 95396,
+    "name": "Severance",
+    "networks": [
+      {
+        "id": 2552,
+        "name": "Apple TV",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        },
+        {
+          "provider_id": 2243,
+          "provider_name": "Apple TV Amazon Channel",
+          "logo_path": "/mHrYMgnZIp6lgW2aXg7ix9zGOnA.jpg",
+          "display_priority": 215
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "silo": {
+    "id": 125988,
+    "name": "Silo",
+    "networks": [
+      {
+        "id": 2552,
+        "name": "Apple TV",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        },
+        {
+          "provider_id": 2243,
+          "provider_name": "Apple TV Amazon Channel",
+          "logo_path": "/mHrYMgnZIp6lgW2aXg7ix9zGOnA.jpg",
+          "display_priority": 215
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "the_boys": {
+    "id": 76479,
+    "name": "The Boys",
+    "networks": [
+      {
+        "id": 1024,
+        "name": "Prime Video",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "house_of_the_dragon": {
+    "id": 94997,
+    "name": "House of the Dragon",
+    "networks": [
+      {
+        "id": 49,
+        "name": "HBO",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "stranger_things": {
+    "id": 66732,
+    "name": "Stranger Things",
+    "networks": [
+      {
+        "id": 213,
+        "name": "Netflix",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "yellowstone": {
+    "id": 73586,
+    "name": "Yellowstone",
+    "networks": [
+      {
+        "id": 2076,
+        "name": "Paramount Network",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "suits": {
+    "id": 37680,
+    "name": "Suits",
+    "networks": [
+      {
+        "id": 30,
+        "name": "USA Network",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_bear": {
+    "id": 136315,
+    "name": "The Bear",
+    "networks": [
+      {
+        "id": 453,
+        "name": "Hulu",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 337,
+          "provider_name": "Disney Plus",
+          "logo_path": "/97yvRBw1GzX7fXprcF80er19ot.jpg",
+          "display_priority": 5
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 123,
+          "provider_name": "FXNow",
+          "logo_path": "/m4KUe3UoTnLgN4g6txYMnBqeUI5.jpg",
+          "display_priority": 42
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "abbott_elementary": {
+    "id": 125935,
+    "name": "Abbott Elementary",
+    "networks": [
+      {
+        "id": 2,
+        "name": "ABC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "shogun": {
+    "id": 126308,
+    "name": "Shōgun",
+    "networks": [
+      {
+        "id": 88,
+        "name": "FX",
+        "origin_country": "US"
+      },
+      {
+        "id": 453,
+        "name": "Hulu",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "the_pitt": {
+    "id": 250307,
+    "name": "The Pitt",
+    "networks": [
+      {
+        "id": 6783,
+        "name": "Max",
+        "origin_country": ""
+      },
+      {
+        "id": 8304,
+        "name": "HBO Max",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "andor": {
+    "id": 83867,
+    "name": "Andor",
+    "networks": [
+      {
+        "id": 2739,
+        "name": "Disney+",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 337,
+          "provider_name": "Disney Plus",
+          "logo_path": "/97yvRBw1GzX7fXprcF80er19ot.jpg",
+          "display_priority": 5
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "pluribus": {
+    "id": 225171,
+    "name": "Pluribus",
+    "networks": [
+      {
+        "id": 2552,
+        "name": "Apple TV",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        },
+        {
+          "provider_id": 2243,
+          "provider_name": "Apple TV Amazon Channel",
+          "logo_path": "/mHrYMgnZIp6lgW2aXg7ix9zGOnA.jpg",
+          "display_priority": 215
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "law_and_order": {
+    "id": 549,
+    "name": "Law & Order",
+    "networks": [
+      {
+        "id": 6,
+        "name": "NBC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "law_and_order_svu": {
+    "id": 2734,
+    "name": "Law & Order: Special Victims Unit",
+    "networks": [
+      {
+        "id": 6,
+        "name": "NBC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        },
+        {
+          "provider_id": 322,
+          "provider_name": "USA Network",
+          "logo_path": "/A95qgiMz6ulV2SxeKcJ5Gc9pqGS.jpg",
+          "display_priority": 93
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "greys_anatomy": {
+    "id": 1416,
+    "name": "Grey's Anatomy",
+    "networks": [
+      {
+        "id": 2,
+        "name": "ABC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "ncis": {
+    "id": 4614,
+    "name": "NCIS",
+    "networks": [
+      {
+        "id": 16,
+        "name": "CBS",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 582,
+          "provider_name": "Paramount+ Amazon Channel",
+          "logo_path": "/hExO4PtimLIYn3kBOrzsejNv7cT.jpg",
+          "display_priority": 26
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 633,
+          "provider_name": "Paramount+ Roku Premium Channel",
+          "logo_path": "/ywIoxSjoYJGUIbR6BfxUiCHdPi3.jpg",
+          "display_priority": 62
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_rookie": {
+    "id": 79744,
+    "name": "The Rookie",
+    "networks": [
+      {
+        "id": 2,
+        "name": "ABC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "chicago_fire": {
+    "id": 44006,
+    "name": "Chicago Fire",
+    "networks": [
+      {
+        "id": 6,
+        "name": "NBC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        },
+        {
+          "provider_id": 322,
+          "provider_name": "USA Network",
+          "logo_path": "/A95qgiMz6ulV2SxeKcJ5Gc9pqGS.jpg",
+          "display_priority": 93
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [
+        {
+          "provider_id": 79,
+          "provider_name": "NBC",
+          "logo_path": "/6hFf3sIdmXSAczy3i6tLSmy6gwK.jpg",
+          "display_priority": 48
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "only_murders": {
+    "id": 107113,
+    "name": "Only Murders in the Building",
+    "networks": [
+      {
+        "id": 453,
+        "name": "Hulu",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 337,
+          "provider_name": "Disney Plus",
+          "logo_path": "/97yvRBw1GzX7fXprcF80er19ot.jpg",
+          "display_priority": 5
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "the_last_of_us": {
+    "id": 100088,
+    "name": "The Last of Us",
+    "networks": [
+      {
+        "id": 49,
+        "name": "HBO",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_white_lotus": {
+    "id": 111803,
+    "name": "The White Lotus",
+    "networks": [
+      {
+        "id": 49,
+        "name": "HBO",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "bluey": {
+    "id": 82728,
+    "name": "Bluey",
+    "networks": [
+      {
+        "id": 2854,
+        "name": "ABC Kids",
+        "origin_country": "AU"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 337,
+          "provider_name": "Disney Plus",
+          "logo_path": "/97yvRBw1GzX7fXprcF80er19ot.jpg",
+          "display_priority": 5
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 508,
+          "provider_name": "DisneyNOW",
+          "logo_path": "/d8HzRaIa5aGE5mJB1SsIA9hODdx.jpg",
+          "display_priority": 122
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_walking_dead": {
+    "id": 1402,
+    "name": "The Walking Dead",
+    "networks": [
+      {
+        "id": 174,
+        "name": "AMC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 635,
+          "provider_name": "AMC+ Roku Premium Channel",
+          "logo_path": "/gAGrSQCTAisxy2CsWbijVvJEnRo.jpg",
+          "display_priority": 30
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 300,
+          "provider_name": "Pluto TV",
+          "logo_path": "/dB8G41Q6tSL5NBisrIeqByfepBc.jpg",
+          "display_priority": 72
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "dexter_resurrection": {
+    "id": 259909,
+    "name": "Dexter: Resurrection",
+    "networks": [
+      {
+        "id": 6631,
+        "name": "Paramount+ with Showtime",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 582,
+          "provider_name": "Paramount+ Amazon Channel",
+          "logo_path": "/hExO4PtimLIYn3kBOrzsejNv7cT.jpg",
+          "display_priority": 26
+        },
+        {
+          "provider_id": 633,
+          "provider_name": "Paramount+ Roku Premium Channel",
+          "logo_path": "/ywIoxSjoYJGUIbR6BfxUiCHdPi3.jpg",
+          "display_priority": 62
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "outlander": {
+    "id": 56570,
+    "name": "Outlander",
+    "networks": [
+      {
+        "id": 318,
+        "name": "STARZ",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 1794,
+          "provider_name": "Starz Amazon Channel",
+          "logo_path": "/esiLBRzDUwodjfN8gA4qj7l3ZF7.jpg",
+          "display_priority": 88
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        },
+        {
+          "provider_id": 43,
+          "provider_name": "Starz",
+          "logo_path": "/yIKwylTLP1u8gl84Is7FItpYLGL.jpg",
+          "display_priority": 164
+        },
+        {
+          "provider_id": 1855,
+          "provider_name": "Starz Apple TV channel",
+          "logo_path": "/1C5EVCWyQD798CE1DFfcm6oAbxP.jpg",
+          "display_priority": 202
+        },
+        {
+          "provider_id": 634,
+          "provider_name": "Starz Roku Premium Channel",
+          "logo_path": "/9laPF1MAiUxlqM8T98F3Gj0bhzd.jpg",
+          "display_priority": 350
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 207,
+          "provider_name": "The Roku Channel",
+          "logo_path": "/wQzSN83BnWVgO7xEh0SeTVqtrFv.jpg",
+          "display_priority": 29
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        }
+      ]
+    }
+  },
+  "from": {
+    "id": 124364,
+    "name": "FROM",
+    "networks": [
+      {
+        "id": 922,
+        "name": "Epix",
+        "origin_country": "US"
+      },
+      {
+        "id": 6219,
+        "name": "MGM+",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 583,
+          "provider_name": "MGM+ Amazon Channel",
+          "logo_path": "/efu1Cqc63XrPBoreYnf2mn0Nizj.jpg",
+          "display_priority": 13
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 636,
+          "provider_name": "MGM Plus Roku Premium Channel",
+          "logo_path": "/lD7HKUmXDvUya58DceiTA809Zbf.jpg",
+          "display_priority": 32
+        },
+        {
+          "provider_id": 34,
+          "provider_name": "MGM Plus",
+          "logo_path": "/ctiRpS16dlaTXQBSsiFncMrgWmh.jpg",
+          "display_priority": 49
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "jury_duty": {
+    "id": 222023,
+    "name": "Jury Duty",
+    "networks": [
+      {
+        "id": 5865,
+        "name": "Amazon Freevee",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "dark_winds": {
+    "id": 128904,
+    "name": "Dark Winds",
+    "networks": [
+      {
+        "id": 174,
+        "name": "AMC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 1854,
+          "provider_name": "AMC Plus Apple TV channel",
+          "logo_path": "/oTQdXIqM9iewlN4MC2nhKB0gHw.jpg",
+          "display_priority": 24
+        },
+        {
+          "provider_id": 528,
+          "provider_name": "AMC+ Amazon Channel",
+          "logo_path": "/2ino0WmHA4GROB7NYKzT6PGqLcb.jpg",
+          "display_priority": 28
+        },
+        {
+          "provider_id": 635,
+          "provider_name": "AMC+ Roku Premium Channel",
+          "logo_path": "/gAGrSQCTAisxy2CsWbijVvJEnRo.jpg",
+          "display_priority": 30
+        },
+        {
+          "provider_id": 526,
+          "provider_name": "AMC+",
+          "logo_path": "/ovmu6uot1XVvsemM2dDySXLiX57.jpg",
+          "display_priority": 31
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 212,
+          "provider_name": "Hoopla",
+          "logo_path": "/j7D006Uy3UWwZ6G0xH6BMgIWTzH.jpg",
+          "display_priority": 36
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "tulsa_king": {
+    "id": 153312,
+    "name": "Tulsa King",
+    "networks": [
+      {
+        "id": 4330,
+        "name": "Paramount+",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 582,
+          "provider_name": "Paramount+ Amazon Channel",
+          "logo_path": "/hExO4PtimLIYn3kBOrzsejNv7cT.jpg",
+          "display_priority": 26
+        },
+        {
+          "provider_id": 633,
+          "provider_name": "Paramount+ Roku Premium Channel",
+          "logo_path": "/ywIoxSjoYJGUIbR6BfxUiCHdPi3.jpg",
+          "display_priority": 62
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "poker_face": {
+    "id": 120998,
+    "name": "Poker Face",
+    "networks": [
+      {
+        "id": 3353,
+        "name": "Peacock",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "reacher": {
+    "id": 108978,
+    "name": "Reacher",
+    "networks": [
+      {
+        "id": 1024,
+        "name": "Prime Video",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "slow_horses": {
+    "id": 95480,
+    "name": "Slow Horses",
+    "networks": [
+      {
+        "id": 2552,
+        "name": "Apple TV",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 350,
+          "provider_name": "Apple TV",
+          "logo_path": "/mcbz1LgtErU9p4UdbZ0rG6RTWHX.jpg",
+          "display_priority": 4
+        },
+        {
+          "provider_id": 2243,
+          "provider_name": "Apple TV Amazon Channel",
+          "logo_path": "/mHrYMgnZIp6lgW2aXg7ix9zGOnA.jpg",
+          "display_priority": 215
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "bosch_legacy": {
+    "id": 153657,
+    "name": "Bosch: Legacy",
+    "networks": [
+      {
+        "id": 1024,
+        "name": "Prime Video",
+        "origin_country": ""
+      },
+      {
+        "id": 5865,
+        "name": "Amazon Freevee",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "yellowjackets": {
+    "id": 117488,
+    "name": "Yellowjackets",
+    "networks": [
+      {
+        "id": 67,
+        "name": "Showtime",
+        "origin_country": "US"
+      },
+      {
+        "id": 6631,
+        "name": "Paramount+ with Showtime",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 582,
+          "provider_name": "Paramount+ Amazon Channel",
+          "logo_path": "/hExO4PtimLIYn3kBOrzsejNv7cT.jpg",
+          "display_priority": 26
+        },
+        {
+          "provider_id": 633,
+          "provider_name": "Paramount+ Roku Premium Channel",
+          "logo_path": "/ywIoxSjoYJGUIbR6BfxUiCHdPi3.jpg",
+          "display_priority": 62
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "power_book_ii": {
+    "id": 97890,
+    "name": "Power Book II: Ghost",
+    "networks": [
+      {
+        "id": 318,
+        "name": "STARZ",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 1794,
+          "provider_name": "Starz Amazon Channel",
+          "logo_path": "/esiLBRzDUwodjfN8gA4qj7l3ZF7.jpg",
+          "display_priority": 88
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 43,
+          "provider_name": "Starz",
+          "logo_path": "/yIKwylTLP1u8gl84Is7FItpYLGL.jpg",
+          "display_priority": 164
+        },
+        {
+          "provider_id": 1855,
+          "provider_name": "Starz Apple TV channel",
+          "logo_path": "/1C5EVCWyQD798CE1DFfcm6oAbxP.jpg",
+          "display_priority": 202
+        },
+        {
+          "provider_id": 634,
+          "provider_name": "Starz Roku Premium Channel",
+          "logo_path": "/9laPF1MAiUxlqM8T98F3Gj0bhzd.jpg",
+          "display_priority": 350
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        }
+      ],
+      "ads": [
+        {
+          "provider_id": 207,
+          "provider_name": "The Roku Channel",
+          "logo_path": "/wQzSN83BnWVgO7xEh0SeTVqtrFv.jpg",
+          "display_priority": 29
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "die_hart": {
+    "id": 99072,
+    "name": "Die Hart",
+    "networks": [
+      {
+        "id": 3091,
+        "name": "Quibi",
+        "origin_country": "US"
+      },
+      {
+        "id": 4692,
+        "name": "The Roku Channel",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 207,
+          "provider_name": "The Roku Channel",
+          "logo_path": "/wQzSN83BnWVgO7xEh0SeTVqtrFv.jpg",
+          "display_priority": 29
+        }
+      ],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "squid_game": {
+    "id": 93405,
+    "name": "Squid Game",
+    "networks": [
+      {
+        "id": 213,
+        "name": "Netflix",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "interview_with_the_vampire": {
+    "id": 128098,
+    "name": "Interview with the Vampire",
+    "networks": [
+      {
+        "id": 174,
+        "name": "AMC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 2383,
+          "provider_name": "Philo",
+          "logo_path": "/ptmbGSttkyzawLbxx9MElmxKuVo.jpg",
+          "display_priority": 17
+        },
+        {
+          "provider_id": 1854,
+          "provider_name": "AMC Plus Apple TV channel",
+          "logo_path": "/oTQdXIqM9iewlN4MC2nhKB0gHw.jpg",
+          "display_priority": 24
+        },
+        {
+          "provider_id": 528,
+          "provider_name": "AMC+ Amazon Channel",
+          "logo_path": "/2ino0WmHA4GROB7NYKzT6PGqLcb.jpg",
+          "display_priority": 28
+        },
+        {
+          "provider_id": 635,
+          "provider_name": "AMC+ Roku Premium Channel",
+          "logo_path": "/gAGrSQCTAisxy2CsWbijVvJEnRo.jpg",
+          "display_priority": 30
+        },
+        {
+          "provider_id": 526,
+          "provider_name": "AMC+",
+          "logo_path": "/ovmu6uot1XVvsemM2dDySXLiX57.jpg",
+          "display_priority": 31
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 212,
+          "provider_name": "Hoopla",
+          "logo_path": "/j7D006Uy3UWwZ6G0xH6BMgIWTzH.jpg",
+          "display_priority": 36
+        }
+      ],
+      "ads": [
+        {
+          "provider_id": 207,
+          "provider_name": "The Roku Channel",
+          "logo_path": "/wQzSN83BnWVgO7xEh0SeTVqtrFv.jpg",
+          "display_priority": 29
+        }
+      ],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "landman": {
+    "id": 157741,
+    "name": "Landman",
+    "networks": [
+      {
+        "id": 4330,
+        "name": "Paramount+",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        },
+        {
+          "provider_id": 582,
+          "provider_name": "Paramount+ Amazon Channel",
+          "logo_path": "/hExO4PtimLIYn3kBOrzsejNv7cT.jpg",
+          "display_priority": 26
+        },
+        {
+          "provider_id": 633,
+          "provider_name": "Paramount+ Roku Premium Channel",
+          "logo_path": "/ywIoxSjoYJGUIbR6BfxUiCHdPi3.jpg",
+          "display_priority": 62
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 2303,
+          "provider_name": "Paramount Plus Premium",
+          "logo_path": "/fts6X10Jn4QT0X6ac3udKEn2tJA.jpg",
+          "display_priority": 14
+        },
+        {
+          "provider_id": 2616,
+          "provider_name": "Paramount Plus Essential",
+          "logo_path": "/5wym1C0jAvJeGirPdgVpcW0CCuy.jpg",
+          "display_priority": 15
+        },
+        {
+          "provider_id": 1853,
+          "provider_name": "Paramount Plus Apple TV channel",
+          "logo_path": "/tJqmTmQ8jp9WfyaZfApHK8lSywA.jpg",
+          "display_priority": 23
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "bobs_burgers": {
+    "id": 32726,
+    "name": "Bob's Burgers",
+    "networks": [
+      {
+        "id": 19,
+        "name": "FOX",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 123,
+          "provider_name": "FXNow",
+          "logo_path": "/m4KUe3UoTnLgN4g6txYMnBqeUI5.jpg",
+          "display_priority": 42
+        },
+        {
+          "provider_id": 318,
+          "provider_name": "Adult Swim",
+          "logo_path": "/da2dkyeFe4GCRaKxpsW4mzt2UPl.jpg",
+          "display_priority": 92
+        },
+        {
+          "provider_id": 2554,
+          "provider_name": "FOX One Amazon Channel",
+          "logo_path": "/r2nFtrKGezfBEV2xA3gufBaqi5j.jpg",
+          "display_priority": 338
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_simpsons": {
+    "id": 456,
+    "name": "The Simpsons",
+    "networks": [
+      {
+        "id": 19,
+        "name": "FOX",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 337,
+          "provider_name": "Disney Plus",
+          "logo_path": "/97yvRBw1GzX7fXprcF80er19ot.jpg",
+          "display_priority": 5
+        },
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 123,
+          "provider_name": "FXNow",
+          "logo_path": "/m4KUe3UoTnLgN4g6txYMnBqeUI5.jpg",
+          "display_priority": 42
+        },
+        {
+          "provider_id": 2554,
+          "provider_name": "FOX One Amazon Channel",
+          "logo_path": "/r2nFtrKGezfBEV2xA3gufBaqi5j.jpg",
+          "display_priority": 338
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 486,
+          "provider_name": "Spectrum On Demand",
+          "logo_path": "/aAb9CUHjFe9Y3O57qnrJH0KOF1B.jpg",
+          "display_priority": 119
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "mr_robot": {
+    "id": 62560,
+    "name": "Mr. Robot",
+    "networks": [
+      {
+        "id": 30,
+        "name": "USA Network",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "westworld": {
+    "id": 63247,
+    "name": "Westworld",
+    "networks": [
+      {
+        "id": 49,
+        "name": "HBO",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "fleabag": {
+    "id": 67070,
+    "name": "Fleabag",
+    "networks": [
+      {
+        "id": 3,
+        "name": "BBC Three",
+        "origin_country": "GB"
+      },
+      {
+        "id": 4,
+        "name": "BBC One",
+        "origin_country": "GB"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        }
+      ],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        }
+      ]
+    }
+  },
+  "schitts_creek": {
+    "id": 61662,
+    "name": "Schitt's Creek",
+    "networks": [
+      {
+        "id": 23,
+        "name": "CBC Television",
+        "origin_country": "CA"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 15,
+          "provider_name": "Hulu",
+          "logo_path": "/bxBlRPEPpMVDc4jMhSrTf2339DW.jpg",
+          "display_priority": 6
+        },
+        {
+          "provider_id": 257,
+          "provider_name": "fuboTV",
+          "logo_path": "/9BgaNQRMDvVlji1JBZi6tcfxpKx.jpg",
+          "display_priority": 10
+        },
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "the_office": {
+    "id": 2316,
+    "name": "The Office",
+    "networks": [
+      {
+        "id": 6,
+        "name": "NBC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 386,
+          "provider_name": "Peacock Premium",
+          "logo_path": "/2aGrp1xw3qhwCYvNGAJZPdjfeeX.jpg",
+          "display_priority": 16
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 387,
+          "provider_name": "Peacock Premium Plus",
+          "logo_path": "/drPlq5beqXtBaP7MNs8W616YRhm.jpg",
+          "display_priority": 213
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "friends": {
+    "id": 1668,
+    "name": "Friends",
+    "networks": [
+      {
+        "id": 6,
+        "name": "NBC",
+        "origin_country": "US"
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 1825,
+          "provider_name": "HBO Max Amazon Channel",
+          "logo_path": "/embS4GPK7c8pjbuY2O2irV5rYch.jpg",
+          "display_priority": 11
+        },
+        {
+          "provider_id": 2528,
+          "provider_name": "YouTube TV",
+          "logo_path": "/x9zOHTUkQzt3PgPVKbMH9CKBwLK.jpg",
+          "display_priority": 38
+        },
+        {
+          "provider_id": 506,
+          "provider_name": "TBS",
+          "logo_path": "/cZvP3XsDKlHFhNIyHYCVPStXT5l.jpg",
+          "display_priority": 115
+        },
+        {
+          "provider_id": 1899,
+          "provider_name": "HBO Max",
+          "logo_path": "/jbe4gVSfRlbPTdESXhEKpornsfu.jpg",
+          "display_priority": 152
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  },
+  "invincible": {
+    "id": 95557,
+    "name": "INVINCIBLE",
+    "networks": [
+      {
+        "id": 1024,
+        "name": "Prime Video",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "fallout": {
+    "id": 106379,
+    "name": "Fallout",
+    "networks": [
+      {
+        "id": 1024,
+        "name": "Prime Video",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 9,
+          "provider_name": "Amazon Prime Video",
+          "logo_path": "/pvske1MyAoymrs5bguRfVqYiM9a.jpg",
+          "display_priority": 3
+        },
+        {
+          "provider_id": 2100,
+          "provider_name": "Amazon Prime Video with Ads",
+          "logo_path": "/8aBqoNeGGr0oSA85iopgNZUOTOc.jpg",
+          "display_priority": 201
+        }
+      ],
+      "free": [],
+      "ads": [
+        {
+          "provider_id": 613,
+          "provider_name": "Amazon Prime Video Free with Ads",
+          "logo_path": "/gZlCYHPx9a0TRUCEeTvHXBf9ibX.jpg",
+          "display_priority": 140
+        }
+      ],
+      "rent": [],
+      "buy": []
+    }
+  },
+  "arcane": {
+    "id": 94605,
+    "name": "Arcane",
+    "networks": [
+      {
+        "id": 213,
+        "name": "Netflix",
+        "origin_country": ""
+      }
+    ],
+    "us": {
+      "flatrate": [
+        {
+          "provider_id": 8,
+          "provider_name": "Netflix",
+          "logo_path": "/pbpMk2JmcoNnQwx5JGpXngfoWtp.jpg",
+          "display_priority": 2
+        },
+        {
+          "provider_id": 1796,
+          "provider_name": "Netflix Standard with Ads",
+          "logo_path": "/dpR8r13zWDeUR0QkzWidrdMxa56.jpg",
+          "display_priority": 151
+        }
+      ],
+      "free": [],
+      "ads": [],
+      "rent": [],
+      "buy": [
+        {
+          "provider_id": 10,
+          "provider_name": "Amazon Video",
+          "logo_path": "/qR6FKvnPBx2O37FDg8PNM7efwF3.jpg",
+          "display_priority": 8
+        },
+        {
+          "provider_id": 2,
+          "provider_name": "Apple TV Store",
+          "logo_path": "/SPnB1qiCkYfirS2it3hZORwGVn.jpg",
+          "display_priority": 9
+        },
+        {
+          "provider_id": 3,
+          "provider_name": "Google Play Movies",
+          "logo_path": "/8z7rC8uIDaTM91X0ZfkRf04ydj2.jpg",
+          "display_priority": 20
+        },
+        {
+          "provider_id": 7,
+          "provider_name": "Fandango At Home",
+          "logo_path": "/oIXE9vJdkilIxCLAtlbtiqewgvn.jpg",
+          "display_priority": 37
+        }
+      ]
+    }
+  }
+}
