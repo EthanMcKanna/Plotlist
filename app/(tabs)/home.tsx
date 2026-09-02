@@ -80,7 +80,6 @@ import {
 } from "../../lib/homeCurrentSignal";
 import {
   getHomeRailIdentitySet,
-  getHomeDiscoveryPreviewKeys,
   limitHomeRailItemsByTitleAppearances,
   removePreviewedHomeRailItems,
   topUpHomeRailItemsPreservingSources,
@@ -112,6 +111,8 @@ import {
 import { getHomeWarmScheduleSnapshot } from "../../lib/homeWarmCache";
 import { getContactsSyncDismissed, setContactsSyncDismissed } from "../../lib/preferences";
 import {
+  HOME_RAIL_DISTINCT_FLOOR,
+  HOME_RAIL_POOL_LIMIT,
   type HomeData,
   useHomeData,
 } from "../../lib/useHomeData";
@@ -124,14 +125,26 @@ const QUICK_ACCENT = "#A3E635";
 const MIN_FEATURE_RAIL_ITEMS = 3;
 // Foregrounding after this long refetches the Continue rail before re-ranking it.
 const CONTINUE_FOREGROUND_REFRESH_MS = 5 * 60 * 1000;
-const MIN_POSTER_RAIL_ITEMS = 4;
 const MIN_DISTINCT_POSTER_RAIL_ITEMS = 3;
 const MIN_QUICK_RAIL_ITEMS = 2;
-const TARGET_FEATURE_RAIL_ITEMS = 5;
-const TARGET_FRESH_RAIL_ITEMS = 4;
-const TARGET_QUICK_RAIL_ITEMS = 3;
+// How deep each discovery rail runs. SignatureRail mounts a leading window
+// and reveals the rest on scroll, so this is scroll depth, not first-frame
+// work; the minimums above still decide whether a rail shows at all.
+const TARGET_DISCOVERY_RAIL_ITEMS = 24;
+// Rails stay distinct from the rails above them while they hold this many
+// distinct titles; below it, a title may repeat across two discovery rails
+// (behind the distinct ones) instead of leaving the later rail short. The
+// Continue rail and the shelf lead are never repeated.
+const DISCOVERY_RAIL_DISTINCT_FLOOR = HOME_RAIL_DISTINCT_FLOOR;
+// Section ordering reads each rail's leading items — roughly one screen of
+// cards — so a deep pool does not inflate a rail's currentness score.
+const SECTION_SIGNAL_ITEM_WINDOW = 6;
 const FRESH_ROOM_TOP_UP_LIMIT = 8;
+// A rail prefers titles not yet on the surface (one appearance) …
 const MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES = 1;
+// … and a repeat below the floor may put a title on a second discovery
+// rail, never a third.
+const MAX_DISCOVERY_TITLE_TOTAL_APPEARANCES = 2;
 export const HOME_NATIVE_INITIAL_RENDER_SECTION_COUNT = 6;
 
 type WebDataSetViewProps = ComponentProps<typeof View> & {
@@ -224,14 +237,10 @@ export function HomeSurface({
     [surfaceNow],
   );
   const featureCardWidth = Math.min(Math.max(width - 48, 280), 360);
-  // Wide layouts (desktop web, regular-width iPad) fit roughly twice as many
-  // rail cards as a phone screen, so the discovery rails aim for more items
-  // there (the limiters simply return fewer when the pools run dry). Phone
-  // targets are unchanged.
-  const targetFeatureRailItems = isWideLayout ? 10 : TARGET_FEATURE_RAIL_ITEMS;
-  const targetFreshRailItems = isWideLayout ? 9 : TARGET_FRESH_RAIL_ITEMS;
-  const targetQuickRailItems = isWideLayout ? 8 : TARGET_QUICK_RAIL_ITEMS;
-  const targetCriticsRailItems = isWideLayout ? 10 : MIN_POSTER_RAIL_ITEMS;
+  // Every layout gets the same rail depth (the rail reveals it lazily); only
+  // the reserve — the leading titles a later rail holds back from earlier
+  // ones — scales with how many cards a wide layout shows at once.
+  const targetRailItems = TARGET_DISCOVERY_RAIL_ITEMS;
   const reserveRailLimit = isWideLayout ? 8 : MIN_DISTINCT_POSTER_RAIL_ITEMS;
 
   const scrollY = useSharedValue(0);
@@ -340,6 +349,7 @@ export function HomeSurface({
             fresh: data.fresh,
             critics: data.critics,
             quick: data.quick,
+            limit: HOME_RAIL_POOL_LIMIT,
             now: surfaceNow,
           })
         : buildColdStartHomeShelfItems({
@@ -348,6 +358,7 @@ export function HomeSurface({
             fresh: data.fresh,
             critics: data.critics,
             quick: data.quick,
+            limit: HOME_RAIL_POOL_LIMIT,
             now: surfaceNow,
           }),
     [
@@ -360,27 +371,29 @@ export function HomeSurface({
       surfaceNow,
     ],
   );
+  // For You borrows from the other rails only while each keeps its distinct
+  // floor, so filling the shelf never leaves a later rail short.
   const forYouTopUpSources = useMemo(
     () => [
       {
         items: data.critics,
-        candidates: getShelfTopUpCandidates(data.critics, MIN_POSTER_RAIL_ITEMS),
-        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+        candidates: getShelfTopUpCandidates(data.critics, DISCOVERY_RAIL_DISTINCT_FLOOR),
+        minimumRemaining: DISCOVERY_RAIL_DISTINCT_FLOOR,
       },
       {
         items: data.quick,
-        candidates: getShelfTopUpCandidates(data.quick, MIN_POSTER_RAIL_ITEMS),
-        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+        candidates: getShelfTopUpCandidates(data.quick, DISCOVERY_RAIL_DISTINCT_FLOOR),
+        minimumRemaining: DISCOVERY_RAIL_DISTINCT_FLOOR,
       },
       {
         items: data.heat,
-        candidates: getShelfTopUpCandidates(data.heat, MIN_FEATURE_RAIL_ITEMS),
-        minimumRemaining: MIN_FEATURE_RAIL_ITEMS,
+        candidates: getShelfTopUpCandidates(data.heat, DISCOVERY_RAIL_DISTINCT_FLOOR),
+        minimumRemaining: DISCOVERY_RAIL_DISTINCT_FLOOR,
       },
       {
         items: data.fresh,
-        candidates: getShelfTopUpCandidates(data.fresh, MIN_POSTER_RAIL_ITEMS),
-        minimumRemaining: MIN_POSTER_RAIL_ITEMS,
+        candidates: getShelfTopUpCandidates(data.fresh, DISCOVERY_RAIL_DISTINCT_FLOOR),
+        minimumRemaining: DISCOVERY_RAIL_DISTINCT_FLOOR,
       },
     ],
     [data.critics, data.fresh, data.quick, data.heat],
@@ -392,7 +405,7 @@ export function HomeSurface({
         forYouTopUpSources,
         forYouPreviewKeys,
         MIN_FEATURE_RAIL_ITEMS,
-        targetFeatureRailItems,
+        targetRailItems,
       );
       const contextualLeadCandidates = hasPersonalTasteSignals
         ? promoteContextualHomeShelfLead(candidates, { now: surfaceNow })
@@ -402,7 +415,7 @@ export function HomeSurface({
         forYouPrecedingSurfaceItems,
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_FEATURE_RAIL_ITEMS,
-        targetFeatureRailItems,
+        targetRailItems,
       );
     },
     [
@@ -412,18 +425,17 @@ export function HomeSurface({
       surfaceNow,
       forYouPreviewKeys,
       forYouPrecedingSurfaceItems,
-      targetFeatureRailItems,
+      targetRailItems,
     ],
   );
-  const discoveryPreviewKeys = useMemo(
-    () => getHomeDiscoveryPreviewKeys(visibleEditorialPreviewKeys, forYouItems),
-    [visibleEditorialPreviewKeys, forYouItems],
-  );
-  const heatPreviewKeys = useMemo(
+  // Hard dedupe for every rail below For You: the Continue rail and the
+  // shelf lead never repeat. Everything else rendered earlier is only
+  // budgeted against (soft), via each rail's preceding-items list.
+  const discoveryHardPreviewKeys = useMemo(
     () =>
       new Set([
         ...visibleEditorialPreviewKeys,
-        ...getHomeRailIdentitySet(forYouItems),
+        ...getHomeRailIdentitySet(forYouItems.slice(0, 1)),
       ]),
     [forYouItems, visibleEditorialPreviewKeys],
   );
@@ -443,7 +455,7 @@ export function HomeSurface({
     () => {
       const candidates = removePreviewedHomeRailItems(
         [...data.heat, ...heatRoomTopUpItems],
-        heatPreviewKeys,
+        discoveryHardPreviewKeys,
         MIN_FEATURE_RAIL_ITEMS,
       );
       return limitHomeRailItemsByTitleAppearances(
@@ -451,16 +463,20 @@ export function HomeSurface({
         [...visibleEditorialSurfaceItems, ...forYouItems],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_FEATURE_RAIL_ITEMS,
-        targetFeatureRailItems,
+        targetRailItems,
+        {
+          distinctFloor: DISCOVERY_RAIL_DISTINCT_FLOOR,
+          maxTotalAppearances: MAX_DISCOVERY_TITLE_TOTAL_APPEARANCES,
+        },
       );
     },
     [
       data.heat,
       heatRoomTopUpItems,
-      heatPreviewKeys,
+      discoveryHardPreviewKeys,
       forYouItems,
       visibleEditorialSurfaceItems,
-      targetFeatureRailItems,
+      targetRailItems,
     ],
   );
   const pulseHeatItems = useMemo(
@@ -471,6 +487,9 @@ export function HomeSurface({
     () => getFreshRoomTopUpItems(data),
     [data.getCatalogForKey, data.streamingRooms],
   );
+  // Reserves: the leading fresh/critics titles are settled before Quick
+  // picks so a later rail cannot take them; they keep the strict (small)
+  // limits since only the head of each rail is reserved.
   const freshReservePreviewKeys = useMemo(
     () =>
       new Set([
@@ -480,19 +499,19 @@ export function HomeSurface({
       ]),
     [forYouItems, heatItems, visibleEditorialPreviewKeys],
   );
-  const freshReserveCandidateItems = useMemo(
+  const freshCandidateItems = useMemo(
     () =>
       removePreviewedHomeRailItems(
         [...data.fresh, ...freshRoomTopUpItems],
-        freshReservePreviewKeys,
+        discoveryHardPreviewKeys,
         MIN_DISTINCT_POSTER_RAIL_ITEMS,
       ),
-    [data.fresh, freshRoomTopUpItems, freshReservePreviewKeys],
+    [data.fresh, freshRoomTopUpItems, discoveryHardPreviewKeys],
   );
   const freshReserveItems = useMemo(
     () =>
       buildVisibleFreshRailItems({
-        items: freshReserveCandidateItems,
+        items: freshCandidateItems,
         previewKeys: freshReservePreviewKeys,
         precedingItems: [
           ...visibleEditorialSurfaceItems,
@@ -505,7 +524,7 @@ export function HomeSurface({
         now: surfaceNow,
       }),
     [
-      freshReserveCandidateItems,
+      freshCandidateItems,
       freshReservePreviewKeys,
       forYouItems,
       heatItems,
@@ -514,28 +533,19 @@ export function HomeSurface({
       visibleEditorialSurfaceItems,
     ],
   );
-  const criticsReservePreviewKeys = useMemo(
-    () =>
-      new Set([
-        ...discoveryPreviewKeys,
-        ...getHomeRailIdentitySet(heatItems),
-        ...getHomeRailIdentitySet(freshReserveItems),
-      ]),
-    [discoveryPreviewKeys, heatItems, freshReserveItems],
-  );
-  const criticsReserveCandidateItems = useMemo(
+  const criticsCandidateItems = useMemo(
     () =>
       removePreviewedHomeRailItems(
         [...data.critics, ...qualityRoomTopUpItems],
-        criticsReservePreviewKeys,
+        discoveryHardPreviewKeys,
         MIN_DISTINCT_POSTER_RAIL_ITEMS,
       ),
-    [data.critics, qualityRoomTopUpItems, criticsReservePreviewKeys],
+    [data.critics, qualityRoomTopUpItems, discoveryHardPreviewKeys],
   );
   const criticsReserveItems = useMemo(
     () =>
       limitHomeRailItemsByTitleAppearances(
-        criticsReserveCandidateItems,
+        criticsCandidateItems,
         [
           ...visibleEditorialSurfaceItems,
           ...forYouItems,
@@ -547,7 +557,7 @@ export function HomeSurface({
         reserveRailLimit,
       ),
     [
-      criticsReserveCandidateItems,
+      criticsCandidateItems,
       forYouItems,
       heatItems,
       freshReserveItems,
@@ -555,21 +565,11 @@ export function HomeSurface({
       visibleEditorialSurfaceItems,
     ],
   );
-  const quickPreviewKeys = useMemo(
-    () =>
-      new Set([
-        ...discoveryPreviewKeys,
-        ...getHomeRailIdentitySet(heatItems),
-        ...getHomeRailIdentitySet(freshReserveItems),
-        ...getHomeRailIdentitySet(criticsReserveItems),
-      ]),
-    [criticsReserveItems, discoveryPreviewKeys, freshReserveItems, heatItems],
-  );
   const quickItems = useMemo(
     () => {
       const candidates = removePreviewedHomeRailItems(
         [...data.quick, ...quickRoomTopUpItems],
-        quickPreviewKeys,
+        discoveryHardPreviewKeys,
         MIN_QUICK_RAIL_ITEMS,
       );
       return limitHomeRailItemsByTitleAppearances(
@@ -578,19 +578,27 @@ export function HomeSurface({
           ...visibleEditorialSurfaceItems,
           ...forYouItems,
           ...heatItems,
+          ...freshReserveItems,
+          ...criticsReserveItems,
         ],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_QUICK_RAIL_ITEMS,
-        targetQuickRailItems,
+        targetRailItems,
+        {
+          distinctFloor: DISCOVERY_RAIL_DISTINCT_FLOOR,
+          maxTotalAppearances: MAX_DISCOVERY_TITLE_TOTAL_APPEARANCES,
+        },
       );
     },
     [
       data.quick,
       quickRoomTopUpItems,
-      quickPreviewKeys,
+      discoveryHardPreviewKeys,
       forYouItems,
       heatItems,
-      targetQuickRailItems,
+      freshReserveItems,
+      criticsReserveItems,
+      targetRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
@@ -603,15 +611,6 @@ export function HomeSurface({
         ...getHomeRailIdentitySet(quickItems),
       ]),
     [forYouItems, heatItems, quickItems, visibleEditorialPreviewKeys],
-  );
-  const freshCandidateItems = useMemo(
-    () =>
-      removePreviewedHomeRailItems(
-        [...data.fresh, ...freshRoomTopUpItems],
-        freshPreviewKeys,
-        MIN_DISTINCT_POSTER_RAIL_ITEMS,
-      ),
-    [data.fresh, freshRoomTopUpItems, freshPreviewKeys],
   );
   const freshItems = useMemo(
     () => {
@@ -626,7 +625,9 @@ export function HomeSurface({
         ],
         maxTitleAppearances: MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         minimumRemaining: MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        limit: targetFreshRailItems,
+        distinctFloor: DISCOVERY_RAIL_DISTINCT_FLOOR,
+        maxTotalAppearances: MAX_DISCOVERY_TITLE_TOTAL_APPEARANCES,
+        limit: targetRailItems,
         now: surfaceNow,
       });
     },
@@ -637,29 +638,14 @@ export function HomeSurface({
       heatItems,
       quickItems,
       surfaceNow,
-      targetFreshRailItems,
+      targetRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
-  const criticsPreviewKeys = useMemo(
-    () =>
-      new Set([
-        ...discoveryPreviewKeys,
-        ...getHomeRailIdentitySet(heatItems),
-        ...getHomeRailIdentitySet(quickItems),
-        ...getHomeRailIdentitySet(freshItems),
-      ]),
-    [discoveryPreviewKeys, heatItems, quickItems, freshItems],
-  );
   const criticsItems = useMemo(
-    () => {
-      const candidates = removePreviewedHomeRailItems(
-        [...data.critics, ...qualityRoomTopUpItems],
-        criticsPreviewKeys,
-        MIN_DISTINCT_POSTER_RAIL_ITEMS,
-      );
-      return limitHomeRailItemsByTitleAppearances(
-        candidates,
+    () =>
+      limitHomeRailItemsByTitleAppearances(
+        criticsCandidateItems,
         [
           ...visibleEditorialSurfaceItems,
           ...forYouItems,
@@ -669,27 +655,40 @@ export function HomeSurface({
         ],
         MAX_VISIBLE_DISCOVERY_TITLE_APPEARANCES,
         MIN_DISTINCT_POSTER_RAIL_ITEMS,
-        targetCriticsRailItems,
-      );
-    },
+        targetRailItems,
+        {
+          distinctFloor: DISCOVERY_RAIL_DISTINCT_FLOOR,
+          maxTotalAppearances: MAX_DISCOVERY_TITLE_TOTAL_APPEARANCES,
+        },
+      ),
     [
-      data.critics,
-      qualityRoomTopUpItems,
-      criticsPreviewKeys,
+      criticsCandidateItems,
       forYouItems,
       heatItems,
       freshItems,
       quickItems,
-      targetCriticsRailItems,
+      targetRailItems,
       visibleEditorialSurfaceItems,
     ],
   );
   const discoverySectionSignals = useMemo(
     () => ({
-      heat: getHomeDiscoverySectionSignal(heatItems, surfaceNow),
-      fresh: getHomeDiscoverySectionSignal(freshItems, surfaceNow),
-      critics: getHomeDiscoverySectionSignal(criticsItems, surfaceNow),
-      quick: getHomeDiscoverySectionSignal(quickItems, surfaceNow),
+      heat: getHomeDiscoverySectionSignal(
+        heatItems.slice(0, SECTION_SIGNAL_ITEM_WINDOW),
+        surfaceNow,
+      ),
+      fresh: getHomeDiscoverySectionSignal(
+        freshItems.slice(0, SECTION_SIGNAL_ITEM_WINDOW),
+        surfaceNow,
+      ),
+      critics: getHomeDiscoverySectionSignal(
+        criticsItems.slice(0, SECTION_SIGNAL_ITEM_WINDOW),
+        surfaceNow,
+      ),
+      quick: getHomeDiscoverySectionSignal(
+        quickItems.slice(0, SECTION_SIGNAL_ITEM_WINDOW),
+        surfaceNow,
+      ),
     }),
     [
       heatItems,

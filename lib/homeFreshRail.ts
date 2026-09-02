@@ -210,6 +210,8 @@ export function buildVisibleFreshRailItems<T extends HomeVisibleFreshRailItem>({
   precedingItems,
   maxTitleAppearances,
   minimumRemaining,
+  distinctFloor = minimumRemaining,
+  maxTotalAppearances = Number.POSITIVE_INFINITY,
   limit,
   now,
 }: {
@@ -218,6 +220,16 @@ export function buildVisibleFreshRailItems<T extends HomeVisibleFreshRailItem>({
   precedingItems: HomeRailIdentityItem[];
   maxTitleAppearances: number;
   minimumRemaining: number;
+  /**
+   * Keep only unpreviewed titles while at least this many remain; below it,
+   * previewed titles fill in behind them. Defaults to `minimumRemaining`.
+   */
+  distinctFloor?: number;
+  /**
+   * Hard ceiling on how many times a title may appear across the surface
+   * (preceding items plus this rail); titles already at it never fill in.
+   */
+  maxTotalAppearances?: number;
   limit?: number;
   now?: Date | string | number;
 }) {
@@ -252,12 +264,16 @@ export function buildVisibleFreshRailItems<T extends HomeVisibleFreshRailItem>({
     normalizedLimit,
   );
 
-  if (unpreviewed.length >= minimumRemaining) {
+  if (unpreviewed.length >= Math.max(minimumRemaining, distinctFloor)) {
     return unpreviewed;
   }
 
   return selectVisibleFreshRailItems(
-    candidates,
+    candidates.filter((item) => {
+      const titleKey = getHomeRailTitleKey(item.title);
+      const titleCount = titleKey ? titleCounts.get(titleKey) ?? 0 : 0;
+      return titleCount < maxTotalAppearances;
+    }),
     minimumRemaining,
     normalizedLimit,
   );

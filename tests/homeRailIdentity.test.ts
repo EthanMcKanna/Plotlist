@@ -924,3 +924,113 @@ describe("home rail identity", () => {
     expect(items.map((next) => next.externalId)).toEqual(["1", "3", "4"]);
   });
 });
+
+describe("discovery rail distinct floor", () => {
+  const rail = (prefix: string, titles: string[]) =>
+    titles.map((title, index) => item(`${prefix}-${index}`, title));
+
+  it("keeps a deep rail fully distinct while it clears the floor", () => {
+    const items = rail("critics", [
+      "Severance", "The Pitt", "Andor", "Shogun", "Hacks", "Slow Horses",
+      "The Bear", "Adolescence", "Fallout", "Dark Matter", "Silo", "Pachinko",
+      "Yellowjackets", "The Boys",
+    ]);
+    const preceding = rail("heat", ["Severance", "The Bear"]);
+
+    const visible = limitHomeRailItemsByTitleAppearances(items, preceding, 1, 3, 24, {
+      distinctFloor: 12,
+    });
+
+    expect(visible.map((next) => next.title)).not.toContain("Severance");
+    expect(visible.map((next) => next.title)).not.toContain("The Bear");
+    expect(visible).toHaveLength(12);
+  });
+
+  it("lets a rail repeat earlier titles behind its distinct picks once it would fall below the floor", () => {
+    const items = rail("quick", [
+      "Severance", "The Pitt", "Andor", "Shogun", "Hacks", "Slow Horses",
+      "The Bear", "Adolescence", "Fallout", "Dark Matter",
+    ]);
+    const preceding = rail("heat", ["Severance", "The Bear"]);
+
+    const visible = limitHomeRailItemsByTitleAppearances(items, preceding, 1, 3, 24, {
+      distinctFloor: 12,
+    });
+
+    // Distinct titles first, in their ranked order; repeats trail them.
+    expect(visible.map((next) => next.title)).toEqual([
+      "The Pitt", "Andor", "Shogun", "Hacks", "Slow Horses", "Adolescence",
+      "Fallout", "Dark Matter", "Severance", "The Bear",
+    ]);
+  });
+
+  it("still hides a rail that cannot reach its minimum even with repeats", () => {
+    expect(
+      limitHomeRailItemsByTitleAppearances(
+        rail("quick", ["Severance", "The Bear"]),
+        rail("heat", ["Severance"]),
+        1,
+        3,
+        24,
+        { distinctFloor: 12 },
+      ),
+    ).toEqual([]);
+  });
+
+  it("defaults the floor to the minimum so existing callers keep their behaviour", () => {
+    const items = rail("quick", ["Severance", "The Pitt", "Andor", "Shogun"]);
+    const preceding = rail("heat", ["Severance"]);
+    expect(
+      limitHomeRailItemsByTitleAppearances(items, preceding, 1, 3, 24),
+    ).toEqual(limitHomeRailItemsByTitleAppearances(items, preceding, 1, 3, 24, {}));
+    expect(
+      limitHomeRailItemsByTitleAppearances(items, preceding, 1, 3, 24).map((next) => next.title),
+    ).toEqual(["The Pitt", "Andor", "Shogun"]);
+  });
+
+  it("demotes soft-previewed titles instead of dropping them below the floor", () => {
+    const items = rail("facet", [
+      "Severance", "The Pitt", "Andor", "Shogun", "Hacks", "Slow Horses",
+    ]);
+    const previewKeys = getHomeRailIdentitySet(rail("for-you", ["Severance", "Andor"]));
+
+    expect(
+      removeOrDemotePreviewedHomeRailItems(items, previewKeys, 4, 12).map(
+        (next) => next.title,
+      ),
+    ).toEqual(["The Pitt", "Shogun", "Hacks", "Slow Horses", "Severance", "Andor"]);
+
+    const deep = rail("facet", [
+      "Severance", "The Pitt", "Andor", "Shogun", "Hacks", "Slow Horses",
+      "The Bear", "Adolescence", "Fallout", "Dark Matter", "Silo", "Pachinko",
+      "Yellowjackets", "The Boys",
+    ]);
+    expect(
+      removeOrDemotePreviewedHomeRailItems(deep, previewKeys, 4, 12).map(
+        (next) => next.title,
+      ),
+    ).not.toEqual(expect.arrayContaining(["Severance", "Andor"]));
+  });
+});
+
+describe("discovery rail total appearance cap", () => {
+  const rail = (prefix: string, titles: string[]) =>
+    titles.map((title, index) => item(`${prefix}-${index}`, title));
+
+  it("never fills a short rail with a title already on two rails", () => {
+    const preceding = [
+      ...rail("for-you", ["Severance", "The Bear"]),
+      ...rail("heat", ["Severance"]),
+    ];
+    const visible = limitHomeRailItemsByTitleAppearances(
+      rail("quick", ["Severance", "The Bear", "Hacks", "The Pitt"]),
+      preceding,
+      1,
+      2,
+      24,
+      { distinctFloor: 12, maxTotalAppearances: 2 },
+    );
+
+    expect(visible.map((next) => next.title)).toEqual(["Hacks", "The Pitt", "The Bear"]);
+  });
+});

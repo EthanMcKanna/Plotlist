@@ -19,10 +19,13 @@ const WARM_CACHE_VERSION = 1;
 const WARM_CACHE_FILE_NAME = "plotlist-home-warm-cache-v1.json";
 const WARM_CACHE_WEB_KEY = "plotlistHomeWarmCacheV1";
 const WARM_CACHE_WRITE_DELAY_MS = 400;
-// Provider room lists persist their leading slice only; the full lists (and
-// item overviews) roughly quintuple the snapshot for content the first frame
-// never shows.
-const WARM_CATALOG_PROVIDER_ITEM_LIMIT = 8;
+// Every persisted list keeps its leading slice only: the first frame renders
+// the head of each rail, and the network payload fills in the deeper tail
+// (rails now hold ~30 items) before the user can scroll to it. Persisting
+// full lists would roughly triple the snapshot for content frame one never
+// shows.
+export const WARM_CATALOG_PROVIDER_ITEM_LIMIT = 8;
+export const WARM_LIST_ITEM_LIMIT = 12;
 
 export const HOME_WARM_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -325,9 +328,10 @@ function trimHomeWarmCatalogItem(item: unknown) {
 }
 
 /**
- * Slim the catalog payload before persisting: overviews are dropped and
- * provider rooms keep only their leading items. `normalizeHomeCatalogPayload`
- * treats both as optional, so the trimmed shape hydrates unchanged.
+ * Slim the catalog payload before persisting: overviews are dropped, every
+ * list keeps only its leading items (provider rooms a shorter slice still).
+ * `normalizeHomeCatalogPayload` treats both as optional, so the trimmed
+ * shape hydrates unchanged.
  */
 export function trimHomeWarmCatalogPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -350,7 +354,9 @@ export function trimHomeWarmCatalogPayload(payload: unknown): unknown {
         ),
       );
     } else if (Array.isArray(value)) {
-      trimmed[key] = value.map(trimHomeWarmCatalogItem);
+      trimmed[key] = value
+        .slice(0, WARM_LIST_ITEM_LIMIT)
+        .map(trimHomeWarmCatalogItem);
     } else {
       trimmed[key] = value;
     }
@@ -365,10 +371,23 @@ export function recordHomeWarmCatalog(payload: unknown, now = Date.now()) {
   scheduleWarmCacheWrite();
 }
 
+function trimHomeWarmRankedItem(item: unknown) {
+  if (!item || typeof item !== "object") return item;
+  const ranked = item as Record<string, unknown>;
+  return "show" in ranked
+    ? { ...ranked, show: trimHomeWarmCatalogItem(ranked.show) }
+    : trimHomeWarmCatalogItem(item);
+}
+
+/** Leading slice of a ranked list (`{ show, rank, ... }`), overviews dropped. */
+export function trimHomeWarmRankedList(items: unknown[]) {
+  return items.slice(0, WARM_LIST_ITEM_LIMIT).map(trimHomeWarmRankedItem);
+}
+
 export function recordHomeWarmForYou(items: unknown[], now = Date.now()) {
   if (!Array.isArray(items)) return;
   const target = getWritableCache(now);
-  target.forYou = items;
+  target.forYou = trimHomeWarmRankedList(items);
   target.forYouSavedAt = now;
   scheduleWarmCacheWrite();
 }
@@ -376,7 +395,7 @@ export function recordHomeWarmForYou(items: unknown[], now = Date.now()) {
 export function recordHomeWarmTrending(items: unknown[], now = Date.now()) {
   if (!Array.isArray(items)) return;
   const target = getWritableCache(now);
-  target.trending = items;
+  target.trending = trimHomeWarmRankedList(items);
   target.trendingSavedAt = now;
   scheduleWarmCacheWrite();
 }

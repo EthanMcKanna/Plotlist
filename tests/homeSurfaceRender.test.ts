@@ -233,13 +233,16 @@ describe("HomeSurface rendered preview", () => {
       // Header search was retired; the tab bar owns search entry.
       expect(screen.queryByLabelText("Search")).toBeNull();
       expect(screen.getByLabelText("Notifications")).toBeTruthy();
+      // Discovery order is signal-driven (lib/homeSectionPlan): with the
+      // deeper rails, the preview's release-window-heavy "New" rail carries
+      // the most current signals and leads the discovery block.
       expect(sectionIds).toEqual([
         "home-section-continue-watching",
         "home-section-tonight",
         "home-section-ask",
-        "home-section-heat",
-        "home-section-for-you",
         "home-section-fresh",
+        "home-section-for-you",
+        "home-section-heat",
         "home-section-critics",
         "home-section-quick",
       ]);
@@ -250,9 +253,9 @@ describe("HomeSurface rendered preview", () => {
         },
         { homeSection: "tonight", homeSectionId: "home-section-tonight" },
         { homeSection: "ask", homeSectionId: "home-section-ask" },
-        { homeSection: "heat", homeSectionId: "home-section-heat" },
-        { homeSection: "for-you", homeSectionId: "home-section-for-you" },
         { homeSection: "fresh", homeSectionId: "home-section-fresh" },
+        { homeSection: "for-you", homeSectionId: "home-section-for-you" },
+        { homeSection: "heat", homeSectionId: "home-section-heat" },
         { homeSection: "critics", homeSectionId: "home-section-critics" },
         { homeSection: "quick", homeSectionId: "home-section-quick" },
       ]);
@@ -276,36 +279,71 @@ describe("HomeSurface rendered preview", () => {
         }];
       });
       expect(unlabeledControls).toEqual([]);
-      const openActionLabels = [
-        ...new Set<string>(
-          UNSAFE_root.findAll((node: unknown) => {
+      // Cross-rail dedupe, as a viewer sees it: a title never repeats inside
+      // one rail, discovery rails never repeat the Continue rail, and a title
+      // reaches at most two discovery rails (a repeat is allowed only while
+      // a rail sits below its distinct floor, and only once). The ordering
+      // guarantees (distinct picks ahead of repeats) are unit-tested in
+      // homeRailIdentity / homeFreshRail.
+      const openActionTitlesBySection = new Map<string, string[]>();
+      UNSAFE_root.findAll((node: unknown) => {
+        const testID = getRenderedTestID(node);
+        return typeof testID === "string" && testID.startsWith("home-section-");
+      }).forEach((section: any) => {
+        const sectionId = getRenderedTestID(section) as string;
+        if (openActionTitlesBySection.has(sectionId)) return;
+        const seenLabels = new Set<string>();
+        const titles = section
+          .findAll((node: unknown) => {
             const label = getRenderedAccessibilityLabel(node);
             const role = getRenderedAccessibilityRole(node);
             return (
               typeof label === "string" &&
               /^Open\s+/i.test(label) &&
+              !/\. Number \d+ on /.test(label) &&
               (role === "button" || role === "link")
             );
           })
-            .map((node: unknown) => getRenderedAccessibilityLabel(node))
-            .filter((label: unknown): label is string => typeof label === "string"),
-        ),
-      ];
-      // Provider chart rows are canonical ranked lists — a charting show may
-      // legitimately also appear in a discovery rail, so they sit outside the
-      // one-open-action-per-title rule.
-      const openActionTitles = openActionLabels
-        .filter((label) => !/\. Number \d+ on /.test(label))
-        .map(getOpenActionTitle)
-        .filter(Boolean);
-      const duplicateOpenActionTitles = [
-        ...new Set(
-          openActionTitles.filter(
-            (title, index) => openActionTitles.indexOf(title) !== index,
-          ),
-        ),
-      ];
-      expect(duplicateOpenActionTitles).toEqual([]);
+          .map((node: unknown) => getRenderedAccessibilityLabel(node) as string)
+          .filter((label: string) => {
+            if (seenLabels.has(label)) return false;
+            seenLabels.add(label);
+            return true;
+          })
+          .map(getOpenActionTitle)
+          .filter(Boolean);
+        openActionTitlesBySection.set(sectionId, titles);
+      });
+      const continueTitles = new Set(
+        openActionTitlesBySection.get("home-section-continue-watching") ?? [],
+      );
+      const discoverySectionIds = [
+        "home-section-for-you",
+        "home-section-heat",
+        "home-section-fresh",
+        "home-section-critics",
+        "home-section-quick",
+      ].filter((id) => sectionIds.includes(id));
+      expect(discoverySectionIds).toHaveLength(5);
+      const appearances = new Map<string, string[]>();
+      const crossRailRepeatViolations: string[] = [];
+      discoverySectionIds.forEach((sectionId) => {
+        const titles = openActionTitlesBySection.get(sectionId) ?? [];
+        expect(titles.length).toBeGreaterThan(0);
+        expect(new Set(titles).size).toBe(titles.length);
+        titles.forEach((title) => {
+          if (continueTitles.has(title)) {
+            crossRailRepeatViolations.push(`${sectionId} repeats Continue: ${title}`);
+          }
+          appearances.set(title, [...(appearances.get(title) ?? []), sectionId]);
+        });
+      });
+      appearances.forEach((railIds, title) => {
+        if (railIds.length > 2) {
+          crossRailRepeatViolations.push(`${title} appears on ${railIds.join(", ")}`);
+        }
+      });
+      expect(crossRailRepeatViolations).toEqual([]);
       expect(
         UNSAFE_root.findAll((node: unknown) => {
           const testID = getRenderedTestID(node);
@@ -361,14 +399,19 @@ describe("HomeSurface rendered preview", () => {
       ).toBe(2);
       expect(
         screen.getByLabelText(
-          "Section 03. Today. Trending",
+          "Section 03. Just in. New",
         ).props.accessibilityRole,
       ).toBe("header");
       expect(
         screen.getByLabelText(
-          "Section 03. Today. Trending",
+          "Section 03. Just in. New",
         ).props["aria-level"],
       ).toBe(2);
+      expect(
+        screen.getByLabelText(
+          "Section 05. Today. Trending",
+        ).props.accessibilityRole,
+      ).toBe("header");
       // The schedule is one dated rail — no tabs, everything visible at once,
       // with clear paths to the dedicated calendar page.
       expect(screen.queryByLabelText("Release schedule")).toBeNull();

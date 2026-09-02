@@ -83,6 +83,11 @@ import {
 } from "./recs-handlers";
 import { computeTasteMatchPercentsForViewer } from "./recs";
 import { getHomeShowKey, rankHomeShows } from "../../lib/homeRanking";
+import {
+  getTmdbListPageNumbers,
+  projectHomeRailRankedItems,
+  projectHomeRailShows,
+} from "../../lib/plotlist/homeRailPayload";
 import { normalizeStreamingProviderKeys } from "../../lib/streamingProviders";
 import {
   isHomeCatalogCacheFresh,
@@ -2793,6 +2798,11 @@ type HomeCatalogStaleFallbackHandler = (args: {
   page: number;
 }) => void;
 
+type TmdbListRequest = {
+  path: string;
+  params: Record<string, string | number | undefined>;
+};
+
 type TmdbListOptions = {
   /** Cron path: always refetch (no stale-while-revalidate short-circuit). */
   forceRefresh?: boolean;
@@ -2857,7 +2867,7 @@ async function refreshTmdbListCache(
   cachedRow: typeof tmdbListCache.$inferSelect | undefined,
   options: { deferSideWrites: boolean },
 ) {
-  let payload: any;
+  let request: TmdbListRequest;
   const today = new Date();
   const todayIso = today.toISOString().slice(0, 10);
   const twoWeeksDate = new Date(today);
@@ -2873,84 +2883,108 @@ async function refreshTmdbListCache(
   const recentYearStartIso = `${today.getUTCFullYear() - 2}-01-01`;
 
   if (category === "trending_day") {
-    payload = await tmdb("/trending/tv/day", { page });
+    request = { path: "/trending/tv/day", params: {} };
   } else if (category === "trending_week") {
-    payload = await tmdb("/trending/tv/week", { page });
+    request = { path: "/trending/tv/week", params: {} };
   } else if (category === "rising_now") {
-    payload = await tmdb("/discover/tv", {
-      page,
-      "air_date.gte": twoWeeksIso,
-      "air_date.lte": todayIso,
-      "vote_count.gte": 25,
-      "vote_average.gte": 7,
-      sort_by: "popularity.desc",
-      timezone: "America/Los_Angeles",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        "air_date.gte": twoWeeksIso,
+        "air_date.lte": todayIso,
+        "vote_count.gte": 25,
+        "vote_average.gte": 7,
+        sort_by: "popularity.desc",
+        timezone: "America/Los_Angeles",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (category === "airing_today") {
-    payload = await tmdb("/tv/airing_today", { page });
+    request = { path: "/tv/airing_today", params: {} };
   } else if (category === "on_the_air") {
-    payload = await tmdb("/tv/on_the_air", { page });
+    request = { path: "/tv/on_the_air", params: {} };
   } else if (category === "fresh_premieres" || category === "breakout_premieres") {
-    payload = await tmdb("/discover/tv", {
-      page,
-      "first_air_date.gte": recentIso,
-      "first_air_date.lte": todayIso,
-      "vote_count.gte": category === "breakout_premieres" ? 25 : 15,
-      "vote_average.gte": category === "breakout_premieres" ? 7 : undefined,
-      sort_by: "popularity.desc",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        "first_air_date.gte": recentIso,
+        "first_air_date.lte": todayIso,
+        "vote_count.gte": category === "breakout_premieres" ? 25 : 15,
+        "vote_average.gte": category === "breakout_premieres" ? 7 : undefined,
+        sort_by: "popularity.desc",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (category === "top_rated" || category === "critics_choice") {
-    payload = await tmdb("/discover/tv", {
-      page,
-      "first_air_date.gte": category === "critics_choice" ? recentYearStartIso : undefined,
-      "vote_count.gte": category === "critics_choice" ? 100 : 350,
-      "vote_average.gte": category === "critics_choice" ? 7.6 : 7.5,
-      sort_by: category === "critics_choice" ? "popularity.desc" : "vote_average.desc",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        "first_air_date.gte": category === "critics_choice" ? recentYearStartIso : undefined,
+        "vote_count.gte": category === "critics_choice" ? 100 : 350,
+        "vote_average.gte": category === "critics_choice" ? 7.6 : 7.5,
+        sort_by: category === "critics_choice" ? "popularity.desc" : "vote_average.desc",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (category === "quick_picks") {
-    payload = await tmdb("/discover/tv", {
-      page,
-      "first_air_date.gte": fiveYearStartIso,
-      "vote_count.gte": 50,
-      "vote_average.gte": 7.1,
-      sort_by: "popularity.desc",
-      "with_runtime.lte": 42,
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        "first_air_date.gte": fiveYearStartIso,
+        "vote_count.gte": 50,
+        "vote_average.gte": 7.1,
+        sort_by: "popularity.desc",
+        "with_runtime.lte": 42,
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (category === "hidden_gems") {
-    payload = await tmdb("/discover/tv", {
-      page,
-      "vote_count.gte": 40,
-      "vote_count.lte": 800,
-      "vote_average.gte": 7.4,
-      sort_by: "vote_average.desc",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        "vote_count.gte": 40,
+        "vote_count.lte": 800,
+        "vote_average.gte": 7.4,
+        sort_by: "vote_average.desc",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (genreCategoryIds[category]) {
-    payload = await tmdb("/discover/tv", {
-      page,
-      with_genres: genreCategoryIds[category],
-      "vote_count.gte": 40,
-      sort_by: "popularity.desc",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        with_genres: genreCategoryIds[category],
+        "vote_count.gte": 40,
+        sort_by: "popularity.desc",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else if (providerIds[category]) {
-    payload = await tmdb("/discover/tv", {
-      page,
-      watch_region: "US",
-      with_watch_providers: providerIds[category],
-      with_watch_monetization_types: "flatrate",
-      "air_date.gte": oneYearIso,
-      "vote_count.gte": 20,
-      sort_by: "popularity.desc",
-      without_genres: noisyTvGenreIds,
-    });
+    request = {
+      path: "/discover/tv",
+      params: {
+        watch_region: "US",
+        with_watch_providers: providerIds[category],
+        with_watch_monetization_types: "flatrate",
+        "air_date.gte": oneYearIso,
+        "vote_count.gte": 20,
+        sort_by: "popularity.desc",
+        without_genres: noisyTvGenreIds,
+      },
+    };
   } else {
-    payload = await tmdb("/trending/tv/week", { page });
+    request = { path: "/trending/tv/week", params: {} };
   }
+  // Lists deeper than one TMDB page fetch the following pages in the same
+  // refresh; a failed later page degrades to what the earlier pages held.
+  const pageNumbers = getTmdbListPageNumbers(page, limit);
+  const pagePayloads = await Promise.all(
+    pageNumbers.map((pageNumber, index) => {
+      const pageRequest = tmdb(request.path, { ...request.params, page: pageNumber });
+      return index === 0 ? pageRequest : pageRequest.catch(() => ({ results: [] }));
+    }),
+  );
+  const tmdbResults = pagePayloads.flatMap((payload: any) => payload?.results ?? []);
   const editorialSeedGroup = editorialSeedGroupsByTmdbCategory[category];
   const editorialSeeds = editorialSeedGroup
     ? getHomeEditorialSeedItems(editorialSeedGroup)
@@ -2962,7 +2996,7 @@ async function refreshTmdbListCache(
     [
       ...editorialSeeds,
       ...providerEditorialSeeds,
-      ...(payload.results ?? []).map(catalogFromTmdb),
+      ...tmdbResults.map(catalogFromTmdb),
     ]
       .filter((item) => item.title && item.posterUrl)
       .slice(0, Math.max(limit * 2, limit)),
@@ -3010,7 +3044,30 @@ const homeCatalogProviderCategories = [
   "paramount_plus",
   "mgm_plus",
 ] as const;
+// Provider lists only feed rail top-ups on home (there is no dedicated
+// provider section), so they stay one TMDB page deep. The discovery
+// categories go two pages deep: the client's quality/recency filters keep
+// roughly a third to a half of what TMDB lists, and a rail needs ~24
+// survivors to be worth scrolling. Responses are projected to the slim rail
+// shape, so the deeper lists still ship in fewer bytes than the old ones.
 const homeCatalogProviderListLimit = 18;
+const homeCatalogDiscoveryListLimit = 30;
+
+// Single source of truth for which lists the batched home catalog serves and
+// how deep each is; the cron refreshes exactly these cache rows.
+const homeCatalogCategoryPlan: Array<{ category: string; limit: number }> = [
+  { category: "rising_now", limit: homeCatalogDiscoveryListLimit },
+  { category: "breakout_premieres", limit: homeCatalogDiscoveryListLimit },
+  { category: "critics_choice", limit: homeCatalogDiscoveryListLimit },
+  { category: "quick_picks", limit: homeCatalogDiscoveryListLimit },
+  { category: "airing_today", limit: 20 },
+  { category: "trending_day", limit: homeCatalogDiscoveryListLimit },
+  { category: "trending_week", limit: homeCatalogDiscoveryListLimit },
+  ...homeCatalogProviderCategories.map((category) => ({
+    category,
+    limit: homeCatalogProviderListLimit,
+  })),
+];
 
 type HomeCatalogListResult = {
   category: string;
@@ -3057,38 +3114,12 @@ async function loadHomeCatalogList(
 }
 
 async function getHomeCatalog() {
-  const providerPromises = homeCatalogProviderCategories.map((category) =>
-    loadHomeCatalogList(category, homeCatalogProviderListLimit),
+  const results = await Promise.all(
+    homeCatalogCategoryPlan.map((entry) => loadHomeCatalogList(entry.category, entry.limit)),
   );
-  const [
-    risingNowResult,
-    breakoutPremieresResult,
-    criticsChoiceResult,
-    quickPicksResult,
-    airingTodayResult,
-    trendingDayResult,
-    trendingWeekResult,
-    ...providerResults
-  ] = await Promise.all([
-    loadHomeCatalogList("rising_now", 16),
-    loadHomeCatalogList("breakout_premieres", 16),
-    loadHomeCatalogList("critics_choice", 16),
-    loadHomeCatalogList("quick_picks", 16),
-    loadHomeCatalogList("airing_today", 10),
-    loadHomeCatalogList("trending_day", 20),
-    loadHomeCatalogList("trending_week", 10),
-    ...providerPromises,
-  ]);
-  const results = [
-    risingNowResult,
-    breakoutPremieresResult,
-    criticsChoiceResult,
-    quickPicksResult,
-    airingTodayResult,
-    trendingDayResult,
-    trendingWeekResult,
-    ...providerResults,
-  ];
+  const byCategory = new Map(results.map((result) => [result.category, result] as const));
+  const items = (category: string) =>
+    projectHomeRailShows(byCategory.get(category)?.items ?? []);
   const failedCategories = results
     .filter((result) => result.failed)
     .map((result) => result.category);
@@ -3097,38 +3128,21 @@ async function getHomeCatalog() {
     .map((result) => result.category);
 
   return {
-    risingNow: risingNowResult.items,
-    breakoutPremieres: breakoutPremieresResult.items,
-    criticsChoice: criticsChoiceResult.items,
-    quickPicks: quickPicksResult.items,
-    airingToday: airingTodayResult.items,
-    trendingDay: trendingDayResult.items,
-    trendingWeek: trendingWeekResult.items,
+    risingNow: items("rising_now"),
+    breakoutPremieres: items("breakout_premieres"),
+    criticsChoice: items("critics_choice"),
+    quickPicks: items("quick_picks"),
+    airingToday: items("airing_today"),
+    trendingDay: items("trending_day"),
+    trendingWeek: items("trending_week"),
     providers: Object.fromEntries(
-      homeCatalogProviderCategories.map((category, index) => [
-        category,
-        providerResults[index]?.items ?? [],
-      ]),
+      homeCatalogProviderCategories.map((category) => [category, items(category)]),
     ),
     ...(failedCategories.length > 0 || staleCategories.length > 0
       ? { diagnostics: { failedCategories, staleCategories } }
       : {}),
   };
 }
-
-const homeCatalogCategoryPlan: Array<{ category: string; limit: number }> = [
-  { category: "rising_now", limit: 16 },
-  { category: "breakout_premieres", limit: 16 },
-  { category: "critics_choice", limit: 16 },
-  { category: "quick_picks", limit: 16 },
-  { category: "airing_today", limit: 10 },
-  { category: "trending_day", limit: 20 },
-  { category: "trending_week", limit: 10 },
-  ...homeCatalogProviderCategories.map((category) => ({
-    category,
-    limit: homeCatalogProviderListLimit,
-  })),
-];
 
 const HOME_CATALOG_REFRESH_CONCURRENCY = 4;
 
@@ -5824,7 +5838,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
         },
         show: fallbackArtworkDocs[index],
       }));
-      return [
+      // Home is the only consumer: ship the slim rail projection.
+      return projectHomeRailRankedItems([
         ...ranked.map(({ showId, signal }, index) => ({
           rank: index + 1,
           score: signal.score,
@@ -5841,17 +5856,19 @@ export const queryHandlers: Record<string, RpcHandler> = {
           statusCount: item.signal.statusCount,
           show: item.show,
         })),
-      ];
+      ]);
     }
 
-    return ranked.map(({ showId, signal }, index) => ({
-      rank: index + 1,
-      score: signal.score,
-      reviewCount: signal.reviewCount,
-      logCount: signal.logCount,
-      statusCount: signal.statusCount,
-      show: showMap.get(showId),
-    }));
+    return projectHomeRailRankedItems(
+      ranked.map(({ showId, signal }, index) => ({
+        rank: index + 1,
+        score: signal.score,
+        reviewCount: signal.reviewCount,
+        logCount: signal.logCount,
+        statusCount: signal.statusCount,
+        show: showMap.get(showId),
+      })),
+    );
   },
   "trending:mostReviewed": async ({ args }) => {
     const parsed = optionalLimitArgs.parse(args ?? {});
@@ -8012,7 +8029,7 @@ export const actionHandlers: Record<string, RpcHandler> = {
     try {
       const vectorItems = await getPersonalizedRecommendationsV2(user?.id, limit);
       if (vectorItems && vectorItems.length >= Math.min(limit, 6)) {
-        return vectorItems;
+        return projectHomeRailRankedItems(vectorItems);
       }
     } catch (error) {
       console.warn("[recs] personalized vector path failed; using fallback", error);
@@ -8050,13 +8067,14 @@ export const actionHandlers: Record<string, RpcHandler> = {
         preferFresh: true,
       },
     ).slice(0, limit);
-    return ranked.map((show, index) => ({
-      _id: show._id,
-      show,
-      rank: index + 1,
-      score: show.homeScore,
-      homeReasons: show.homeReasons,
-    }));
+    return projectHomeRailRankedItems(
+      ranked.map((show, index) => ({
+        _id: show._id,
+        show,
+        rank: index + 1,
+        score: show.homeScore,
+      })),
+    );
   },
   "embeddings:getHomeRecommendationRails": async ({ args, req }) => {
     const parsed = z.object({ limitPerRail: z.number().optional() }).parse(args ?? {});
@@ -8065,7 +8083,10 @@ export const actionHandlers: Record<string, RpcHandler> = {
     try {
       const vectorRails = await getHomeRecommendationRailsV2(user?.id, limit);
       if (vectorRails && vectorRails.length > 0) {
-        return vectorRails;
+        return vectorRails.map((rail) => ({
+          ...rail,
+          items: projectHomeRailRankedItems(rail.items),
+        }));
       }
     } catch (error) {
       console.warn("[recs] rails vector path failed; using fallback", error);
@@ -8097,13 +8118,14 @@ export const actionHandlers: Record<string, RpcHandler> = {
       {
         key: "for_you",
         title: "Picked for you",
-        items: ranked.map((show, index) => ({
-          _id: show._id,
-          show,
-          rank: index + 1,
-          score: show.homeScore,
-          homeReasons: show.homeReasons,
-        })),
+        items: projectHomeRailRankedItems(
+          ranked.map((show, index) => ({
+            _id: show._id,
+            show,
+            rank: index + 1,
+            score: show.homeScore,
+          })),
+        ),
       },
     ];
   },
