@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 
 import {
+  computeIngestContentHash,
   computeNextRefreshDelayMs,
   mapDetailsToShowRow,
   REFRESH_TIER_MS,
@@ -9,10 +10,29 @@ import {
 const NOW = Date.parse("2026-07-05T12:00:00Z");
 
 describe("computeNextRefreshDelayMs", () => {
-  it("treats returning series as active", () => {
+  it("ignores TMDB's status label when nothing concrete says the show is active", () => {
+    // TMDB marks most of its catalog "Returning Series" regardless of
+    // activity; that label alone once put ~100k shows on the 12-hour tier.
     expect(
       computeNextRefreshDelayMs({
-        details: { status: "Returning Series", popularity: 50 },
+        details: { status: "Returning Series", last_air_date: "2019-05-19", popularity: 50 },
+        isUserAttached: false,
+        now: NOW,
+      }),
+    ).toBe(REFRESH_TIER_MS.popular);
+    expect(
+      computeNextRefreshDelayMs({
+        details: { status: "Returning Series", popularity: 0.4 },
+        isUserAttached: false,
+        now: NOW,
+      }),
+    ).toBe(REFRESH_TIER_MS.dormant);
+  });
+
+  it("treats shows in production as active", () => {
+    expect(
+      computeNextRefreshDelayMs({
+        details: { status: "Returning Series", in_production: true, popularity: 50 },
         isUserAttached: false,
         now: NOW,
       }),
@@ -123,5 +143,44 @@ describe("mapDetailsToShowRow", () => {
     expect(row.posterUrl).toBeNull();
     expect(row.backdropUrl).toBeNull();
     expect(row.year).toBeNull();
+  });
+});
+
+describe("computeIngestContentHash", () => {
+  const base = {
+    id: 1396,
+    name: "Breaking Bad",
+    original_name: "Breaking Bad",
+    overview: "A chemistry teacher breaks bad.",
+    first_air_date: "2008-01-20",
+    poster_path: "/poster.jpg",
+    popularity: 100,
+    vote_average: 8.9,
+    vote_count: 12000,
+  };
+
+  it("is stable across refreshes and ignores the row id and timestamps", () => {
+    const first = computeIngestContentHash(mapDetailsToShowRow(base, NOW));
+    const second = computeIngestContentHash(mapDetailsToShowRow(base, NOW + 60_000));
+    expect(second).toBe(first);
+    expect(first).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("ignores popularity and vote drift", () => {
+    const before = computeIngestContentHash(mapDetailsToShowRow(base, NOW));
+    const after = computeIngestContentHash(
+      mapDetailsToShowRow({ ...base, popularity: 42, vote_average: 8.7, vote_count: 12345 }, NOW),
+    );
+    expect(after).toBe(before);
+  });
+
+  it("changes when content changes", () => {
+    const before = computeIngestContentHash(mapDetailsToShowRow(base, NOW));
+    expect(
+      computeIngestContentHash(mapDetailsToShowRow({ ...base, overview: "Edited overview." }, NOW)),
+    ).not.toBe(before);
+    expect(
+      computeIngestContentHash(mapDetailsToShowRow({ ...base, poster_path: "/new.jpg" }, NOW)),
+    ).not.toBe(before);
   });
 });

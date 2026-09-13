@@ -223,7 +223,6 @@ export const shows = sqliteTable(
       table.externalSource,
       table.externalId,
     ),
-    searchIdx: index("shows_search_text_idx").on(table.searchText),
     updatedAtIdx: index("shows_updated_at_idx").on(table.updatedAt),
     // Home/rec fallbacks order the whole catalog by popularity; without this
     // they full-scan and sort six-figure row counts per request.
@@ -1297,6 +1296,15 @@ export const showIngestState = sqliteTable(
     lastIngestedAt: timestampMs("last_ingested_at"),
     failCount: integer("fail_count").notNull(),
     lastError: text("last_error"),
+    // Hash of the content fields last written to shows (everything except
+    // popularity/vote counts). A refresh whose hash matches only writes the
+    // volatile numbers, so unchanged shows stop rewriting the row, its
+    // indexes and the FTS index on every tick.
+    contentHash: text("content_hash"),
+    // When the /tv/changes sync last marked this row due. The feed is polled
+    // hourly over a 25-hour window, so without this the same changed ids
+    // were re-queued (and re-fetched) every hour for a day.
+    changesSeenAt: timestampMs("changes_seen_at"),
     updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => ({

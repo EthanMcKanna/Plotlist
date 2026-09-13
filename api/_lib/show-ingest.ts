@@ -30,8 +30,9 @@ const STATEMENTS_PER_BATCH = 40;
 // Shows at or above this popularity (or attached to any user) also get their
 // full extended-details payload warmed so the detail screen never waits on
 // TMDB. Warming everything would blow past D1's 10GB budget (~226k shows at
-// ~40KB of credits/videos/recommendations each).
-export const DETAIL_WARM_MIN_POPULARITY = 5;
+// ~40KB of credits/videos/recommendations each). Below the threshold the
+// detail read path fetches and caches on first open instead.
+export const DETAIL_WARM_MIN_POPULARITY = 10;
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -49,8 +50,6 @@ const FAILURE_BASE_RETRY_MS = 6 * HOUR_MS;
 const FAILURE_MAX_RETRY_MS = 7 * DAY_MS;
 const GONE_RETRY_MS = 90 * DAY_MS;
 const RECENTLY_AIRED_WINDOW_MS = 45 * DAY_MS;
-
-const ACTIVE_STATUSES = new Set(["Returning Series", "In Production", "Planned", "Pilot"]);
 
 type TmdbShowDetails = {
   id?: number;
@@ -83,9 +82,14 @@ export function computeNextRefreshDelayMs(args: {
 }): number {
   const { details, isUserAttached, now } = args;
   const lastAirMs = details.last_air_date ? Date.parse(details.last_air_date) : Number.NaN;
+  // TMDB's status string is not evidence of activity: it labels most of the
+  // catalog "Returning Series" whether or not anything has aired in years,
+  // which once put ~100k shows on the 12-hour tier. Only concrete signals
+  // count — in production, a scheduled next episode, or a recent air date.
+  // Anything else that changes on TMDB still reaches us through the hourly
+  // /tv/changes sync.
   const active =
     details.in_production === true ||
-    (details.status !== undefined && ACTIVE_STATUSES.has(details.status)) ||
     (details.next_episode_to_air !== null && details.next_episode_to_air !== undefined) ||
     (Number.isFinite(lastAirMs) && now - lastAirMs <= RECENTLY_AIRED_WINDOW_MS);
 
@@ -150,6 +154,39 @@ export function mapDetailsToShowRow(details: TmdbShowDetails, now: number) {
   };
 }
 
+// Fields of a show row that only change when TMDB's content changes. The
+// popularity/vote numbers drift every day for nearly every show, so they are
+// excluded and written through the narrow update below instead.
+const CONTENT_HASH_FIELDS = [
+  "title",
+  "originalTitle",
+  "year",
+  "overview",
+  "posterUrl",
+  "backdropUrl",
+  "genreIds",
+  "originalLanguage",
+  "originCountries",
+  "imdbId",
+  "searchText",
+] as const;
+
+// 64-bit FNV-1a rendered as hex. Stable, synchronous, and collision-safe at
+// catalog scale (a collision would only defer one show's content refresh).
+export function computeIngestContentHash(row: ReturnType<typeof mapDetailsToShowRow>): string {
+  const input = JSON.stringify(CONTENT_HASH_FIELDS.map((field) => row[field] ?? null));
+  let high = 0xcbf29ce4;
+  let low = 0x84222325;
+  for (let index = 0; index < input.length; index += 1) {
+    low ^= input.charCodeAt(index);
+    // Multiply the 64-bit value by the FNV prime 0x100000001b3 in two halves.
+    const lowProduct = low * 0x1b3;
+    high = (Math.imul(high, 0x1b3) + low + Math.floor(lowProduct / 0x100000000)) >>> 0;
+    low = lowProduct >>> 0;
+  }
+  return high.toString(16).padStart(8, "0") + low.toString(16).padStart(8, "0");
+}
+
 class TmdbGoneError extends Error {}
 
 async function tmdbFetch(path: string, params: Record<string, string> = {}) {
@@ -204,6 +241,9 @@ async function readUserAttachedTmdbIds(tmdbIds: number[]): Promise<Set<number>> 
 type IngestTickSummary = {
   selected: number;
   ingested: number;
+  // Refreshes whose content hash matched, so only popularity/votes were
+  // written (or nothing, when those matched too).
+  unchanged?: number;
   warmed: number;
   failed: number;
   gone: number;
@@ -275,8 +315,10 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
     fetchedAt: number;
     expiresAt: number;
   }> = [];
+  const unchangedRows: Array<ReturnType<typeof mapDetailsToShowRow>> = [];
   const stateStatements: Array<unknown> = [];
   let ingested = 0;
+  let volatileUpdates = 0;
   let warmed = 0;
   let failed = 0;
   let gone = 0;
@@ -314,7 +356,17 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
       isUserAttached: userAttached.has(state.tmdbId),
       now,
     });
-    showRows.push(mapDetailsToShowRow(details, now));
+    const showRow = mapDetailsToShowRow(details, now);
+    const contentHash = computeIngestContentHash(showRow);
+    if (state.contentHash === contentHash) {
+      // Content unchanged since the last refresh: only the volatile numbers
+      // move, and only when they actually differ (the WHERE keeps an
+      // identical update from counting as a write).
+      unchangedRows.push(showRow);
+      volatileUpdates += 1;
+    } else {
+      showRows.push(showRow);
+    }
     if (warm) {
       warmed += 1;
       detailCacheRows.push({
@@ -337,6 +389,7 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
           lastError: null,
           lastIngestedAt: now,
           nextRefreshAt: now + delay,
+          contentHash,
           updatedAt: now,
         })
         .where(eq(showIngestState.id, state.id)),
@@ -344,6 +397,26 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
   }
 
   const statements: Array<unknown> = [];
+  for (const row of unchangedRows) {
+    statements.push(
+      db
+        .update(shows)
+        .set({
+          tmdbPopularity: row.tmdbPopularity,
+          tmdbVoteAverage: row.tmdbVoteAverage,
+          tmdbVoteCount: row.tmdbVoteCount,
+        })
+        .where(
+          and(
+            eq(shows.externalSource, row.externalSource),
+            eq(shows.externalId, row.externalId),
+            sql`(${shows.tmdbPopularity} is not ${row.tmdbPopularity}
+              or ${shows.tmdbVoteAverage} is not ${row.tmdbVoteAverage}
+              or ${shows.tmdbVoteCount} is not ${row.tmdbVoteCount})`,
+          ),
+        ),
+    );
+  }
   for (const chunk of chunkForSqlParams(showRows, 18)) {
     statements.push(
       db
@@ -402,7 +475,16 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
     console.warn("[ingest] embedding stale-marking failed", error);
   }
 
-  return { selected: batch.length, ingested, warmed, failed, gone, changesSynced, embeddingNominated };
+  return {
+    selected: batch.length,
+    ingested,
+    unchanged: volatileUpdates,
+    warmed,
+    failed,
+    gone,
+    changesSynced,
+    embeddingNominated,
+  };
 }
 
 // Pull the TMDB TV changes feed at most hourly and mark every changed id due
@@ -442,6 +524,13 @@ async function syncTmdbChangesIfDue(now: number): Promise<number | null> {
   }
 
   if (changedIds.size > 0) {
+    // The feed is date-granular, so this hourly pass sees every id changed
+    // since yesterday. An id already marked by a pass whose window started
+    // at or after the same day boundary is skipped: the row is neither
+    // rewritten nor re-fetched. (The WHERE on the upsert means a skipped row
+    // costs no D1 write at all.) A second edit to the same show inside a day
+    // is picked up by the first pass after the boundary moves.
+    const windowStartMs = Date.parse(`${startDate}T00:00:00Z`);
     const rows = Array.from(changedIds, (tmdbId) => ({
       id: createId("ingest"),
       tmdbId,
@@ -449,18 +538,21 @@ async function syncTmdbChangesIfDue(now: number): Promise<number | null> {
       status: "pending" as const,
       nextRefreshAt: now,
       failCount: 0,
+      changesSeenAt: now,
       updatedAt: now,
     }));
-    const statements = chunkForSqlParams(rows, 9).map((chunk) =>
+    const statements = chunkForSqlParams(rows, 10).map((chunk) =>
       db
         .insert(showIngestState)
         .values(chunk)
         .onConflictDoUpdate({
           target: showIngestState.tmdbId,
           set: {
-            nextRefreshAt: sql`excluded.next_refresh_at`,
+            nextRefreshAt: sql`min(${showIngestState.nextRefreshAt}, excluded.next_refresh_at)`,
+            changesSeenAt: sql`excluded.changes_seen_at`,
             updatedAt: sql`excluded.updated_at`,
           },
+          setWhere: sql`${showIngestState.changesSeenAt} is null or ${showIngestState.changesSeenAt} < ${windowStartMs}`,
         }),
     );
     await runBatches(statements as Array<{ run?: unknown }>);
