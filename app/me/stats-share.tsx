@@ -12,9 +12,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as Sharing from "expo-sharing";
-import { captureRef } from "react-native-view-shot";
 
-import { exportCardToPngDataUri } from "../../lib/exportCardImage";
+import { captureCardToTmpFile, exportCardToPngDataUri } from "../../lib/exportCardImage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { EmptyState } from "../../components/EmptyState";
@@ -190,10 +189,7 @@ export default function StatsShareScreen() {
     try {
       let uri: string;
       try {
-        uri = await captureRef(node, {
-          format: "png",
-          quality: 1,
-          result: "tmpfile",
+        uri = await captureCardToTmpFile(node, {
           width: EXPORT_WIDTH,
           height: EXPORT_HEIGHT,
         });
