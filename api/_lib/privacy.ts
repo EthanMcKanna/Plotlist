@@ -1,9 +1,10 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import type { IncomingMessage } from "node:http";
+
+import { and, eq, or } from "drizzle-orm";
 
 import { blocks, follows, users } from "../../db/schema";
 import { canViewPrivateProfileContent } from "../../lib/profilePrivacy";
 import { db } from "./db";
-import { chunkForSqlParams } from "./sql-dialect";
 
 export type BlockStatus = {
   // The viewer blocked the other user.
@@ -41,29 +42,82 @@ export async function getBlockStatus(
   };
 }
 
+// Every user with a block in either direction relative to the viewer (never
+// the viewer themselves). Block lists are tiny — typically none, a handful at
+// most — so one indexed read of the whole set (blocks_pair_idx for the
+// blocker side, blocks_blocked_idx for the other) beats probing candidate
+// chunks, and it doesn't depend on the candidates, so callers can start it
+// alongside their main query and filter in JS.
+async function readViewerBlockedIdSet(viewerId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+    .from(blocks)
+    .where(or(eq(blocks.blockerId, viewerId), eq(blocks.blockedId, viewerId)));
+  const blocked = new Set<string>();
+  for (const row of rows) {
+    blocked.add(row.blockerId === viewerId ? row.blockedId : row.blockerId);
+  }
+  blocked.delete(viewerId);
+  return blocked;
+}
+
+const viewerBlockedIdSetByRequest = new WeakMap<
+  IncomingMessage,
+  Map<string, Promise<Set<string>>>
+>();
+
+// readViewerBlockedIdSet memoized per request (and viewer), so a handler can
+// kick it off early and every later filter in the same request reuses it.
+export function getViewerBlockedIdSet(
+  viewerId: string | null | undefined,
+  req?: IncomingMessage,
+): Promise<Set<string>> {
+  if (!viewerId) {
+    return Promise.resolve(new Set<string>());
+  }
+  if (!req) {
+    return readViewerBlockedIdSet(viewerId);
+  }
+  let byViewer = viewerBlockedIdSetByRequest.get(req);
+  if (!byViewer) {
+    byViewer = new Map();
+    viewerBlockedIdSetByRequest.set(req, byViewer);
+  }
+  const cached = byViewer.get(viewerId);
+  if (cached) {
+    return cached;
+  }
+  const pending = readViewerBlockedIdSet(viewerId);
+  byViewer.set(viewerId, pending);
+  // A rejected read shouldn't stay memoized for the rest of the request.
+  pending.catch(() => {
+    if (byViewer?.get(viewerId) === pending) {
+      byViewer.delete(viewerId);
+    }
+  });
+  return pending;
+}
+
 // Ids among the candidates with a block in either direction relative to the
-// viewer. Chunked to stay under D1's bound-parameter cap.
+// viewer. One round trip regardless of candidate count (see above); pass the
+// request to share the viewer's block set with other filters in it.
 export async function getBlockedEitherWayIdSet(
   viewerId: string | null | undefined,
   candidateIds: string[],
+  req?: IncomingMessage,
 ): Promise<Set<string>> {
   const blocked = new Set<string>();
   if (!viewerId) {
     return blocked;
   }
   const uniqueIds = Array.from(new Set(candidateIds)).filter((id) => id !== viewerId);
-  for (const chunk of chunkForSqlParams(uniqueIds, 2, 80)) {
-    const rows = await db
-      .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
-      .from(blocks)
-      .where(
-        or(
-          and(eq(blocks.blockerId, viewerId), inArray(blocks.blockedId, chunk)),
-          and(eq(blocks.blockedId, viewerId), inArray(blocks.blockerId, chunk)),
-        ),
-      );
-    for (const row of rows) {
-      blocked.add(row.blockerId === viewerId ? row.blockedId : row.blockerId);
+  if (uniqueIds.length === 0) {
+    return blocked;
+  }
+  const viewerBlocked = await getViewerBlockedIdSet(viewerId, req);
+  for (const id of uniqueIds) {
+    if (viewerBlocked.has(id)) {
+      blocked.add(id);
     }
   }
   return blocked;
