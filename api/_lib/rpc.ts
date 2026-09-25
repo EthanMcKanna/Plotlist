@@ -1,6 +1,19 @@
 import type { IncomingMessage } from "node:http";
 
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { chunkForSqlParams, ilike, ilikeContains, queryInChunks } from "./sql-dialect";
@@ -50,7 +63,14 @@ import { createCalendarFeedToken } from "./calendar-feed";
 import { requirePro, userHasPro } from "./pro";
 import { ensurePhoneIdentity } from "./auth";
 import { normalizePhoneNumber, hashPhoneNumber, matchesAppReviewBypass } from "./phone";
-import { requireAuthUser, getOptionalAuthUser } from "./request-auth";
+import {
+  getAccessTokenUserId,
+  getOptionalAuthUser,
+  getOptionalAuthUserId,
+  requireAuthUser,
+  requireAuthUserId,
+  runWithSpeculativeAuth,
+} from "./request-auth";
 import { getStaleReleaseShowIds, refreshTrackedReleaseCalendarForUser } from "./release-refresh";
 import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "./rate-limit";
 import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social";
@@ -176,6 +196,7 @@ import {
   getBlockedEitherWayIdSet,
   getBlockStatus,
   getProfileAudience,
+  getViewerBlockedIdSet,
   isBlockedEitherWay,
 } from "./privacy";
 import {
@@ -324,6 +345,52 @@ function pageRows<T>(rows: T[], args: any) {
     continueCursor: String(next),
     isDone: next >= rows.length,
   };
+}
+
+// pageRows for rows whose payload is expensive to build: slices the page
+// first and builds only that. `build` must map rows 1:1 and in order, so
+// cursors and isDone come out exactly as pageRows over the built list.
+async function pageRowsBuilt<T, D>(rows: T[], args: any, build: (page: T[]) => Promise<D[]>) {
+  const parsed = paginationArgs.parse(args ?? {});
+  const start = Number(parsed.paginationOpts?.cursor ?? 0) || 0;
+  const numItems = parsed.paginationOpts?.numItems ?? 20;
+  const pageSource = rows.slice(start, start + numItems);
+  const page = pageSource.length > 0 ? await build(pageSource) : [];
+  const next = start + page.length;
+  return {
+    page,
+    continueCursor: String(next),
+    isDone: next >= rows.length,
+  };
+}
+
+// Reads just enough of an ordered query for pageRows(args) to come out as it
+// would over the whole (filtered) result, instead of loading every row.
+// `read(limit)` runs the query (null = unbounded); `keep` applies any row
+// filter (e.g. blocks — start its lookup before calling so it overlaps the
+// read). The window over-fetches a buffer past the page; the returned rows
+// are the full result when the read ran dry, otherwise a filtered prefix
+// long enough to hold the page plus one row, which pins isDone = false just
+// as the full list would. If filtering eats the buffer — rare — or the
+// cursor is unusual, it falls back to the unbounded read.
+async function readPageWindow<T>(
+  args: any,
+  read: (limit: number | null) => Promise<T[]>,
+  keep: (rows: T[]) => T[] | Promise<T[]> = (rows) => rows,
+): Promise<T[]> {
+  const parsed = paginationArgs.parse(args ?? {});
+  const start = Number(parsed.paginationOpts?.cursor ?? 0) || 0;
+  const numItems = parsed.paginationOpts?.numItems ?? 20;
+  const fetchLimit = start + numItems * 2 + 20;
+  if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(fetchLimit)) {
+    return await keep(await read(null));
+  }
+  const windowRows = await read(fetchLimit);
+  const kept = await keep(windowRows);
+  if (windowRows.length < fetchLimit || kept.length > start + numItems) {
+    return kept;
+  }
+  return await keep(await read(null));
 }
 
 function showToDoc(show: typeof shows.$inferSelect | null | undefined) {
@@ -1937,7 +2004,21 @@ async function getTmdbDetailRowsForShows(showRows: Array<typeof shows.$inferSele
   );
 }
 
-function listToDoc(list: typeof lists.$inferSelect | null | undefined) {
+// Every lists column listToDoc keeps. The smart-list internals it strips —
+// above all vibe_vector, ~1536 floats of JSON per smart list — never need to
+// leave D1 for a list read.
+const {
+  vibeVector: _listVibeVector,
+  vibeConstraints: _listVibeConstraints,
+  vibeExcludedShowIds: _listVibeExcludedShowIds,
+  ...listDocColumns
+} = getTableColumns(lists);
+type ListDocRow = Omit<
+  typeof lists.$inferSelect,
+  "vibeVector" | "vibeConstraints" | "vibeExcludedShowIds"
+>;
+
+function listToDoc(list: ListDocRow | null | undefined) {
   const doc = toDoc(list) as Record<string, unknown> | null;
   if (doc) {
     // Smart-list internals never leave the server: the stored query vector
@@ -1975,7 +2056,7 @@ async function getViewableList(listId: string, viewerId: string | null) {
 // Attaches owner, follower/show counts, and the viewer's follow state to a
 // page of lists with three batched queries instead of per-row lookups.
 async function enrichListDocs(
-  listRows: Array<typeof lists.$inferSelect>,
+  listRows: Array<ListDocRow>,
   viewerId: string | null,
 ) {
   if (listRows.length === 0) {
@@ -4177,29 +4258,38 @@ function buildRatingStats(ratings: number[]) {
 async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>, viewerId?: string) {
   const authorIds = Array.from(new Set(reviewRows.map((review) => review.authorId)));
   const showIds = Array.from(new Set(reviewRows.map((review) => review.showId)));
-  const [authorRows, showRows] = await Promise.all([
+  // Like totals and the viewer's own like come back aggregated per review,
+  // alongside the author/show reads rather than after them.
+  const [authorRows, showRows, likeRows] = await Promise.all([
     getUsersByIdsChunked(authorIds),
     getShowRowsByIdsChunked(showIds),
+    queryInChunks(
+      reviewRows.map((review) => review.id),
+      (chunk) =>
+        db
+          .select({
+            targetId: likes.targetId,
+            total: count(),
+            likedByViewer: viewerId
+              ? sql<number>`max(case when ${likes.userId} = ${viewerId} then 1 else 0 end)`
+              : sql<number>`0`,
+          })
+          .from(likes)
+          .where(and(eq(likes.targetType, "review"), inArray(likes.targetId, chunk)))
+          .groupBy(likes.targetId),
+      2,
+    ),
   ]);
   const authors = new Map(authorRows.map((user) => [user.id, toClientUser(user)] as const));
   const authorAvatars = new Map(
     authorRows.map((user) => [user.id, user.avatarUrl ?? user.image ?? null] as const),
   );
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
-  const likeRows = await queryInChunks(
-    reviewRows.map((review) => review.id),
-    (chunk) =>
-      db
-        .select()
-        .from(likes)
-        .where(and(eq(likes.targetType, "review"), inArray(likes.targetId, chunk))),
-    1,
-  );
   const likeCount = new Map<string, number>();
   const likedByViewer = new Set<string>();
   for (const like of likeRows) {
-    likeCount.set(like.targetId, (likeCount.get(like.targetId) ?? 0) + 1);
-    if (viewerId && like.userId === viewerId) {
+    likeCount.set(like.targetId, Number(like.total));
+    if (Number(like.likedByViewer) === 1) {
       likedByViewer.add(like.targetId);
     }
   }
@@ -4216,7 +4306,7 @@ async function buildReviewDetails(reviewRows: Array<typeof reviews.$inferSelect>
 
 const FEED_FALLBACK_MAX_ROWS = 1000;
 
-async function buildFeed(userId: string, args: any) {
+async function buildFeed(userId: string, args: any, req?: IncomingMessage) {
   const feedPagination = paginationArgs.parse(args ?? {});
   const feedStart = Number(feedPagination.paginationOpts?.cursor ?? 0) || 0;
   const feedNumItems = feedPagination.paginationOpts?.numItems ?? 20;
@@ -4228,13 +4318,11 @@ async function buildFeed(userId: string, args: any) {
   // fetches a buffer past the requested window instead of loading the whole
   // history (feed_items grows forever with follow count); if blocking eats
   // the entire buffer — rare — fall back to the full read for exactness.
+  // The viewer's block set doesn't depend on the rows, so it loads alongside
+  // the window read instead of after it.
+  const blockedIdsPromise = getViewerBlockedIdSet(userId, req);
   const filterByBlocks = async (rows: (typeof feedItems.$inferSelect)[]) => {
-    const blockedIds = await getBlockedEitherWayIdSet(
-      userId,
-      rows.flatMap((row) =>
-        row.type === "follow" ? [row.actorId, row.targetId] : [row.actorId],
-      ),
-    );
+    const blockedIds = await blockedIdsPromise;
     return blockedIds.size === 0
       ? rows
       : rows.filter(
@@ -4245,12 +4333,16 @@ async function buildFeed(userId: string, args: any) {
   };
 
   const fetchLimit = feedStart + feedNumItems * 3 + 20;
-  let windowRows = await db
-    .select()
-    .from(feedItems)
-    .where(eq(feedItems.ownerId, userId))
-    .orderBy(desc(feedItems.timestamp))
-    .limit(fetchLimit);
+  let [windowRows] = await Promise.all([
+    db
+      .select()
+      .from(feedItems)
+      .where(eq(feedItems.ownerId, userId))
+      .orderBy(desc(feedItems.timestamp))
+      .limit(fetchLimit),
+    // Surface a block-read failure here, as the serial version did.
+    blockedIdsPromise,
+  ]);
   let tableExhausted = windowRows.length < fetchLimit;
   let feedRows = await filterByBlocks(windowRows);
   if (!tableExhausted && feedRows.length < feedStart + feedNumItems + 1) {
@@ -4327,36 +4419,59 @@ async function buildWatchLogActivity(userId: string, args: any) {
     .parse(args ?? {});
   const limit = Math.min(parsed.limit ?? 60, 160);
 
+  // The newest `limit` of the merged stream can hold at most `limit` rows
+  // from either source, so each read stops at limit + 1 — the extra row is
+  // what keeps hasMore exact when one source alone overflows the page.
   const [logRows, reviewRows] = await Promise.all([
-    db.select().from(watchLogs).where(eq(watchLogs.userId, userId)).orderBy(desc(watchLogs.watchedAt)),
-    db.select().from(reviews).where(eq(reviews.authorId, userId)).orderBy(desc(reviews.createdAt)),
+    db
+      .select()
+      .from(watchLogs)
+      .where(eq(watchLogs.userId, userId))
+      .orderBy(desc(watchLogs.watchedAt))
+      .limit(limit + 1),
+    db
+      .select()
+      .from(reviews)
+      .where(eq(reviews.authorId, userId))
+      .orderBy(desc(reviews.createdAt))
+      .limit(limit + 1),
   ]);
-  const showRows = await getShowRowsByIdsChunked([
-    ...logRows.map((row) => row.showId),
-    ...reviewRows.map((row) => row.showId),
-  ]);
-  const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
 
-  const items = [
-    ...logRows.map((log) => ({
-      id: log.id,
-      type: "log" as const,
-      timestamp: log.watchedAt,
-      show: showMap.get(log.showId) ?? null,
-      log: toDoc(log),
-    })),
+  const merged = [
+    ...logRows.map((log) => ({ type: "log" as const, timestamp: log.watchedAt, row: log })),
     ...reviewRows.map((review) => ({
-      id: review.id,
       type: "review" as const,
       timestamp: review.createdAt,
-      show: showMap.get(review.showId) ?? null,
-      review: toDoc(review),
+      row: review,
     })),
   ].sort((left, right) => right.timestamp - left.timestamp);
+  const pageEntries = merged.slice(0, limit);
+
+  // Shows only for the entries actually returned.
+  const showRows = await getShowRowsByIdsChunked(pageEntries.map((entry) => entry.row.showId));
+  const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
+
+  const items = pageEntries.map((entry) =>
+    entry.type === "log"
+      ? {
+          id: entry.row.id,
+          type: "log" as const,
+          timestamp: entry.timestamp,
+          show: showMap.get(entry.row.showId) ?? null,
+          log: toDoc(entry.row),
+        }
+      : {
+          id: entry.row.id,
+          type: "review" as const,
+          timestamp: entry.timestamp,
+          show: showMap.get(entry.row.showId) ?? null,
+          review: toDoc(entry.row),
+        },
+  );
 
   return {
-    items: items.slice(0, limit),
-    hasMore: items.length > limit,
+    items,
+    hasMore: merged.length > limit,
   };
 }
 
@@ -4877,9 +4992,19 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return user !== null;
   },
   "users:me": async ({ req }) => {
+    // The counts only need the id, so they start on the access token's claim
+    // alongside the user-row lookup; they're used only once that row
+    // confirms the same user.
+    const claimedUserId = await getAccessTokenUserId(req);
+    const claimedCounts = claimedUserId ? getUserLibraryCounts(claimedUserId) : null;
+    // Handled below if the claim goes unused (e.g. no user row).
+    claimedCounts?.catch(() => undefined);
     const user = await getOptionalAuthUser(req);
     if (!user) return null;
-    const libraryCounts = await getUserLibraryCounts(user.id);
+    const libraryCounts =
+      claimedCounts && claimedUserId === user.id
+        ? await claimedCounts
+        : await getUserLibraryCounts(user.id);
     return {
       ...toClientUser(user),
       // Server-authoritative Pro flag (webhook-maintained proUntil); the
@@ -4982,8 +5107,8 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return await getShowsByIds(parsed.showIds);
   },
   "contacts:getStatus": async ({ req }) => {
-    const user = await requireAuthUser(req);
-    return await getContactStatus(user.id);
+    const userId = await requireAuthUserId(req);
+    return await getContactStatus(userId);
   },
   "contacts:getMatches": async ({ args, req }) => {
     const user = await requireAuthUser(req);
@@ -5333,19 +5458,20 @@ export const queryHandlers: Record<string, RpcHandler> = {
     };
   },
   "watchStates:getForShow": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
     const rows = await db
       .select()
       .from(watchStates)
-      .where(and(eq(watchStates.userId, user.id), eq(watchStates.showId, showId)))
+      .where(and(eq(watchStates.userId, userId), eq(watchStates.showId, showId)))
       .limit(1);
     if (!rows[0]) {
       return null;
     }
     // One show: reconciling is a single small batch, and it keeps the show
-    // page's status in step with what the continue rail derives.
-    const { rows: reconciled } = await readReconciledWatchStatuses(user.id, rows);
+    // page's status in step with what the continue rail derives. (Its
+    // deferred write-back only corrects this user's own row.)
+    const { rows: reconciled } = await readReconciledWatchStatuses(userId, rows);
     return toDoc(reconciled[0]);
   },
   "watchStates:listForUser": async ({ args, req }) => {
@@ -5378,24 +5504,24 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return await detailedWatchStates(parsed.userId, { ...args, status: "watchlist" }, true);
   },
   "watchLogs:listActivityForUser": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
-    if (parsed.userId !== user.id) {
+    if (parsed.userId !== userId) {
       throw new ApiError(403, "forbidden", "You can only view your own log activity");
     }
-    return await buildWatchLogActivity(user.id, args);
+    return await buildWatchLogActivity(userId, args);
   },
   // Every logged viewing of one show for the signed-in user, newest first.
   // The show screen derives watch-count badges and per-episode viewing
   // history from this; capped generously since even heavy rewatchers stay
   // in the hundreds per show.
   "watchLogs:listForShow": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const parsed = z.object({ showId: z.string() }).parse(args ?? {});
     const rows = await db
       .select()
       .from(watchLogs)
-      .where(and(eq(watchLogs.userId, user.id), eq(watchLogs.showId, parsed.showId)))
+      .where(and(eq(watchLogs.userId, userId), eq(watchLogs.showId, parsed.showId)))
       .orderBy(desc(watchLogs.watchedAt))
       .limit(1000);
     return rows.map(toDoc);
@@ -5410,21 +5536,22 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return userHasPro(user) ? insights : redactAllTimeInsights(insights);
   },
   "episodeProgress:getProgressForShow": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
     const rows = await db
       .select()
       .from(episodeProgress)
-      .where(and(eq(episodeProgress.userId, user.id), eq(episodeProgress.showId, showId)));
+      .where(and(eq(episodeProgress.userId, userId), eq(episodeProgress.showId, showId)));
     return rows.map(toDoc);
   },
   "episodeProgress:getUpNext": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    // Read-only apart from best-effort status/season-cache write-backs.
+    const userId = await requireAuthUserId(req);
     const parsedArgs = z
       .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
       .parse(args ?? {});
     const { candidates, now, enrichmentContext } = await loadContinueCandidates(
-      user.id,
+      userId,
       parsedArgs.utcOffsetMinutes ?? null,
       { includePausedDropped: false },
     );
@@ -5464,12 +5591,13 @@ export const queryHandlers: Record<string, RpcHandler> = {
       .map(stripContinueCandidate);
   },
   "episodeProgress:getContinue": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    // Read-only apart from best-effort status/season-cache write-backs.
+    const userId = await requireAuthUserId(req);
     const parsedArgs = z
       .object({ utcOffsetMinutes: z.number().int().min(-840).max(840).optional() })
       .parse(args ?? {});
     const { candidates, now, enrichmentContext } = await loadContinueCandidates(
-      user.id,
+      userId,
       parsedArgs.utcOffsetMinutes ?? null,
       { includePausedDropped: true },
     );
@@ -5571,65 +5699,101 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return rows[0] ? (await buildReviewDetails(rows, viewer?.id))[0] : null;
   },
   "reviews:listForShowDetailed": async ({ args, req }) => {
-    const viewer = await getOptionalAuthUser(req);
+    const viewerId = await getOptionalAuthUserId(req);
     const parsed = z.object({ showId: z.string() }).passthrough().parse(args ?? {});
-    // Show-level reviews only: per-episode ratings live in the episode sheet
-    // (listForEpisodeDetailed) and would flood this rail as star-only rows.
-    const rows = await db
-      .select()
-      .from(reviews)
-      .where(and(eq(reviews.showId, parsed.showId), isNull(reviews.seasonNumber)))
-      .orderBy(desc(reviews.createdAt));
-    const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
-    return pageRows(await buildReviewDetails(visibleRows, viewer?.id), args);
+    // Blocked authors drop out before paging; the viewer's block set loads
+    // alongside the reviews read, and details are built for the page only.
+    const blockedIdsPromise = getViewerBlockedIdSet(viewerId, req);
+    const visibleRows = await readPageWindow(
+      args,
+      (limit) => {
+        // Show-level reviews only: per-episode ratings live in the episode
+        // sheet (listForEpisodeDetailed) and would flood this rail as
+        // star-only rows.
+        const query = db
+          .select()
+          .from(reviews)
+          .where(and(eq(reviews.showId, parsed.showId), isNull(reviews.seasonNumber)))
+          .orderBy(desc(reviews.createdAt));
+        return limit === null ? query : query.limit(limit);
+      },
+      async (rows) => {
+        const blockedIds = await blockedIdsPromise;
+        return blockedIds.size === 0 ? rows : rows.filter((row) => !blockedIds.has(row.authorId));
+      },
+    );
+    return await pageRowsBuilt(visibleRows, args, (page) =>
+      buildReviewDetails(page, viewerId ?? undefined),
+    );
   },
   "reviews:listForEpisodeDetailed": async ({ args, req }) => {
-    const viewer = await getOptionalAuthUser(req);
+    const viewerId = await getOptionalAuthUserId(req);
     const parsed = z.object({ showId: z.string(), seasonNumber: z.number(), episodeNumber: z.number() }).passthrough().parse(args ?? {});
-    const rows = await db
-      .select()
-      .from(reviews)
-      .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)))
-      .orderBy(desc(reviews.createdAt));
-    const visibleRows = await filterRowsByBlockedAuthors(viewer?.id ?? null, rows, (row) => row.authorId);
-    // People the viewer follows surface first; each group keeps newest-first
-    // order from the query above (sort is stable).
-    let orderedRows = visibleRows;
-    if (viewer && visibleRows.length > 1) {
-      const authorIds = Array.from(new Set(visibleRows.map((row) => row.authorId)));
-      const followedAuthors = new Set<string>();
-      for (const chunk of chunkForSqlParams(authorIds, 1, 80)) {
-        const followRows = await db
-          .select()
-          .from(follows)
-          .where(and(eq(follows.followerId, viewer.id), inArray(follows.followeeId, chunk)));
-        for (const row of followRows) {
-          followedAuthors.add(row.followeeId);
-        }
-      }
-      orderedRows = [...visibleRows].sort(
-        (left, right) =>
-          Number(followedAuthors.has(right.authorId)) - Number(followedAuthors.has(left.authorId)),
-      );
-    }
-    return pageRows(await buildReviewDetails(orderedRows, viewer?.id), args);
+    const blockedIdsPromise = getViewerBlockedIdSet(viewerId, req);
+    // People the viewer follows surface first, so the whole (per-episode,
+    // small) set is read; whether the viewer follows each author rides on the
+    // same query instead of a follow-up lookup.
+    const [rows, blockedIds] = await Promise.all([
+      db
+        .select({
+          review: reviews,
+          viewerFollowsAuthor: viewerId
+            ? sql<number>`exists(select 1 from ${follows} where ${follows.followerId} = ${viewerId} and ${follows.followeeId} = ${reviews.authorId})`
+            : sql<number>`0`,
+        })
+        .from(reviews)
+        .where(and(eq(reviews.showId, parsed.showId), eq(reviews.seasonNumber, parsed.seasonNumber), eq(reviews.episodeNumber, parsed.episodeNumber)))
+        .orderBy(desc(reviews.createdAt)),
+      blockedIdsPromise,
+    ]);
+    const visibleRows =
+      blockedIds.size === 0 ? rows : rows.filter((row) => !blockedIds.has(row.review.authorId));
+    // Each group keeps newest-first order from the query above (sort is
+    // stable).
+    const orderedRows =
+      viewerId && visibleRows.length > 1
+        ? [...visibleRows].sort(
+            (left, right) =>
+              Number(Number(right.viewerFollowsAuthor) === 1) -
+              Number(Number(left.viewerFollowsAuthor) === 1),
+          )
+        : visibleRows;
+    return await pageRowsBuilt(
+      orderedRows.map((row) => row.review),
+      args,
+      (page) => buildReviewDetails(page, viewerId ?? undefined),
+    );
   },
   "reviews:listForUserDetailed": async ({ args, req }) => {
-    const viewer = await getOptionalAuthUser(req);
+    const viewerId = await getOptionalAuthUserId(req);
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
-    if (!(await getVisibleProfileAudience(viewer?.id ?? null, parsed.userId))) {
+    // The page read overlaps the audience gate; its rows are only used once
+    // the gate passes. No row filter here, so the window is always exact.
+    const [visible, rows] = await Promise.all([
+      getVisibleProfileAudience(viewerId, parsed.userId),
+      readPageWindow(args, (limit) => {
+        const query = db
+          .select()
+          .from(reviews)
+          .where(eq(reviews.authorId, parsed.userId))
+          .orderBy(desc(reviews.createdAt));
+        return limit === null ? query : query.limit(limit);
+      }),
+    ]);
+    if (!visible) {
       return EMPTY_PAGE;
     }
-    const rows = await db.select().from(reviews).where(eq(reviews.authorId, parsed.userId)).orderBy(desc(reviews.createdAt));
-    return pageRows(await buildReviewDetails(rows, viewer?.id), args);
+    return await pageRowsBuilt(rows, args, (page) =>
+      buildReviewDetails(page, viewerId ?? undefined),
+    );
   },
   "reviews:getMyEpisodeRatings": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
     const rows = await db
       .select()
       .from(reviews)
-      .where(and(eq(reviews.authorId, user.id), eq(reviews.showId, showId)));
+      .where(and(eq(reviews.authorId, userId), eq(reviews.showId, showId)));
     return rows.filter((row) => row.seasonNumber !== null && row.episodeNumber !== null).map(toDoc);
   },
   "reviews:getEpisodeStats": async ({ args }) => {
@@ -5737,22 +5901,30 @@ export const queryHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ userId: z.string().optional() }).passthrough().parse(args ?? {});
     const userId = parsed.userId;
     if (!userId) return pageRows([], args);
-    const viewer = await getOptionalAuthUser(req);
-    const viewerId = viewer?.id ?? null;
+    const viewerId = await getOptionalAuthUserId(req);
     // Private lists never leave the owner's account.
     if (viewerId !== userId) {
-      if (!(await getVisibleProfileAudience(viewerId, userId))) {
+      // The public-lists read overlaps the audience gate; its rows are only
+      // used once the gate passes.
+      const [visible, rows] = await Promise.all([
+        getVisibleProfileAudience(viewerId, userId),
+        db
+          .select(listDocColumns)
+          .from(lists)
+          .where(and(eq(lists.ownerId, userId), eq(lists.isPublic, true)))
+          .orderBy(desc(lists.updatedAt)),
+      ]);
+      if (!visible) {
         return EMPTY_PAGE;
       }
-      const rows = await db
-        .select()
-        .from(lists)
-        .where(and(eq(lists.ownerId, userId), eq(lists.isPublic, true)))
-        .orderBy(desc(lists.updatedAt));
-      return pageRows(await enrichListDocs(rows, viewerId), args);
+      return await pageRowsBuilt(rows, args, (page) => enrichListDocs(page, viewerId));
     }
-    const rows = await db.select().from(lists).where(eq(lists.ownerId, userId)).orderBy(desc(lists.updatedAt));
-    return pageRows(await enrichListDocs(rows, viewerId), args);
+    const rows = await db
+      .select(listDocColumns)
+      .from(lists)
+      .where(eq(lists.ownerId, userId))
+      .orderBy(desc(lists.updatedAt));
+    return await pageRowsBuilt(rows, args, (page) => enrichListDocs(page, viewerId));
   },
   "lists:listPublicForUser": async ({ args, req }) => {
     const parsed = z.object({ userId: z.string() }).passthrough().parse(args ?? {});
@@ -5803,17 +5975,20 @@ export const queryHandlers: Record<string, RpcHandler> = {
     return rows.map((row) => ({ ...toDoc(row), show: showMap.get(row.showId) ?? null }));
   },
   "listItems:getShowMembership": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const showId = z.object({ showId: z.string() }).parse(args ?? {}).showId;
-    const ownLists = await db.select().from(lists).where(eq(lists.ownerId, user.id));
-    const ids = ownLists.map((list) => list.id);
-    if (!ids.length) return [];
-    const rows = await db.select().from(listItems).where(and(inArray(listItems.listId, ids), eq(listItems.showId, showId)));
+    // Ids of the viewer's own lists holding the show, in one join (callers
+    // treat the result as a set).
+    const rows = await db
+      .select({ listId: listItems.listId })
+      .from(listItems)
+      .innerJoin(lists, eq(lists.id, listItems.listId))
+      .where(and(eq(lists.ownerId, userId), eq(listItems.showId, showId)));
     return rows.map((row) => row.listId);
   },
   "feed:listForUser": async ({ args, req }) => {
-    const user = await requireAuthUser(req);
-    return await buildFeed(user.id, args);
+    const userId = await requireAuthUserId(req);
+    return await buildFeed(userId, args, req);
   },
   "trending:shows": async ({ args }) => {
     const parsed = z
@@ -6180,12 +6355,12 @@ export const queryHandlers: Record<string, RpcHandler> = {
     };
   },
   "notifications:getUnreadCount": async ({ req }) => {
-    const user = await getOptionalAuthUser(req);
-    if (!user) return 0;
+    const userId = await getOptionalAuthUserId(req);
+    if (!userId) return 0;
     const rows = await db
       .select({ value: count() })
       .from(notifications)
-      .where(and(eq(notifications.userId, user.id), isNull(notifications.readAt)));
+      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
     return Number(rows[0]?.value ?? 0);
   },
   "notifications:getPreferences": async ({ req }) => {
@@ -6196,11 +6371,11 @@ export const queryHandlers: Record<string, RpcHandler> = {
     };
   },
   "notifications:getMutedShowIds": async ({ req }) => {
-    const user = await requireAuthUser(req);
+    const userId = await requireAuthUserId(req);
     const rows = await db
       .select({ showId: showNotificationMutes.showId })
       .from(showNotificationMutes)
-      .where(eq(showNotificationMutes.userId, user.id));
+      .where(eq(showNotificationMutes.userId, userId));
     return rows.map((row) => row.showId);
   },
   "notifications:getMutedShows": async ({ req }) => {
@@ -8593,8 +8768,12 @@ export async function runRpcHandler(
     throw new ApiError(501, "not_implemented", `${name} is not implemented in the SQL backend yet`);
   }
 
-  return await handler({
-    args: input.args,
-    req: input.req,
-  });
+  // Handlers may speculate on the access token's user id for reads; the
+  // wrapper holds every result and error until that claim is confirmed.
+  return await runWithSpeculativeAuth(input.req, kind, () =>
+    handler({
+      args: input.args,
+      req: input.req,
+    }),
+  );
 }
