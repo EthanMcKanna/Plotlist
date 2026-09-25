@@ -24,6 +24,7 @@ import { HomeSectionHeader } from "./HomeSectionHeader";
 import { HorizontalRail } from "./HorizontalRail";
 import { LinkPressable } from "./LinkPressable";
 import { getHomeDisplayMetaLine, getHomeDisplayMetaLabels } from "../lib/homeDisplayMeta";
+import { resizeTmdbImageUrl } from "../lib/tmdbImages";
 import {
   RAIL_INITIAL_WINDOW,
   getInitialRailWindow,
@@ -457,7 +458,9 @@ const PosterCard = memo(function PosterCard({
   // title/meta text leaves the tree (poster cards otherwise read double).
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
-  const posterUrl = item.posterUrl?.trim() || null;
+  // 118pt cards: w342 is ~3x density; the server's w500 decoded ~2x the
+  // pixels for every poster on every rail.
+  const posterUrl = resizeTmdbImageUrl(item.posterUrl?.trim() || null, "w342");
   const shouldShowImage = Boolean(posterUrl && !imageFailed);
   const shouldShowFallback = !posterUrl || imageFailed || !imageLoaded;
 

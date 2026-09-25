@@ -1,4 +1,5 @@
-import { differenceInCalendarDays, isSameDay } from "date-fns";
+import { differenceInCalendarDays } from "date-fns/differenceInCalendarDays";
+import { isSameDay } from "date-fns/isSameDay";
 
 // Pure presentation logic for the notifications inbox. Server strings stay
 // the source of truth for copy — these helpers only decorate: they bucket

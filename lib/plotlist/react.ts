@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-query";
 
 import { getFunctionName } from "./api";
-import { cachedQueryArgs } from "./cachedQueryArgs";
+import { cachedQueryArgs, normalizeQueryArgs } from "./cachedQueryArgs";
 import { callAction, callMutation, callQuery } from "./rpc";
 import { useAuth as useWrappedAuth } from "./auth";
 import { queryClient } from "../queryClient";
@@ -52,7 +52,7 @@ function queryKeyFor<Query extends PlotlistFunctionReference<"query">>(
   query: Query,
   args?: Record<string, any>,
 ) {
-  return ["plotlist-rpc", "query", getFunctionName(query as any), args] as const;
+  return ["plotlist-rpc", "query", getFunctionName(query as any), normalizeQueryArgs(args)] as const;
 }
 
 // Which query domains a mutation domain can change. Mutations used to
@@ -157,8 +157,18 @@ const MUTATION_INVALIDATION_DOMAINS: Record<string, readonly string[] | null> = 
   traktImport: null,
 };
 
+// Per-mutation overrides, checked before the domain map.
+const MUTATION_INVALIDATION_OVERRIDES: Record<string, readonly string[]> = {
+  // AuthGate's launch heartbeat: with no args it only stamps lastSeenAt, yet
+  // the users domain refetched users:me (library-count aggregation),
+  // suggestions, contacts and follows moments after they first loaded.
+  "users:ensureProfile": [],
+};
+
 function invalidationFilterForMutation(name: string) {
-  const affected = MUTATION_INVALIDATION_DOMAINS[name.split(":")[0] ?? ""];
+  const affected =
+    MUTATION_INVALIDATION_OVERRIDES[name] ??
+    MUTATION_INVALIDATION_DOMAINS[name.split(":")[0] ?? ""];
   if (affected == null) {
     return { queryKey: ["plotlist-rpc"] as const };
   }
@@ -268,7 +278,7 @@ export function useQuery<Query extends PlotlistFunctionReference<"query">>(
   ...args: ArgsOrSkip
 ): any {
   const name = getFunctionName(query as any);
-  const queryArgs = args[0];
+  const queryArgs = normalizeQueryArgs(args[0]);
   const rpcResult = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "query", name, queryArgs],
@@ -292,7 +302,7 @@ export function useQuery<Query extends PlotlistFunctionReference<"query">>(
 // (a growing `limit`, a filter change) instead of blanking to a spinner.
 export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
   query: Query,
-  queryArgs?: Record<string, any> | "skip",
+  rawQueryArgs?: Record<string, any> | "skip",
   options?: { keepPreviousData?: boolean },
 ): {
   data: any;
@@ -302,6 +312,7 @@ export function useQueryState<Query extends PlotlistFunctionReference<"query">>(
   refetch: () => void;
 } {
   const name = getFunctionName(query as any);
+  const queryArgs = normalizeQueryArgs(rawQueryArgs);
   const rpcResult = useTanstackQuery(
     {
       queryKey: ["plotlist-rpc", "query", name, queryArgs],

@@ -1,5 +1,3 @@
-import html2canvas from "html2canvas";
-
 // TMDB's CDN only sends Access-Control-Allow-Origin when the request has an
 // Origin header, and the page's plain <img> loads cache a non-CORS response
 // — so html2canvas's useCORS re-fetch hits that cached entry and the
@@ -75,6 +73,8 @@ export async function exportCardToPngDataUri(
 
   const rect = element.getBoundingClientRect();
   const scale = rect.width > 0 ? options.width / rect.width : 2;
+  // ~200KB and only needed at share time, so it loads as its own chunk.
+  const { default: html2canvas } = await import("html2canvas");
   const rendered = await withBlobImages(element, () =>
     html2canvas(element, {
       useCORS: true,
@@ -94,4 +94,11 @@ export async function exportCardToPngDataUri(
   }
   context.drawImage(rendered, 0, 0, options.width, options.height);
   return canvas.toDataURL("image/png");
+}
+
+export async function captureCardToTmpFile(
+  _node: unknown,
+  _options: { width: number; height: number },
+): Promise<string> {
+  throw new Error("captureCardToTmpFile is native-only");
 }

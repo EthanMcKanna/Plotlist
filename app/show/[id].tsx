@@ -847,9 +847,15 @@ export default function ShowScreen() {
     !isShowPreview && showId ? { showId } : "skip",
   );
   const showRatingStats = isShowPreview ? PREVIEW_SHOW_STATS : queriedShowStats;
+  // The user's lists only feed the add-to-list picker, so they load on the
+  // first press-in of its button (a press-in head start usually beats the
+  // sheet's open animation) instead of on every show open.
+  const [listsRequested, setListsRequested] = useState(false);
   const { results: queriedLists, status: queriedListsStatus } = usePaginatedQuery(
     api.lists.listForUser,
-    !isShowPreview && isAuthenticated && me?._id ? { userId: me._id } : "skip",
+    listsRequested && !isShowPreview && isAuthenticated && me?._id
+      ? { userId: me._id }
+      : "skip",
     { initialNumItems: 20 },
   );
   const lists = isShowPreview
@@ -2980,8 +2986,10 @@ export default function ShowScreen() {
               <Ionicons name="create-outline" size={22} color="#F59E0B" />
             </GlassPressable>
             <GlassPressable
+              onPressIn={() => setListsRequested(true)}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setListsRequested(true);
                 setListPickerVisible(true);
               }}
               accessibilityLabel="Add to list"

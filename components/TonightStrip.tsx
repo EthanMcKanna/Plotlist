@@ -9,6 +9,7 @@ import Animated, { FadeInRight } from "react-native-reanimated";
 import { useAction, useAuth, useQuery } from "../lib/plotlist/react";
 import { getPrimaryWatchProvider } from "../lib/watchProviders";
 import { api } from "../lib/plotlist/api";
+import { resizeTmdbImageUrl } from "../lib/tmdbImages";
 import { useAccent } from "../lib/appearanceStore";
 import { formatCalendarDay, formatEpisodeCode } from "../lib/format";
 import { recordHomeWarmSchedule } from "../lib/homeWarmCache";
@@ -233,18 +234,34 @@ export function useHomeSchedulePreview(enabled = true): HomeSchedulePreviewState
     });
   }, [enabled, isAuthenticated, preview, refresh, today]);
 
-  return {
-    isAuthenticated,
-    today,
-    preview,
-    tonightItems,
-    upcomingItems,
-    tonightCount,
-    weekCount,
-    hasScheduleItems: tonightCount > 0 || weekCount > 0,
-    loading: enabled && isAuthenticated && preview === undefined,
-    refresh,
-  };
+  const loading = enabled && isAuthenticated && preview === undefined;
+  // Stable identity: home's section renderer depends on this object, so a
+  // fresh literal per render re-rendered every mounted home section.
+  return useMemo(
+    () => ({
+      isAuthenticated,
+      today,
+      preview,
+      tonightItems,
+      upcomingItems,
+      tonightCount,
+      weekCount,
+      hasScheduleItems: tonightCount > 0 || weekCount > 0,
+      loading,
+      refresh,
+    }),
+    [
+      isAuthenticated,
+      loading,
+      preview,
+      refresh,
+      today,
+      tonightCount,
+      tonightItems,
+      upcomingItems,
+      weekCount,
+    ],
+  );
 }
 
 // Providers arrive resolved and ordered original-first (lib/watchProviders),
@@ -437,7 +454,11 @@ function ScheduleCard({
   today: string;
 }) {
   const accent = useAccent();
-  const imageUrl = item.show?.backdropUrl ?? item.show?.posterUrl ?? null;
+  // 240pt-wide cards: w780 is ~3x density (the stored backdrops are w1280).
+  const imageUrl = resizeTmdbImageUrl(
+    item.show?.backdropUrl ?? item.show?.posterUrl ?? null,
+    "w780",
+  );
   const dateLabel = getScheduleCardDateLabel(item, today);
   const isTonight = item.airDate === today;
   const headline = getScheduleCardHeadline(item);

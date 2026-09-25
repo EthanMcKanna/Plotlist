@@ -27,12 +27,16 @@ const FALLBACK_SESSION: PlotlistSessionContextValue = {
 
 const PlotlistSessionContext = createContext<PlotlistSessionContextValue | null>(null);
 
-async function validateStoredSession(session: StoredSession) {
-  if (session.accessTokenExpiresAt > Date.now() + 30_000) {
-    return session;
-  }
-
-  return await refreshSessionIfNeeded();
+// A stored session whose refresh token is still valid is treated as signed
+// in right away, so the navigator (and the warm-start home cache) mounts on
+// the first frame instead of after a refresh round trip — access tokens live
+// 15 minutes, so nearly every cold start needs one. The refresh still runs
+// now, single-flighted with the first RPCs that need the new token; a 401/403
+// clears the stored session, which subscribeToSessionCleared turns into a
+// sign-out. A network failure keeps the user signed in (it used to bounce an
+// offline launch to the sign-in screen).
+function isSessionUsable(session: StoredSession | null): session is StoredSession {
+  return Boolean(session && session.refreshTokenExpiresAt > Date.now());
 }
 
 export function PlotlistSessionProvider({ children }: PropsWithChildren) {
@@ -47,13 +51,11 @@ export function PlotlistSessionProvider({ children }: PropsWithChildren) {
     void (async () => {
       const session = await getStoredSession();
       if (!cancelled && generation === authGeneration.current) {
-        const validatedSession =
-          session && session.refreshTokenExpiresAt > Date.now()
-            ? await validateStoredSession(session).catch(() => null)
-            : null;
-        if (!cancelled && generation === authGeneration.current) {
-          setIsApiAuthenticated(Boolean(validatedSession));
-          setIsLoading(false);
+        const usable = isSessionUsable(session);
+        setIsApiAuthenticated(usable);
+        setIsLoading(false);
+        if (usable) {
+          void refreshSessionIfNeeded().catch(() => undefined);
         }
       }
     })();

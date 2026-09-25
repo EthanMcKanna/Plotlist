@@ -1,4 +1,7 @@
-import { format, formatDistanceToNowStrict, isSameMonth, startOfMonth } from "date-fns";
+import { format } from "date-fns/format";
+import { formatDistanceToNowStrict } from "date-fns/formatDistanceToNowStrict";
+import { isSameMonth } from "date-fns/isSameMonth";
+import { startOfMonth } from "date-fns/startOfMonth";
 
 export function formatDate(value: number) {
   return format(new Date(value), "MMM d, yyyy");

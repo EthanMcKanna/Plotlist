@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format } from "date-fns/format";
 
 // Client-side mirror of the server's watch-log date model. A viewing's date
 // is the triple (watchedAt, watchedOn, datePrecision):

@@ -55,6 +55,7 @@ import {
   removeOrDemotePreviewedHomeRailItems,
 } from "./homeRailIdentity";
 import { shouldLoadEditorialSeedRail } from "./homeRailHealth";
+import { markHomeSettled } from "./homeSettled";
 import type { HeroSlide } from "../components/HeroCarousel";
 import type { ProviderRoom } from "./providerRoom";
 import type { SignatureRailItem } from "../components/SignatureRail";
@@ -1959,6 +1960,7 @@ export function useHomeData(): HomeData {
       holding = false;
       if (cancelled) return;
       held.splice(0).forEach((applyResult) => applyResult());
+      markHomeSettled();
     };
     const cap = setTimeout(flush, HOME_INITIAL_COMMIT_CAP_MS);
     jobs.forEach((job) => {

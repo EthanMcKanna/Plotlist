@@ -14,6 +14,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { getFunctionName } from "./plotlist/api";
+import { normalizeQueryArgs } from "./plotlist/cachedQueryArgs";
 import type { LocalStore } from "./plotlist/react";
 import type { PaginatedResult, PlotlistFunctionReference } from "./plotlist/types";
 
@@ -134,7 +135,7 @@ export function removeRowsFromPaginatedCaches(
  */
 export function createDirectCacheStore(client: QueryClient): LocalStore {
   const keyFor = (query: PlotlistFunctionReference<"query">, args?: Record<string, any>) =>
-    [RPC_KEY_ROOT, "query", getFunctionName(query), args] as const;
+    [RPC_KEY_ROOT, "query", getFunctionName(query), normalizeQueryArgs(args)] as const;
   return {
     getQuery: (query, args) => client.getQueryData(keyFor(query, args) as any),
     setQuery: (query, args, data) => {

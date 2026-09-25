@@ -1,10 +1,4 @@
-import {
-  ErrorCode,
-  Purchases,
-  PurchasesError,
-  type CustomerInfo,
-  type Package,
-} from "@revenuecat/purchases-js";
+import type { CustomerInfo, Package } from "@revenuecat/purchases-js";
 
 import { getAccent } from "./appearanceStore";
 import {
@@ -22,6 +16,20 @@ import { Sentry } from "./sentry";
 // webhook → users.proUntil.
 
 export const PURCHASES_SUPPORTED = true;
+
+// purchases-js is ~800KB of the web bundle and nothing needs it before the
+// signed-in account syncs, so it loads as its own chunk off the boot path.
+type PurchasesModule = typeof import("@revenuecat/purchases-js");
+let purchasesModule: Promise<PurchasesModule> | null = null;
+
+function loadPurchases(): Promise<PurchasesModule> {
+  purchasesModule ??= import("@revenuecat/purchases-js").catch((error) => {
+    // Let a later call retry a chunk that failed to download.
+    purchasesModule = null;
+    throw error;
+  });
+  return purchasesModule;
+}
 
 // Web stays on the Test Store key (simulated checkout) until a Stripe
 // account is connected for RevenueCat Web Billing; entitlements bought on
@@ -89,6 +97,7 @@ export async function syncPurchasesUser(userId: string | null): Promise<void> {
       setStatus({ ...status, isReady: true, isPro: false });
       return;
     }
+    const { Purchases } = await loadPurchases();
     if (!Purchases.isConfigured()) {
       Purchases.configure({ apiKey: REVENUECAT_API_KEY, appUserId: userId });
       applyCustomerInfo(await Purchases.getSharedInstance().getCustomerInfo());
@@ -107,19 +116,21 @@ export async function syncPurchasesUser(userId: string | null): Promise<void> {
 }
 
 export async function refreshProStatus(): Promise<ProStatus> {
-  if (Purchases.isConfigured()) {
-    try {
+  try {
+    const { Purchases } = await loadPurchases();
+    if (Purchases.isConfigured()) {
       applyCustomerInfo(await Purchases.getSharedInstance().getCustomerInfo());
-    } catch {
-      // Keep the last known status.
     }
+  } catch {
+    // Keep the last known status.
   }
   return status;
 }
 
 export async function getProPackages(): Promise<Package[]> {
-  if (!Purchases.isConfigured()) return [];
   try {
+    const { Purchases } = await loadPurchases();
+    if (!Purchases.isConfigured()) return [];
     const offerings = await Purchases.getSharedInstance().getOfferings();
     return offerings.current?.availablePackages ?? [];
   } catch (error) {
@@ -131,6 +142,7 @@ export async function getProPackages(): Promise<Package[]> {
 export async function purchaseProPackage(
   pkg: Package,
 ): Promise<"purchased" | "cancelled"> {
+  const { Purchases } = await loadPurchases();
   const { customerInfo } = await Purchases.getSharedInstance().purchase({
     rcPackage: pkg,
   });
@@ -251,6 +263,13 @@ function chooseProPackage(packages: Package[]): Promise<Package | null> {
 export async function presentProPaywall(options?: {
   onlyIfNeeded?: boolean;
 }): Promise<PaywallOutcome> {
+  let purchases: PurchasesModule;
+  try {
+    purchases = await loadPurchases();
+  } catch {
+    return "unavailable";
+  }
+  const { ErrorCode, Purchases, PurchasesError } = purchases;
   if (!Purchases.isConfigured()) return "unavailable";
   if (options?.onlyIfNeeded) {
     await refreshProStatus();
