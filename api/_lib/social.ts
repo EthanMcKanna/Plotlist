@@ -73,14 +73,9 @@ export async function buildPersonPreviews(
   // matches). The block check and the relationship reads below are
   // independent, so they share one wave: every chunk of both is in flight at
   // once, and relationship rows for a blocked candidate are simply never
-  // read. (getBlockedEitherWayIdSet walks its own chunks serially, so it is
-  // handed one chunk per call.)
-  const [blockedSets, chunkResults] = await Promise.all([
-    Promise.all(
-      chunkForSqlParams(candidateIds, 2, 80).map((chunk) =>
-        getBlockedEitherWayIdSet(viewerId, chunk),
-      ),
-    ),
+  // read. The block check is one query for the viewer's whole block set.
+  const [blockedIds, chunkResults] = await Promise.all([
+    getBlockedEitherWayIdSet(viewerId, candidateIds),
     Promise.all(
       chunkForSqlParams(candidateIds, 1, 80).map((chunk) =>
         Promise.all([
@@ -139,7 +134,6 @@ export async function buildPersonPreviews(
     ),
   ]);
 
-  const blockedIds = new Set(blockedSets.flatMap((set) => Array.from(set)));
   const visibleCandidates = uniqueCandidates.filter(
     (candidate) => !blockedIds.has(candidate.id),
   );
