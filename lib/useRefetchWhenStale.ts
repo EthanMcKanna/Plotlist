@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import { useFocusEffect } from "expo-router";
 
 import { getFunctionName } from "./plotlist/api";
+import { normalizeQueryArgs } from "./plotlist/cachedQueryArgs";
 import type { PlotlistFunctionReference } from "./plotlist/types";
 import { queryClient } from "./queryClient";
 
@@ -75,7 +76,7 @@ export function refetchWhenStale(
     return true;
   }
 
-  const queryKey = ["plotlist-rpc", "query", name, args] as const;
+  const queryKey = ["plotlist-rpc", "query", name, normalizeQueryArgs(args)] as const;
   const state = queryClient.getQueryState(queryKey as any);
   const updatedAt = state?.dataUpdatedAt ?? 0;
   if (updatedAt === 0 || now - updatedAt <= options.maxAgeMs) {

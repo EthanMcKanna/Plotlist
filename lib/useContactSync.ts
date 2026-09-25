@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Linking, Platform, Share } from "react-native";
+import { Alert, InteractionManager, Linking, Platform, Share } from "react-native";
 
 import { api } from "./plotlist/api";
 import { notify, notifyError } from "./dialogs";
@@ -12,6 +12,7 @@ import {
   type ContactSyncResult,
 } from "./contactSync";
 import { getContactsPermissionState, loadDeviceContacts } from "./deviceContacts";
+import { onHomeSettled } from "./homeSettled";
 import { buildInviteMessage, buildSmsInviteUrl } from "./invite";
 import { setContactsAutoSyncedAt, setContactsSyncDismissed } from "./preferences";
 
@@ -24,6 +25,10 @@ export type InviteCandidate = {
 // Contact reads are queries ("plotlist-rpc","query",name,args); after a sync
 // rewrites the snapshot, every contact-derived surface must refetch —
 // including suggestions, which blend in contact matches.
+// The daily background resync starts this long after home settles.
+const CONTACT_AUTO_SYNC_DELAY_MS = 3000;
+const CONTACT_AUTO_SYNC_SETTLE_FALLBACK_MS = 5000;
+
 const CONTACT_QUERY_NAMES = new Set([
   "contacts:getStatus",
   "contacts:getMatches",
@@ -119,23 +124,37 @@ export function useContactSync(options: { enabled: boolean; hasSyncedBefore: boo
   );
 
   // Keep matches fresh without asking: once the user has synced and granted
-  // access, new address-book entries flow in on a daily cadence.
+  // access, new address-book entries flow in on a daily cadence. The first
+  // launch of the day is exactly when this is due, so it waits for home's
+  // initial rails to commit: reading and normalizing the whole address book
+  // and uploading the snapshot shouldn't compete with time-to-content.
   const { enabled, hasSyncedBefore } = options;
   useEffect(() => {
     if (!enabled || !hasSyncedBefore) {
       return;
     }
     let active = true;
-    void runContactAutoSync({
-      hasSyncedBefore,
-      syncSnapshot: (args) => syncSnapshot(args) as Promise<ContactSyncResult>,
-    }).then((result) => {
-      if (active && result) {
-        invalidateContactQueries();
-      }
-    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let task: { cancel(): void } | undefined;
+    const cancelSettled = onHomeSettled(() => {
+      task = InteractionManager.runAfterInteractions(() => {
+        timer = setTimeout(() => {
+          void runContactAutoSync({
+            hasSyncedBefore,
+            syncSnapshot: (args) => syncSnapshot(args) as Promise<ContactSyncResult>,
+          }).then((result) => {
+            if (active && result) {
+              invalidateContactQueries();
+            }
+          });
+        }, CONTACT_AUTO_SYNC_DELAY_MS);
+      });
+    }, CONTACT_AUTO_SYNC_SETTLE_FALLBACK_MS);
     return () => {
       active = false;
+      cancelSettled();
+      task?.cancel();
+      if (timer !== undefined) clearTimeout(timer);
     };
   }, [enabled, hasSyncedBefore, syncSnapshot]);
 
