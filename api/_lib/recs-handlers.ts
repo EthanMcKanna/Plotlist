@@ -162,9 +162,12 @@ type PersonalizedItem = {
   reason: string | null;
 };
 
+// `facetsById` is the facet map already loaded for the candidate pool (every
+// pick is a candidate), so the facet fallback needs no second read.
 async function buildReasons(
   picks: Array<{ showId: string; reasons: string[] }>,
   profile: TasteProfile,
+  facetsById: Map<string, Array<{ key: string; score: number }>>,
 ): Promise<Map<string, string>> {
   const reasonByShow = new Map<string, string>();
   const topSeeds = profile.positiveSeeds.slice(0, 8);
@@ -174,7 +177,7 @@ async function buildReasons(
     fetchShowVectors(topSeeds.map((seed) => seed.showId)),
     fetchShowVectors(picks.slice(0, 20).map((pick) => pick.showId)),
     db
-      .select()
+      .select({ id: shows.id, title: shows.title })
       .from(shows)
       .where(inArray(shows.id, topSeeds.map((seed) => seed.showId))),
   ]);
@@ -195,13 +198,10 @@ async function buildReasons(
   }
 
   // Facet-based reasons for picks without a strong seed match.
-  const facetsByShow = await getFacetsForShows(
-    picks.filter((pick) => !reasonByShow.has(pick.showId)).map((pick) => pick.showId),
-  );
   const profileFacetKeys = new Set(profile.topFacets.slice(0, 6).map((facet) => facet.key));
   for (const pick of picks) {
     if (reasonByShow.has(pick.showId)) continue;
-    const match = (facetsByShow.get(pick.showId) ?? []).find((facet) =>
+    const match = (facetsById.get(pick.showId) ?? []).find((facet) =>
       profileFacetKeys.has(facet.key),
     );
     const def = match ? facetByKey(match.key) : null;
@@ -210,14 +210,11 @@ async function buildReasons(
   return reasonByShow;
 }
 
-export async function getPersonalizedRecommendationsV2(
-  userId: string | null | undefined,
-  limit: number,
-): Promise<PersonalizedItem[] | null> {
-  if (!userId) return null;
-  const profile = await getTasteProfile(userId);
-  if (!profile) return null;
-
+// Candidate generation + ranking for the For You rail, on a profile already
+// in hand: one Vectorize query, then shows and facets in a single wave.
+// Null when the vector pool can't fill a rail (the For You RPC falls back to
+// the heuristic path on null).
+async function rankPersonalizedCandidates(profile: TasteProfile, limit: number) {
   const exclude = new Set<string>([...profile.seenShowIds, ...profile.negativeShowIds]);
   const matches = await queryVectorCandidates(profile.vector, {
     topK: Math.min(Math.max(limit * 6, 90), 100),
@@ -225,8 +222,11 @@ export async function getPersonalizedRecommendationsV2(
   });
   if (matches.length === 0) return null;
 
-  const showsById = await loadShowsByIds(matches.map((match) => match.showId));
-  const facetsById = await getFacetsForShows(matches.map((match) => match.showId));
+  const matchIds = matches.map((match) => match.showId);
+  const [showsById, facetsById] = await Promise.all([
+    loadShowsByIds(matchIds),
+    getFacetsForShows(matchIds),
+  ]);
   const candidates = matches
     .map((match) => {
       const row = showsById.get(match.showId);
@@ -249,9 +249,24 @@ export async function getPersonalizedRecommendationsV2(
     limit,
     diversityStrength: 0.2,
   });
+  return { ranked, showsById, facetsById };
+}
+
+export async function getPersonalizedRecommendationsV2(
+  userId: string | null | undefined,
+  limit: number,
+): Promise<PersonalizedItem[] | null> {
+  if (!userId) return null;
+  const profile = await getTasteProfile(userId);
+  if (!profile) return null;
+
+  const pool = await rankPersonalizedCandidates(profile, limit);
+  if (!pool) return null;
+  const { ranked, showsById, facetsById } = pool;
   const reasons = await buildReasons(
     ranked.map((item) => ({ showId: item.showId, reasons: item.reasons })),
     profile,
+    facetsById,
   );
 
   return ranked.map((item, index) => {
@@ -304,6 +319,10 @@ async function facetRailItems(facetKey: string, limit: number, excludeIds: Set<s
     });
 }
 
+// Facet rails ("Because you're into X") only. The For You rail is served by
+// embeddings:getPersonalizedRecommendations, and every client build that
+// calls this RPC has dropped non-facet rails from it, so it is no longer
+// returned here.
 export async function getHomeRecommendationRailsV2(
   userId: string | null | undefined,
   limitPerRail: number,
@@ -315,26 +334,25 @@ export async function getHomeRecommendationRailsV2(
   const rails: Array<{ key: string; title: string; items: unknown[] }> = [];
   const usedShowIds = new Set<string>([...profile.seenShowIds, ...profile.negativeShowIds]);
 
-  // The three facet rails only depend on the profile, so they run alongside
-  // the for-you rail instead of after it. Cross-rail duplicates are removed
-  // afterwards in rail order (each rail over-fetches to absorb the loss).
+  // The facet rails still skip the shows For You ranks at this rail size, so
+  // the ranked pool is computed alongside them on the same profile — ranking
+  // only: no reasons, no second profile build. Cross-rail duplicates are
+  // removed afterwards in rail order (each rail over-fetches to absorb the
+  // loss).
   const facetDefs = profile.topFacets
     .slice(0, 3)
     .map((facet) => ({ key: facet.key, def: facetByKey(facet.key) }))
     .filter((entry): entry is { key: string; def: NonNullable<typeof entry.def> } =>
       Boolean(entry.def),
     );
-  const [forYou, ...facetItems] = await Promise.all([
-    getPersonalizedRecommendationsV2(userId, limitPerRail),
+  const [forYouPool, ...facetItems] = await Promise.all([
+    rankPersonalizedCandidates(profile, limitPerRail),
     ...facetDefs.map((entry) => facetRailItems(entry.key, limitPerRail * 2, usedShowIds)),
   ]);
-  if (forYou && forYou.length > 0) {
-    rails.push({ key: "for_you", title: "Picked for you", items: forYou });
-    forYou.forEach((item) => usedShowIds.add(item._id));
-  }
+  forYouPool?.ranked.forEach((item) => usedShowIds.add(item.showId));
 
   for (const [index, entry] of facetDefs.entries()) {
-    if (rails.length >= 4) break;
+    if (rails.length >= 3) break;
     const items = dedupeRailItems(facetItems[index], usedShowIds, limitPerRail);
     if (items.length >= 4) {
       rails.push({ key: `facet:${entry.key}`, title: entry.def.title, items });

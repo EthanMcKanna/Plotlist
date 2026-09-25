@@ -80,6 +80,34 @@ export async function getContactMatchedUserIds(userId: string, limit: number) {
   );
 }
 
+// The matched users themselves, in one statement: the id scan above rides
+// along as an IN subquery instead of a round trip of its own. Same rows in
+// the same order as getUsersByIdsChunked(getContactMatchedUserIds(...)) —
+// both forms resolve through the users primary-key index, which yields rows
+// in id order (the IN set also de-duplicates repeat matches). Only for
+// limits that fit one lookup chunk (≤ 80).
+export async function getContactMatchedUsers(userId: string, limit: number) {
+  return await db
+    .select()
+    .from(users)
+    .where(
+      inArray(
+        users.id,
+        db
+          .select({ matchedUserId: contactSyncEntries.matchedUserId })
+          .from(contactSyncEntries)
+          .where(
+            and(
+              eq(contactSyncEntries.ownerId, userId),
+              isNotNull(contactSyncEntries.matchedUserId),
+            ),
+          )
+          .orderBy(desc(contactSyncEntries.updatedAt))
+          .limit(limit),
+      ),
+    );
+}
+
 export async function getContactMatches(userId: string, limit: number) {
   // Over-fetch to survive the blocked-user filter inside buildPersonPreviews.
   const userIds = (await getContactMatchedUserIds(userId, limit * 2)).slice(0, limit);

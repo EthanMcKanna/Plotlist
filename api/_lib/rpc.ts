@@ -56,7 +56,7 @@ import { clientRateLimitKey, enforceRateLimit, rateLimitKey } from "./rate-limit
 import { buildPersonPreviews, normalizeSearchText, toClientUser } from "./social";
 import {
   clearContactSync,
-  getContactMatchedUserIds,
+  getContactMatchedUsers,
   getContactMatches,
   getContactStatus,
   getInviteCandidates,
@@ -66,6 +66,7 @@ import {
   syncContactSnapshot,
 } from "./contacts";
 import { getUsersByIdsChunked } from "./user-lookup";
+import { countSharedShows, loadSimilarTasteCandidates } from "./similar-taste";
 import { rankPeopleSearchResults } from "../../lib/peopleSearch";
 import { sendPhoneVerificationCode, verifyPhoneVerificationCode } from "./twilio";
 import { createUploadToken, getRequestOrigin } from "./uploads";
@@ -3836,21 +3837,25 @@ async function buildExportData(userId: string) {
 }
 
 async function getSuggestedUsers(userId: string, limit: number) {
-  const followRows = await db.select().from(follows).where(eq(follows.followerId, userId));
+  // Follows, recent candidates, and contact-matched users are independent
+  // reads — one wave instead of four serial round trips.
+  const [followRows, candidates, contactUsers] = await Promise.all([
+    db
+      .select({ followeeId: follows.followeeId })
+      .from(follows)
+      .where(eq(follows.followerId, userId)),
+    db
+      .select()
+      .from(users)
+      .orderBy(desc(users.lastSeenAt), desc(users.createdAt))
+      .limit(limit * 10),
+    getContactMatchedUsers(userId, 60),
+  ]);
   const excludedIds = new Set(followRows.map((follow) => follow.followeeId));
   excludedIds.add(userId);
-
-  const candidates = await db
-    .select()
-    .from(users)
-    .orderBy(desc(users.lastSeenAt), desc(users.createdAt))
-    .limit(limit * 10);
   const suggestionUsers = candidates.filter(
     (candidate) => !excludedIds.has(candidate.id) && Boolean(candidate.username),
   );
-
-  const contactUserIds = await getContactMatchedUserIds(userId, 60);
-  const contactUsers = contactUserIds.length > 0 ? await getUsersByIdsChunked(contactUserIds) : [];
 
   const previews = await buildPersonPreviews(userId, [
     ...contactUsers.filter((candidate) => Boolean(candidate.username)),
@@ -3900,10 +3905,17 @@ function countOverlap(left: Set<string>, right: Set<string>) {
 }
 
 async function getSimilarTasteUserPreviews(userId: string, limit: number) {
-  const [viewerRows, viewerWatchRows, followRows] = await Promise.all([
+  // One wave: the viewer, their library, their follows, and the candidate
+  // pool (which carries each candidate's shared watched ids, see
+  // loadSimilarTasteCandidates) — previously four serial round trips.
+  const [viewerRows, viewerWatchRows, followRows, candidatePool] = await Promise.all([
     db.select().from(users).where(eq(users.id, userId)).limit(1),
-    db.select().from(watchStates).where(eq(watchStates.userId, userId)),
-    db.select().from(follows).where(eq(follows.followerId, userId)),
+    db.select({ showId: watchStates.showId }).from(watchStates).where(eq(watchStates.userId, userId)),
+    db
+      .select({ followeeId: follows.followeeId })
+      .from(follows)
+      .where(eq(follows.followerId, userId)),
+    loadSimilarTasteCandidates(userId, Math.max(limit * 20, 120)),
   ]);
   const viewer = viewerRows[0];
   if (!viewer) {
@@ -3924,45 +3936,29 @@ async function getSimilarTasteUserPreviews(userId: string, limit: number) {
   const excludedIds = new Set(followRows.map((follow) => follow.followeeId));
   excludedIds.add(userId);
 
-  const candidateRows = (
-    await db
-      .select()
-      .from(users)
-      .orderBy(desc(users.lastSeenAt), desc(users.createdAt))
-      .limit(Math.max(limit * 20, 120))
-  ).filter((candidate) => !excludedIds.has(candidate.id) && Boolean(candidate.username));
+  const sharedWatchedShowIdsByUser = new Map<string, string[]>();
+  const candidateRows: Array<typeof users.$inferSelect> = [];
+  for (const { user: candidate, sharedWatchedShowIds } of candidatePool) {
+    if (excludedIds.has(candidate.id) || !candidate.username) continue;
+    candidateRows.push(candidate);
+    sharedWatchedShowIdsByUser.set(candidate.id, sharedWatchedShowIds);
+  }
 
   if (candidateRows.length === 0) {
     return [];
   }
 
-  const candidateIds = candidateRows.map((candidate) => candidate.id);
-  // Up to ~200 candidates → three chunks; independent, so one wave.
-  const candidateWatchRows = (
-    await Promise.all(
-      chunkForSqlParams(candidateIds, 1, 80).map((chunk) =>
-        db.select().from(watchStates).where(inArray(watchStates.userId, chunk)),
-      ),
-    )
-  ).flat();
-  const watchedShowIdsByUser = new Map<string, Set<string>>();
-  for (const row of candidateWatchRows) {
-    const showIds = watchedShowIdsByUser.get(row.userId) ?? new Set<string>();
-    showIds.add(row.showId);
-    watchedShowIdsByUser.set(row.userId, showIds);
-  }
-
   const now = Date.now();
   const scored = candidateRows
     .map((candidate) => {
-      const candidateShowIds = new Set([
-        ...(candidate.favoriteShowIds ?? []),
-        ...(watchedShowIdsByUser.get(candidate.id) ?? []),
-      ]);
       const candidateGenreLabels = new Set(
         (candidate.favoriteGenres ?? []).map(normalizedTasteLabel).filter(Boolean),
       );
-      const sharedShowCount = countOverlap(viewerShowIds, candidateShowIds);
+      const sharedShowCount = countSharedShows(
+        viewerShowIds,
+        candidate.favoriteShowIds,
+        sharedWatchedShowIdsByUser.get(candidate.id) ?? [],
+      );
       const sharedGenreCount = countOverlap(viewerGenreLabels, candidateGenreLabels);
       const profileCompleteness =
         Number(Boolean(candidate.displayName ?? candidate.name)) +
@@ -8147,54 +8143,20 @@ export const actionHandlers: Record<string, RpcHandler> = {
     const parsed = z.object({ limitPerRail: z.number().optional() }).parse(args ?? {});
     const limit = Math.min(parsed.limitPerRail ?? 10, 20);
     const user = await getOptionalAuthUser(req);
+    // Facet rails only. The client renders For You from
+    // embeddings:getPersonalizedRecommendations and has kept only "facet:"
+    // rails from this RPC since it first called it, so there is no heuristic
+    // "for_you" fallback any more: no taste profile means no rails.
     try {
       const vectorRails = await getHomeRecommendationRailsV2(user?.id, limit);
-      if (vectorRails && vectorRails.length > 0) {
-        return vectorRails.map((rail) => ({
-          ...rail,
-          items: projectHomeRailRankedItems(rail.items),
-        }));
-      }
+      return (vectorRails ?? []).map((rail) => ({
+        ...rail,
+        items: projectHomeRailRankedItems(rail.items),
+      }));
     } catch (error) {
-      console.warn("[recs] rails vector path failed; using fallback", error);
+      console.warn("[recs] rails vector path failed", error);
+      return [];
     }
-    const profile = await buildHomeTasteProfile(user?.id);
-    const [rows, risingNow, breakoutPremieres, criticsChoice] = await Promise.all([
-      db
-        .select()
-        .from(shows)
-        .orderBy(desc(shows.tmdbPopularity), desc(shows.tmdbVoteCount), desc(shows.updatedAt))
-        .limit(Math.max(limit * 6, 80)),
-      getTmdbList("rising_now", 20, 1).catch(() => []),
-      getTmdbList("breakout_premieres", 20, 1).catch(() => []),
-      getTmdbList("critics_choice", 20, 1).catch(() => []),
-    ]);
-    const ranked = rankHomeShows([
-      ...risingNow,
-      ...breakoutPremieres,
-      ...criticsChoice,
-      ...rows.map(showToDoc).filter(Boolean),
-    ].filter(isCurrentHomeCandidate), {
-      genreWeights: profile.genreWeights,
-      seenKeys: profile.seenKeys,
-      seedKeys: profile.seedKeys,
-      diversityStrength: 0.22,
-      preferFresh: true,
-    }).slice(0, limit);
-    return [
-      {
-        key: "for_you",
-        title: "Picked for you",
-        items: projectHomeRailRankedItems(
-          ranked.map((show, index) => ({
-            _id: show._id,
-            show,
-            rank: index + 1,
-            score: show.homeScore,
-          })),
-        ),
-      },
-    ];
   },
   "embeddings:getSimilarTasteUsers": async ({ args, req }) => {
     const user = await requireAuthUser(req);
