@@ -65,87 +65,100 @@ export async function buildPersonPreviews(
     .map((candidate) => candidate.id)
     .filter((id) => id !== viewerId);
 
+  const viewerFollows = alias(follows, "viewer_follows");
+  const viewerWatch = alias(watchStates, "viewer_watch_states");
+
   // Users with a block in either direction disappear from every people
   // surface built on previews (search, suggestions, follower lists, contact
-  // matches).
-  const blockedIds = await getBlockedEitherWayIdSet(viewerId, candidateIds);
+  // matches). The block check and the relationship reads below are
+  // independent, so they share one wave: every chunk of both is in flight at
+  // once, and relationship rows for a blocked candidate are simply never
+  // read. (getBlockedEitherWayIdSet walks its own chunks serially, so it is
+  // handed one chunk per call.)
+  const [blockedSets, chunkResults] = await Promise.all([
+    Promise.all(
+      chunkForSqlParams(candidateIds, 2, 80).map((chunk) =>
+        getBlockedEitherWayIdSet(viewerId, chunk),
+      ),
+    ),
+    Promise.all(
+      chunkForSqlParams(candidateIds, 1, 80).map((chunk) =>
+        Promise.all([
+          db
+            .select({ followeeId: follows.followeeId })
+            .from(follows)
+            .where(and(eq(follows.followerId, viewerId), inArray(follows.followeeId, chunk))),
+          db
+            .select({ followerId: follows.followerId })
+            .from(follows)
+            .where(and(eq(follows.followeeId, viewerId), inArray(follows.followerId, chunk))),
+          db
+            .select({ matchedUserId: contactSyncEntries.matchedUserId })
+            .from(contactSyncEntries)
+            .where(
+              and(
+                eq(contactSyncEntries.ownerId, viewerId),
+                isNotNull(contactSyncEntries.matchedUserId),
+                inArray(contactSyncEntries.matchedUserId, chunk),
+              ),
+            ),
+          // Mutuals: people the viewer follows who also follow the candidate.
+          db
+            .select({
+              followeeId: follows.followeeId,
+              value: sql<number>`count(*)`,
+            })
+            .from(follows)
+            .innerJoin(
+              viewerFollows,
+              and(
+                eq(viewerFollows.followeeId, follows.followerId),
+                eq(viewerFollows.followerId, viewerId),
+              ),
+            )
+            .where(inArray(follows.followeeId, chunk))
+            .groupBy(follows.followeeId),
+          // Shows both the viewer and the candidate have in their libraries.
+          db
+            .select({
+              userId: watchStates.userId,
+              value: sql<number>`count(distinct ${watchStates.showId})`,
+            })
+            .from(watchStates)
+            .innerJoin(
+              viewerWatch,
+              and(
+                eq(viewerWatch.showId, watchStates.showId),
+                eq(viewerWatch.userId, viewerId),
+              ),
+            )
+            .where(inArray(watchStates.userId, chunk))
+            .groupBy(watchStates.userId),
+        ]),
+      ),
+    ),
+  ]);
+
+  const blockedIds = new Set(blockedSets.flatMap((set) => Array.from(set)));
   const visibleCandidates = uniqueCandidates.filter(
     (candidate) => !blockedIds.has(candidate.id),
   );
   if (visibleCandidates.length === 0) {
     return [];
   }
-  const visibleCandidateIds = candidateIds.filter((id) => !blockedIds.has(id));
 
   const followingIds = new Set<string>();
   const followerIds = new Set<string>();
   const contactMatchIds = new Set<string>();
   const mutualCountByUser = new Map<string, number>();
   const sharedShowCountByUser = new Map<string, number>();
-
-  const viewerFollows = alias(follows, "viewer_follows");
-  const viewerWatch = alias(watchStates, "viewer_watch_states");
-
-  for (const chunk of chunkForSqlParams(visibleCandidateIds, 1, 80)) {
-    const [
-      followingRows,
-      followerRows,
-      contactRows,
-      mutualRows,
-      sharedShowRows,
-    ] = await Promise.all([
-      db
-        .select({ followeeId: follows.followeeId })
-        .from(follows)
-        .where(and(eq(follows.followerId, viewerId), inArray(follows.followeeId, chunk))),
-      db
-        .select({ followerId: follows.followerId })
-        .from(follows)
-        .where(and(eq(follows.followeeId, viewerId), inArray(follows.followerId, chunk))),
-      db
-        .select({ matchedUserId: contactSyncEntries.matchedUserId })
-        .from(contactSyncEntries)
-        .where(
-          and(
-            eq(contactSyncEntries.ownerId, viewerId),
-            isNotNull(contactSyncEntries.matchedUserId),
-            inArray(contactSyncEntries.matchedUserId, chunk),
-          ),
-        ),
-      // Mutuals: people the viewer follows who also follow the candidate.
-      db
-        .select({
-          followeeId: follows.followeeId,
-          value: sql<number>`count(*)`,
-        })
-        .from(follows)
-        .innerJoin(
-          viewerFollows,
-          and(
-            eq(viewerFollows.followeeId, follows.followerId),
-            eq(viewerFollows.followerId, viewerId),
-          ),
-        )
-        .where(inArray(follows.followeeId, chunk))
-        .groupBy(follows.followeeId),
-      // Shows both the viewer and the candidate have in their libraries.
-      db
-        .select({
-          userId: watchStates.userId,
-          value: sql<number>`count(distinct ${watchStates.showId})`,
-        })
-        .from(watchStates)
-        .innerJoin(
-          viewerWatch,
-          and(
-            eq(viewerWatch.showId, watchStates.showId),
-            eq(viewerWatch.userId, viewerId),
-          ),
-        )
-        .where(inArray(watchStates.userId, chunk))
-        .groupBy(watchStates.userId),
-    ]);
-
+  for (const [
+    followingRows,
+    followerRows,
+    contactRows,
+    mutualRows,
+    sharedShowRows,
+  ] of chunkResults) {
     for (const row of followingRows) followingIds.add(row.followeeId);
     for (const row of followerRows) followerIds.add(row.followerId);
     for (const row of contactRows) {

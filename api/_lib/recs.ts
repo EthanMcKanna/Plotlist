@@ -81,14 +81,31 @@ export async function fetchShowVectors(showIds: string[]): Promise<Map<string, n
 
 async function gatherSignals(userId: string) {
   const logsSince = Date.now() - 365 * 24 * 60 * 60 * 1000;
+  // Only the columns the signals read — review text and log notes stay in
+  // D1. The narrower selects resolve through the same indexes as full rows,
+  // so row order (and with it signal accumulation order) is unchanged.
   const [states, reviewRows, logs, prefs] = await Promise.all([
-    db.select().from(watchStates).where(eq(watchStates.userId, userId)),
-    db.select().from(reviews).where(eq(reviews.authorId, userId)),
     db
-      .select()
+      .select({
+        showId: watchStates.showId,
+        status: watchStates.status,
+        updatedAt: watchStates.updatedAt,
+      })
+      .from(watchStates)
+      .where(eq(watchStates.userId, userId)),
+    db
+      .select({ showId: reviews.showId, rating: reviews.rating, createdAt: reviews.createdAt })
+      .from(reviews)
+      .where(eq(reviews.authorId, userId)),
+    db
+      .select({ showId: watchLogs.showId, watchedAt: watchLogs.watchedAt })
       .from(watchLogs)
       .where(and(eq(watchLogs.userId, userId), gte(watchLogs.watchedAt, logsSince))),
-    db.select().from(userTastePreferences).where(eq(userTastePreferences.userId, userId)).limit(1),
+    db
+      .select({ favoriteShowIds: userTastePreferences.favoriteShowIds })
+      .from(userTastePreferences)
+      .where(eq(userTastePreferences.userId, userId))
+      .limit(1),
   ]);
 
   const now = Date.now();
@@ -210,6 +227,17 @@ export async function getTasteProfile(userId: string): Promise<TasteProfile | nu
     .slice(0, 24);
   if (positives.length === 0) return null;
 
+  const positiveSeeds = positives.map(([showId, weight]) => ({
+    showId,
+    weight: Number(weight.toFixed(4)),
+  }));
+  // Seed facets depend only on the seed ids, so they load alongside the
+  // vectors instead of after them. Awaited only once the vectors prove the
+  // profile buildable — an early `return null` below behaves exactly as
+  // before, and the no-op catch keeps an unused failure from surfacing as an
+  // unhandled rejection.
+  const facetsBySeedPromise = loadFacetsForShows(positiveSeeds.map((seed) => seed.showId));
+  facetsBySeedPromise.catch(() => {});
   const vectorIds = [...positives.map(([id]) => id), ...negatives.map(([id]) => id)];
   const vectors = await fetchShowVectors(vectorIds);
   const positiveVectors = positives
@@ -235,11 +263,7 @@ export async function getTasteProfile(userId: string): Promise<TasteProfile | nu
   );
   const profileVector = normalizeVector(combined);
 
-  const positiveSeeds = positives.map(([showId, weight]) => ({
-    showId,
-    weight: Number(weight.toFixed(4)),
-  }));
-  const facetsBySeed = await loadFacetsForShows(positiveSeeds.map((seed) => seed.showId));
+  const facetsBySeed = await facetsBySeedPromise;
   const topFacets = aggregateProfileFacets(
     positiveSeeds.map((seed) => ({
       weight: seed.weight,
