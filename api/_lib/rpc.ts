@@ -4377,7 +4377,7 @@ async function buildFeed(userId: string, args: any, req?: IncomingMessage) {
     reviewIds.length ? db.select().from(reviews).where(inArray(reviews.id, reviewIds)) : [],
     logIds.length ? db.select().from(watchLogs).where(inArray(watchLogs.id, logIds)) : [],
     followedUserIds.length ? db.select().from(users).where(inArray(users.id, followedUserIds)) : [],
-    listIds.length ? db.select().from(lists).where(inArray(lists.id, listIds)) : [],
+    listIds.length ? db.select(listDocColumns).from(lists).where(inArray(lists.id, listIds)) : [],
   ]);
   const actors = new Map(actorRows.map((user) => [user.id, toClientUser(user)] as const));
   const showMap = new Map(showRows.map((show) => [show.id, showToDoc(show)] as const));
@@ -4387,7 +4387,9 @@ async function buildFeed(userId: string, args: any, req?: IncomingMessage) {
   // Lists made private after fan-out stop rendering; the client drops rows
   // whose list resolved to null.
   const listMap = new Map(
-    listRows.filter((list) => list.isPublic).map((list) => [list.id, toDoc(list)] as const),
+    // listToDoc, not toDoc: feed readers are followers, so the smart-list
+    // query vector (~30KB) and owner-private exclusions must not ride along.
+    listRows.filter((list) => list.isPublic).map((list) => [list.id, listToDoc(list)] as const),
   );
   const page = pageFeedRows.map((item) => ({
     ...toDoc(item),

@@ -166,8 +166,9 @@ export async function requireAuthUser(req: IncomingMessage) {
 //   requireAuthUser throws.
 // - getOptionalAuthUserId: a claim that doesn't validate re-runs the handler
 //   on the serial path (it would have run signed-out, not failed).
-// Mutations never speculate — the helper awaits the full user before handing
-// out an id, so no write happens for an unvalidated claim. Outside a
+// Only queries speculate — in actions and mutations the helper awaits the
+// full user before handing out an id, so no write happens for an unvalidated
+// claim. Outside a
 // dispatcher scope (crons, scripts) there is nothing to enforce the check
 // later, so the helpers stay serial there too.
 
@@ -185,7 +186,9 @@ const speculativeAuthByRequest = new WeakMap<IncomingMessage, SpeculativeAuthSco
 
 async function takeSpeculativeClaim(req: IncomingMessage) {
   const scope = speculativeAuthByRequest.get(req);
-  if (!scope || scope.disabled || scope.kind === "mutation") {
+  // Queries only: actions may write (caches, embeddings), and mutations always
+  // do, so both keep awaiting the full user before any work starts.
+  if (!scope || scope.disabled || scope.kind !== "query") {
     return { scope: null, claimedUserId: null };
   }
   const claimedUserId = await getAccessTokenUserId(req);
