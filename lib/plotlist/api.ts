@@ -217,6 +217,8 @@ export const api = {
     unregisterPushToken: ref("mutation", "notifications:unregisterPushToken"),
     markRead: ref("mutation", "notifications:markRead"),
     markAllRead: ref("mutation", "notifications:markAllRead"),
+    markUnread: ref("mutation", "notifications:markUnread"),
+    remove: ref("mutation", "notifications:remove"),
     updatePreferences: ref("mutation", "notifications:updatePreferences"),
     muteShow: ref("mutation", "notifications:muteShow"),
     unmuteShow: ref("mutation", "notifications:unmuteShow"),
