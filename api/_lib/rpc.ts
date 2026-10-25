@@ -208,6 +208,7 @@ import {
 } from "../../lib/profilePrivacy";
 import {
   mergeNotificationPreferences,
+  type NotificationType,
   resolveDigestHour,
   resolveNotificationPreferences,
 } from "../../lib/notificationContent";
@@ -316,6 +317,24 @@ const targetArgs = z.object({
 const likeTargetArgs = z.object({
   targetType: z.enum(["review", "log", "list", "comment"]),
   targetId: z.string().min(1),
+});
+
+// Inbox filter tabs. Types outside every list (future ones) still show
+// under "all".
+const NOTIFICATION_FILTER_TYPES = {
+  social: [
+    "follow",
+    "follow_request",
+    "follow_accepted",
+    "contact_joined",
+    "list_follow",
+    "like",
+    "comment",
+  ],
+  shows: ["episode", "premiere", "streaming", "vibe_arrival", "vibe_digest", "monthly_recap"],
+} as const satisfies Record<string, readonly NotificationType[]>;
+const notificationListFilterArgs = z.object({
+  filter: z.enum(["social", "shows"]).optional(),
 });
 
 const paginationArgs = z
@@ -6284,12 +6303,18 @@ export const queryHandlers: Record<string, RpcHandler> = {
   "notifications:list": async ({ args, req }) => {
     const user = await requireAuthUser(req);
     const parsed = paginationArgs.parse(args ?? {});
+    const filter = notificationListFilterArgs.parse(args ?? {}).filter;
     const start = Number(parsed.paginationOpts?.cursor ?? 0) || 0;
     const numItems = Math.min(parsed.paginationOpts?.numItems ?? 20, 50);
+    const filterTypes = filter ? NOTIFICATION_FILTER_TYPES[filter] : null;
     const rows = await db
       .select()
       .from(notifications)
-      .where(eq(notifications.userId, user.id))
+      .where(
+        filterTypes
+          ? and(eq(notifications.userId, user.id), inArray(notifications.type, [...filterTypes]))
+          : eq(notifications.userId, user.id),
+      )
       .orderBy(desc(notifications.createdAt))
       .limit(numItems)
       .offset(start);
@@ -7965,16 +7990,55 @@ export const mutationHandlers: Record<string, RpcHandler> = {
   },
   "notifications:markRead": async ({ args, req }) => {
     const user = await requireAuthUser(req);
-    const parsed = z.object({ notificationId: z.string().min(1) }).parse(args ?? {});
+    // `notificationIds` marks a grouped inbox row ("Ana and 3 others liked…")
+    // in one round trip; `notificationId` stays for older builds.
+    const parsed = z
+      .object({
+        notificationId: z.string().min(1).optional(),
+        notificationIds: z.array(z.string().min(1)).max(100).optional(),
+      })
+      .parse(args ?? {});
+    const ids = Array.from(
+      new Set([
+        ...(parsed.notificationId ? [parsed.notificationId] : []),
+        ...(parsed.notificationIds ?? []),
+      ]),
+    );
+    if (ids.length === 0) return { success: true };
     await db
       .update(notifications)
       .set({ readAt: Date.now() })
       .where(
         and(
-          eq(notifications.id, parsed.notificationId),
+          inArray(notifications.id, ids),
           eq(notifications.userId, user.id),
           isNull(notifications.readAt),
         ),
+      );
+    return { success: true };
+  },
+  "notifications:markUnread": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({ notificationIds: z.array(z.string().min(1)).min(1).max(100) })
+      .parse(args ?? {});
+    await db
+      .update(notifications)
+      .set({ readAt: null })
+      .where(
+        and(inArray(notifications.id, parsed.notificationIds), eq(notifications.userId, user.id)),
+      );
+    return { success: true };
+  },
+  "notifications:remove": async ({ args, req }) => {
+    const user = await requireAuthUser(req);
+    const parsed = z
+      .object({ notificationIds: z.array(z.string().min(1)).min(1).max(100) })
+      .parse(args ?? {});
+    await db
+      .delete(notifications)
+      .where(
+        and(inArray(notifications.id, parsed.notificationIds), eq(notifications.userId, user.id)),
       );
     return { success: true };
   },

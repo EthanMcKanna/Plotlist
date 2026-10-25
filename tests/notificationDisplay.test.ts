@@ -2,6 +2,8 @@ import { describe, expect, it } from "@jest/globals";
 
 import { formatCompactRelativeTime } from "../lib/format";
 import {
+  groupBodySegments,
+  groupPlainText,
   notificationBodySegments,
   notificationSections,
   notificationVisuals,
@@ -182,5 +184,78 @@ describe("notificationVisuals", () => {
     const visuals = notificationVisuals(item({ _id: "a", type: "mystery_type" }));
     expect(visuals.glyph).toBe("notifications");
     expect(visuals.leading).toBe("tile");
+  });
+});
+
+describe("notification grouping", () => {
+  const actor = (id: string, name: string) => ({
+    _id: id,
+    username: name.toLowerCase(),
+    displayName: name,
+    avatarUrl: null,
+  });
+  const like = (id: string, name: string, url: string, createdAt: number) =>
+    item({
+      _id: id,
+      type: "like",
+      body: `${name} liked your review.`,
+      actor: actor(`u-${name}`, name),
+      data: { url },
+      createdAt,
+      readAt: NOW,
+    });
+
+  it("folds likes on the same target within a section into the newest row", () => {
+    const entries = notificationSections(
+      [
+        like("l1", "Ana", "/review/1", NOW - HOUR),
+        like("l2", "Ben", "/review/2", NOW - 2 * HOUR),
+        like("l3", "Cara", "/review/1", NOW - 3 * HOUR),
+      ],
+      NOW,
+    );
+    const rows = entries.filter((entry) => entry.kind === "row");
+    expect(rows.map((row) => row.key)).toEqual(["l1", "l2"]);
+    expect(rows[0].kind === "row" && rows[0].group.map((member) => member._id)).toEqual([
+      "l1",
+      "l3",
+    ]);
+  });
+
+  it("never groups across sections or comment rows", () => {
+    const entries = notificationSections(
+      [
+        like("l1", "Ana", "/review/1", NOW - HOUR),
+        like("l2", "Ben", "/review/1", NOW - 3 * DAY),
+        item({ _id: "c1", type: "comment", actor: actor("u-a", "Ana"), data: { url: "/review/1" } , readAt: NOW}),
+        item({ _id: "c2", type: "comment", actor: actor("u-b", "Ben"), data: { url: "/review/1" } , readAt: NOW}),
+      ],
+      NOW,
+    );
+    expect(entries.filter((entry) => entry.kind === "row").length).toBe(4);
+  });
+
+  it("writes plural copy for two and many actors", () => {
+    const two = [like("l1", "Ana", "/r", NOW), like("l2", "Ben", "/r", NOW)];
+    expect(groupPlainText(two)).toBe("Ana and Ben liked your review.");
+    const many = [
+      ...two,
+      like("l3", "Cara", "/r", NOW),
+      like("l4", "Dev", "/r", NOW),
+    ];
+    expect(groupPlainText(many)).toBe("Ana, Ben and 2 others liked your review.");
+    expect(groupBodySegments(many).filter((segment) => segment.bold).map((s) => s.text)).toEqual([
+      "Ana",
+      "Ben",
+      "2 others",
+    ]);
+    expect(groupPlainText([...two, like("l3", "Cara", "/r", NOW)])).toBe(
+      "Ana, Ben and 1 other liked your review.",
+    );
+  });
+
+  it("counts the same actor once", () => {
+    const repeat = [like("l1", "Ana", "/r", NOW), like("l2", "Ana", "/r", NOW)];
+    expect(groupPlainText(repeat)).toBe("Ana liked your review.");
   });
 });

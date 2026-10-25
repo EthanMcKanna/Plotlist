@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,14 +8,18 @@ import type { Href } from "expo-router";
 import { useAccent } from "../lib/appearanceStore";
 import { formatCompactRelativeTime } from "../lib/format";
 import {
-  notificationBodySegments,
+  groupActors,
+  groupBodySegments,
+  groupPlainText,
   notificationVisuals,
+  type NotificationActor,
   type NotificationItem,
 } from "../lib/notificationDisplay";
 import { resizeTmdbImageUrl } from "../lib/tmdbImages";
 import { useFollowToggle } from "../lib/useFollowToggle";
 import { Avatar } from "./Avatar";
 import { LinkPressable } from "./LinkPressable";
+import { NotificationRowActions } from "./NotificationRowActions";
 import { Poster } from "./Poster";
 import { ShimmerBlock } from "./ShowDetailSkeleton";
 
@@ -139,35 +143,90 @@ function FollowBackButton({
   );
 }
 
+// Two overlapping avatars for grouped rows ("Ana, Ben and 3 others …"),
+// newest actor in front — the same footprint as a single 44pt avatar.
+function StackedAvatars({ actors }: { actors: NotificationActor[] }) {
+  const [front, back] = actors;
+  return (
+    <View style={{ height: 44, width: 44 }}>
+      <View className="absolute right-0 top-0">
+        <Avatar
+          uri={back.avatarUrl}
+          label={back.displayName ?? back.username ?? "User"}
+          size={28}
+        />
+      </View>
+      <View
+        className="absolute bottom-0 left-0 rounded-full"
+        style={{ borderColor: "#0D0F14", borderWidth: 2 }}
+      >
+        <Avatar
+          uri={front.avatarUrl}
+          label={front.displayName ?? front.username ?? "User"}
+          size={30}
+        />
+      </View>
+    </View>
+  );
+}
+
+export type NotificationRowProps = {
+  item: NotificationItem;
+  group: NotificationItem[];
+  unread: boolean;
+  onOpen: (item: NotificationItem, group: NotificationItem[]) => void;
+  onMarkRead: (group: NotificationItem[]) => void;
+  onToggleRead: (group: NotificationItem[], unread: boolean) => void;
+  onDelete: (group: NotificationItem[]) => void;
+  onMuteShow: (item: NotificationItem) => void;
+  onOpenSettings: () => void;
+};
+
+const SHOW_MUTABLE_TYPES = new Set(["episode", "premiere", "streaming", "vibe_arrival"]);
+
 export const NotificationRow = memo(function NotificationRow({
   item,
+  group,
   unread,
   onOpen,
   onMarkRead,
-}: {
-  item: NotificationItem;
-  unread: boolean;
-  onOpen: (item: NotificationItem) => void;
-  onMarkRead: (item: NotificationItem) => void;
-}) {
+  onToggleRead,
+  onDelete,
+  onMuteShow,
+  onOpenSettings,
+}: NotificationRowProps) {
   const accent = useAccent();
   const href = notificationHref(item);
   const visuals = notificationVisuals(item);
   const glyphColor = visuals.glyphColor === "accent" ? accent.ramp[400] : visuals.glyphColor;
   const timeLabel = formatCompactRelativeTime(item.createdAt);
   const actorName = item.actor?.displayName ?? item.actor?.username ?? null;
+  const actors = groupActors(group);
+  const isGroup = actors.length > 1;
+  const bodySegments = groupBodySegments(group);
+  const plainBody = isGroup ? groupPlainText(group) : item.body;
 
   const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (href) {
-      onMarkRead(item);
+      onMarkRead(group);
     } else {
-      onOpen(item);
+      onOpen(item, group);
     }
-  }, [href, item, onMarkRead, onOpen]);
+  }, [group, href, item, onMarkRead, onOpen]);
+
+  const handleToggleRead = useCallback(() => onToggleRead(group, unread), [group, onToggleRead, unread]);
+  const handleDelete = useCallback(() => onDelete(group), [group, onDelete]);
+  const canMuteShow = Boolean(item.show?._id) && SHOW_MUTABLE_TYPES.has(item.type);
+  const handleMuteShow = useCallback(() => onMuteShow(item), [item, onMuteShow]);
 
   const leading =
-    visuals.leading === "avatar" && item.actor ? (
+    visuals.leading === "avatar" && isGroup ? (
+      <View className="relative">
+        <StackedAvatars actors={actors} />
+        <CornerBadge glyph={visuals.glyph} color={glyphColor} />
+      </View>
+    ) : visuals.leading === "avatar" && item.actor ? (
       <View className="relative">
         <Avatar uri={item.actor.avatarUrl} label={actorName ?? "User"} size={44} />
         <CornerBadge glyph={visuals.glyph} color={glyphColor} />
@@ -181,12 +240,12 @@ export const NotificationRow = memo(function NotificationRow({
       <GlyphTile glyph={visuals.glyph} color={glyphColor} size={44} />
     );
 
-  // Actor rows collapse to a single Instagram-style paragraph (bold name +
+  // Actor rows collapse to a single Instagram-style paragraph (bold names +
   // action + muted inline age); entity rows keep the server title as the
   // headline with the body below.
   const text = item.actor ? (
     <Text className="text-[14px] leading-[19px] text-text-secondary" numberOfLines={3}>
-      {notificationBodySegments(item).map((segment, index) => (
+      {bodySegments.map((segment, index) => (
         <Text
           key={index}
           className={
@@ -216,6 +275,7 @@ export const NotificationRow = memo(function NotificationRow({
     </>
   );
 
+  const showFollowButton = visuals.trailing === "followButton" && item.actor && !isGroup;
   const trailing =
     visuals.trailing === "poster" && item.show?.posterUrl ? (
       <Poster uri={item.show.posterUrl} width={40} alt={item.show.title ?? undefined} />
@@ -234,33 +294,52 @@ export const NotificationRow = memo(function NotificationRow({
     ) : null;
 
   const unreadDot = unread ? (
-    <View className="h-2 w-2 rounded-full bg-brand-400" />
+    <View
+      className="h-2 w-2 rounded-full"
+      style={{ backgroundColor: accent.ramp[400] }}
+      accessible={false}
+    />
   ) : null;
 
+  // Opaque on native so the swipe actions underneath only show as the row
+  // slides away (web has no swipe and a different column background).
   const rowClassName = `flex-row items-center gap-3 rounded-2xl px-3 py-3 ${
-    unread ? "bg-dark-elevated/60" : ""
+    unread ? "bg-dark-card" : "native:bg-dark-bg"
   }`;
   const pressClassName =
     "active:opacity-85 hover:bg-white/5 web:transition-colors rounded-xl";
-  const accessibilityLabel = `${item.title}. ${item.body}`;
+  const accessibilityLabel = `${unread ? "Unread. " : ""}${item.actor ? plainBody : `${item.title}. ${item.body}`}. ${timeLabel} ago`;
+  // VoiceOver/TalkBack get the swipe + menu actions on the row itself.
+  const accessibilityActions = [
+    { name: "toggleRead", label: unread ? "Mark as read" : "Mark as unread" },
+    { name: "delete", label: "Delete" },
+    ...(canMuteShow ? [{ name: "muteShow", label: "Mute this show" }] : []),
+  ];
+  const onAccessibilityAction = (event: { nativeEvent: { actionName: string } }) => {
+    if (event.nativeEvent.actionName === "toggleRead") handleToggleRead();
+    else if (event.nativeEvent.actionName === "delete") handleDelete();
+    else if (event.nativeEvent.actionName === "muteShow") handleMuteShow();
+  };
+  const a11yProps = { accessibilityActions, onAccessibilityAction };
 
+  let row: ReactNode;
   // Avatar, row body, and the follow pill are sibling pressables (never
   // nested) so the web output stays valid HTML — a button may not contain
   // another button.
-  if (item.actor && (visuals.trailing === "followButton" || visuals.leading === "avatar")) {
+  if (item.actor && (showFollowButton || visuals.leading === "avatar")) {
     const main = (
       <View className="min-w-0 flex-1 flex-row items-center gap-3">
         <View className="min-w-0 flex-1">{text}</View>
         {trailing}
       </View>
     );
-    return (
+    row = (
       <View className={rowClassName}>
         <LinkPressable
           href={`/profile/${item.actor._id}`}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onMarkRead(item);
+            onMarkRead(group);
           }}
           accessibilityRole="button"
           accessibilityLabel={`Open ${actorName ?? "user"}'s profile`}
@@ -275,6 +354,7 @@ export const NotificationRow = memo(function NotificationRow({
             onPress={handlePress}
             accessibilityRole="button"
             accessibilityLabel={accessibilityLabel}
+            {...a11yProps}
             className={`min-w-0 flex-1 ${pressClassName}`}
           >
             {main}
@@ -284,12 +364,13 @@ export const NotificationRow = memo(function NotificationRow({
             onPress={handlePress}
             accessibilityRole="button"
             accessibilityLabel={accessibilityLabel}
+            {...a11yProps}
             className={`min-w-0 flex-1 ${pressClassName}`}
           >
             {main}
           </Pressable>
         )}
-        {visuals.trailing === "followButton" && item.actor ? (
+        {showFollowButton && item.actor ? (
           <FollowBackButton
             userId={item.actor._id}
             viewerFollows={Boolean(item.actor.viewerFollows)}
@@ -299,38 +380,49 @@ export const NotificationRow = memo(function NotificationRow({
         {unreadDot}
       </View>
     );
-  }
-
-  const content = (
-    <>
-      {leading}
-      <View className="min-w-0 flex-1">{text}</View>
-      {trailing}
-      {unreadDot}
-    </>
-  );
-  if (href) {
-    return (
+  } else {
+    const content = (
+      <>
+        {leading}
+        <View className="min-w-0 flex-1">{text}</View>
+        {trailing}
+        {unreadDot}
+      </>
+    );
+    row = href ? (
       <LinkPressable
         href={href}
         onPress={handlePress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
+        {...a11yProps}
         className={`${rowClassName} active:bg-dark-hover hover:bg-dark-hover web:transition-colors`}
       >
         {content}
       </LinkPressable>
+    ) : (
+      <Pressable
+        onPress={handlePress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        {...a11yProps}
+        className={`${rowClassName} active:bg-dark-hover hover:bg-dark-hover web:transition-colors`}
+      >
+        {content}
+      </Pressable>
     );
   }
+
   return (
-    <Pressable
-      onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      className={`${rowClassName} active:bg-dark-hover hover:bg-dark-hover web:transition-colors`}
+    <NotificationRowActions
+      unread={unread}
+      onToggleRead={handleToggleRead}
+      onDelete={handleDelete}
+      onMuteShow={canMuteShow ? handleMuteShow : undefined}
+      onOpenSettings={onOpenSettings}
     >
-      {content}
-    </Pressable>
+      {row}
+    </NotificationRowActions>
   );
 });
 
