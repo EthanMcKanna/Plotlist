@@ -29,14 +29,14 @@ describe("computeNextRefreshDelayMs", () => {
     ).toBe(REFRESH_TIER_MS.dormant);
   });
 
-  it("treats shows in production as active", () => {
+  it("ignores TMDB's in_production flag, which outlives a show's last episode", () => {
     expect(
       computeNextRefreshDelayMs({
-        details: { status: "Returning Series", in_production: true, popularity: 50 },
+        details: { status: "Returning Series", in_production: true, last_air_date: "2025-03-20", popularity: 50 },
         isUserAttached: false,
         now: NOW,
-      }),
-    ).toBe(REFRESH_TIER_MS.active);
+      } as Parameters<typeof computeNextRefreshDelayMs>[0]),
+    ).toBe(REFRESH_TIER_MS.popular);
   });
 
   it("treats shows with a scheduled next episode as active", () => {

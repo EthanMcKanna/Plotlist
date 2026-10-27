@@ -46,6 +46,23 @@ export const REFRESH_TIER_MS = {
 } as const;
 
 const DETAILS_CACHE_MAX_TTL_MS = 7 * DAY_MS;
+
+// TMDB's popularity and vote numbers drift a little on nearly every refresh.
+// Rewriting them each time costs a row plus an index entry per show, so a
+// refresh only writes them once they have moved by more than this share
+// (popularity, vote count) or this many points (vote average). Ranking and
+// the warm threshold don't notice drift this small.
+export const VOLATILE_RELATIVE_TOLERANCE = 0.1;
+export const VOTE_AVERAGE_TOLERANCE = 0.05;
+
+/** SQL true when a stored number should be replaced by `next` (null-safe). */
+function driftedSql(column: unknown, next: number | null, tolerance: number, relative: boolean) {
+  if (next === null) {
+    return sql`${column} is not null`;
+  }
+  const limit = relative ? sql`${tolerance} * max(abs(${column}), 1)` : sql`${tolerance}`;
+  return sql`(${column} is null or abs(${column} - ${next}) > ${limit})`;
+}
 const FAILURE_BASE_RETRY_MS = 6 * HOUR_MS;
 const FAILURE_MAX_RETRY_MS = 7 * DAY_MS;
 const GONE_RETRY_MS = 90 * DAY_MS;
@@ -75,21 +92,21 @@ type TmdbShowDetails = {
 export function computeNextRefreshDelayMs(args: {
   details: Pick<
     TmdbShowDetails,
-    "status" | "in_production" | "last_air_date" | "next_episode_to_air" | "popularity"
+    "status" | "last_air_date" | "next_episode_to_air" | "popularity"
   >;
   isUserAttached: boolean;
   now: number;
 }): number {
   const { details, isUserAttached, now } = args;
   const lastAirMs = details.last_air_date ? Date.parse(details.last_air_date) : Number.NaN;
-  // TMDB's status string is not evidence of activity: it labels most of the
-  // catalog "Returning Series" whether or not anything has aired in years,
-  // which once put ~100k shows on the 12-hour tier. Only concrete signals
-  // count — in production, a scheduled next episode, or a recent air date.
-  // Anything else that changes on TMDB still reaches us through the hourly
-  // /tv/changes sync.
+  // Neither TMDB's status string nor its in_production flag is evidence of
+  // activity: "Returning Series" labels most of the catalog, and
+  // in_production stays true for years after a show's last episode (in Oct
+  // 2026 it alone held ~100k shows on the 12-hour tier, ~200k refreshes and
+  // ~650k D1 row writes a day). Only concrete signals count — a scheduled
+  // next episode or a recent air date. A new season or any other edit on
+  // TMDB still reaches us within the hour through the /tv/changes sync.
   const active =
-    details.in_production === true ||
     (details.next_episode_to_air !== null && details.next_episode_to_air !== undefined) ||
     (Number.isFinite(lastAirMs) && now - lastAirMs <= RECENTLY_AIRED_WINDOW_MS);
 
@@ -360,8 +377,8 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
     const contentHash = computeIngestContentHash(showRow);
     if (state.contentHash === contentHash) {
       // Content unchanged since the last refresh: only the volatile numbers
-      // move, and only when they actually differ (the WHERE keeps an
-      // identical update from counting as a write).
+      // move, and only once they drift past the tolerance (the WHERE keeps
+      // a skipped update from counting as a write).
       unchangedRows.push(showRow);
       volatileUpdates += 1;
     } else {
@@ -384,7 +401,13 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
         .update(showIngestState)
         .set({
           status: "ingested",
-          popularity: typeof details.popularity === "number" ? details.popularity : state.popularity,
+          // Kept as is unless it drifted past the tolerance, so the
+          // status/popularity index entry isn't rewritten on every refresh.
+          popularity:
+            typeof details.popularity === "number"
+              ? sql`CASE WHEN ${driftedSql(showIngestState.popularity, details.popularity, VOLATILE_RELATIVE_TOLERANCE, true)}
+                  THEN ${details.popularity} ELSE ${showIngestState.popularity} END`
+              : state.popularity,
           failCount: 0,
           lastError: null,
           lastIngestedAt: now,
@@ -410,9 +433,9 @@ export async function runShowIngestTick(maxShows = 200): Promise<IngestTickSumma
           and(
             eq(shows.externalSource, row.externalSource),
             eq(shows.externalId, row.externalId),
-            sql`(${shows.tmdbPopularity} is not ${row.tmdbPopularity}
-              or ${shows.tmdbVoteAverage} is not ${row.tmdbVoteAverage}
-              or ${shows.tmdbVoteCount} is not ${row.tmdbVoteCount})`,
+            sql`(${driftedSql(shows.tmdbPopularity, row.tmdbPopularity, VOLATILE_RELATIVE_TOLERANCE, true)}
+              or ${driftedSql(shows.tmdbVoteAverage, row.tmdbVoteAverage, VOTE_AVERAGE_TOLERANCE, false)}
+              or ${driftedSql(shows.tmdbVoteCount, row.tmdbVoteCount, VOLATILE_RELATIVE_TOLERANCE, true)})`,
           ),
         ),
     );
